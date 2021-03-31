@@ -968,8 +968,8 @@ void   CodeGenFunction::EmitMetaABIWriteReturnValue( const Decl *FuncDecl, const
 
          // store pointer in returnValue
          // OMIT this, it's superflous
-         //llvm::Value *newParam = Builder.CreateBitCast( paramAddr, VoidPtrTy);
-         //Builder.CreateStore( newParam, ReturnValue);
+         llvm::Value *newParam = Builder.CreateBitCast( paramAddr, VoidPtrTy);
+         Builder.CreateStore( newParam, ReturnValue);
          return;
       }
 
