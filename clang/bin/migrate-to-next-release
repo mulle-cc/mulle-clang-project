@@ -16,13 +16,13 @@
 
 # Current branch we are developing from and the llvm tag where it
 # branched of from
-OLD_LLVM_TAG="llvmorg-10.0.0"
-OLD_MULLE_DEV_BRANCH="mulle/10.0.0"
+OLD_LLVM_TAG="llvmorg-11.0.0"
+OLD_MULLE_DEV_BRANCH="mulle/11.0.0"
 
 # The llvm where we want to glom our changes unto
-NEW_LLVM_TAG="llvmorg-11.0.0"
+NEW_LLVM_TAG="llvmorg-12.0.0"
 # the name of the new branch we want to develop on from now
-NEW_MULLE_DEV_BRANCH="mulle/11.0.0"
+NEW_MULLE_DEV_BRANCH="mulle/12.0.0"
 
 # usually don't edit these
 
@@ -103,9 +103,9 @@ migrate()
 
    echo "### 5: Add changed script files" >&2
 
-   cp "${TMPDIR:-/tmp}/install-mulle-clang" "${TMPDIR:-/tmp}/migrate-to-next-release" "${LLVM_PROJECT}/bin/" || exit 1
-   chmod +x "${LLVM_PROJECT}/bin/install-mulle-clang" "${LLVM_PROJECT}/bin/migrate-to-next-release"
-   git add "${LLVM_PROJECT}/bin/install-mulle-clang" "${LLVM_PROJECT}/bin/migrate-to-next-release"
+   cp "${TMPDIR:-/tmp}/migrate-to-next-release" "${LLVM_PROJECT}/bin/" || exit 1
+   chmod +x "${LLVM_PROJECT}/bin/migrate-to-next-release"
+   git add "${LLVM_PROJECT}/bin/migrate-to-next-release"
 
    #
    # There shouldn't be any problem until here. If there is a failure, before
@@ -191,7 +191,7 @@ case "$0" in
    *)
       echo "### 0: Executing script \"$0\" from tmp" >&2
 
-      cp "${LLVM_PROJECT}/bin/install-mulle-clang" "${LLVM_PROJECT}/bin/migrate-to-next-release" "${TMPDIR:-/tmp}" || exit 1
+      cp "${LLVM_PROJECT}/bin/migrate-to-next-release" "${TMPDIR:-/tmp}" || exit 1
       chmod 755 "${TMPDIR:-/tmp}/migrate-to-next-release" || exit 1
       exec "${TMPDIR:-/tmp}/migrate-to-next-release" "$@"
    ;;
