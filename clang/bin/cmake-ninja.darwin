@@ -1,16 +1,12 @@
 #! /bin/sh
 
-# It's assumed that the mono repo is unpacked in the current directory.
-# Lets build it in 'build' inside of the unpacked repository (different
-# to linux)
-#
+# It's assumed that the mono repo is unpacked in the parent directory
+# and that we are already in a folder called "build".
+
 # If you are in a docker container or VM or otherwise a fresh install use
 # mulle-clang-project/clang/bin/install-prerequisites
 #
 # MEMO: If you can't use ninja copy this file and make it cmake-make or so.
-
-[ ! -d build ] && mkdir build
-cd build &&
 cmake \
    -DLLVM_ENABLE_PROJECTS="libcxxabi;libcxx;compiler-rt;clang" \
    -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE:-Release}" \

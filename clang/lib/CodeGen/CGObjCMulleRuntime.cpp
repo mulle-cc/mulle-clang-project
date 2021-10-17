@@ -105,15 +105,17 @@ namespace {
       /// might need another one, when params is null..
       ///
 
-      llvm::FunctionCallee  getMessageSendFn( int optLevel) const {
+      llvm::FunctionCallee  getMessageSendFn( int optLevel, int inline_calls) const {
          StringRef    name;
          // Add the non-lazy-bind attribute, since objc_msgSend is likely to
          // be called a lot.
-         switch( optLevel)
+         switch( inline_calls)
          {
-         case 3  : name = "mulle_objc_object_call_inline"; break;
-         default : name = "mulle_objc_object_call_inline_partial"; break;
-         case -1 :
+         case 4  : name = "mulle_objc_object_call_inline"; break;
+         case 3  :
+         case 2  : name = "mulle_objc_object_call_inline_partial"; break;
+         default :
+         case -1 : name = "mulle_objc_object_call_inline_minimal"; break;
          case 0  : name = "mulle_objc_object_call"; break;
          }
 
@@ -130,15 +132,18 @@ namespace {
       }
 
       // just the same but differently typed for llvm
-      llvm::FunctionCallee getMessageSendNoParamFn( int optLevel) const {
+      llvm::FunctionCallee getMessageSendNoParamFn( int optLevel, int inline_calls) const {
          StringRef    name;
          // Add the non-lazy-bind attribute, since objc_msgSend is likely to
          // be called a lot.
-         switch( optLevel)
+
+         switch( inline_calls)
          {
-         case 3  : name = "mulle_objc_object_call_inline"; break;
-         default : name = "mulle_objc_object_call_inline_partial"; break;
-         case -1 :
+         case 4  : name = "mulle_objc_object_call_inline"; break;
+         case 3  :
+         case 2  : name = "mulle_objc_object_call_inline_partial"; break;
+         default :
+         case -1 : name = "mulle_objc_object_call_inline_minimal"; break;
          case 0  : name = "mulle_objc_object_call"; break;
          }
 
@@ -195,14 +200,16 @@ namespace {
       /// The messenger used for super calls from instance methods
       /// and class methods too
 
-      llvm::FunctionCallee getMessageSendSuperFn( int optLevel) const
+      llvm::FunctionCallee getMessageSendSuperFn( int optLevel, int inline_calls) const
       {
          StringRef    name;
-         switch( optLevel)
+
+         switch( inline_calls)
          {
-         case 3  : name = "mulle_objc_object_supercall_inline"; break;
-         default : name = "mulle_objc_object_supercall_inline_partial"; break;
-         case -1 :
+         case 4  : name = "mulle_objc_object_supercall_inline"; break;
+         case 3  :
+         case 2  : name = "mulle_objc_object_supercall_inline_partial"; break;
+         default :
          case 0  : name = "mulle_objc_object_supercall"; break;
          }
 
@@ -220,9 +227,9 @@ namespace {
          return( C);
       }
 
-      llvm::FunctionCallee getMessageSendMetaSuperFn( int optLevel) const
+      llvm::FunctionCallee getMessageSendMetaSuperFn( int optLevel, int inline_calls) const
       {
-         return( getMessageSendSuperFn( optLevel));
+         return( getMessageSendSuperFn( optLevel, inline_calls));
       }
 
 
@@ -850,6 +857,7 @@ namespace {
       uint32_t      user_version;
       int32_t       no_tagged_pointers;
       int32_t       no_fast_calls;
+      int32_t       inline_calls;
       std::string   universe_name;
       llvm::Constant  *UniverseID;
 
@@ -1610,7 +1618,9 @@ ObjCTypes(cgm) {
    // fprintf( stderr, "universe_name: \"%s\"\n", universe_name.c_str());
    no_tagged_pointers = CGM.getLangOpts().ObjCDisableTaggedPointers;
    no_fast_calls      = CGM.getLangOpts().ObjCDisableFastCalls;
+   inline_calls       = CGM.getLangOpts().ObjCInlineMethodCalls;
 
+   // fprintf( stderr, "ObjCInlineMethodCalls=%d\n", inline_calls);
    memset( fastclassids, 0, sizeof( fastclassids));
 
    fastclassids_defined = 0;
@@ -1896,7 +1906,7 @@ bool  CGObjCMulleRuntime::GetMacroDefinitionUnsignedIntegerValue( clang::Preproc
 void   CGObjCMulleRuntime::ParserDidFinish( clang::Parser *P)
 {
    clang::Preprocessor  *PP;
-   uint64_t     major;
+   uint64_t      major;
    uint64_t      minor;
    uint64_t      patch;
    uint64_t      value;
@@ -2013,6 +2023,12 @@ void   CGObjCMulleRuntime::ParserDidFinish( clang::Parser *P)
                fprintf( stderr, "fastclassid #%d = 0x%llx\n", i, (long long) fastclassids[ i]);
          }
       }
+   }
+
+   if( GetMacroDefinitionUnsignedIntegerValue( PP, "__MULLE_OBJC_INLINE_METHOD_CALLS__", &value))
+   {
+      //fprintf( stderr, "__MULLE_OBJC_INLINE_METHOD_CALLS__ %d\n", (int) value);
+      inline_calls = value;
    }
 }
 
@@ -2853,9 +2869,9 @@ CodeGen::RValue CGObjCMulleRuntime::GenerateMessageSend(CodeGen::CodeGenFunction
    //   optLevel = 1;
 
    if( ! CallArgs.size())
-      Fn = ObjCTypes.getMessageSendNoParamFn( optLevel); // : ObjCTypes.getMessageSendFn0();
+      Fn = ObjCTypes.getMessageSendNoParamFn( optLevel, inline_calls); // : ObjCTypes.getMessageSendFn0();
    else
-      Fn = ObjCTypes.getMessageSendFn( optLevel); // : ObjCTypes.getMessageSendFn0();
+      Fn = ObjCTypes.getMessageSendFn( optLevel, inline_calls); // : ObjCTypes.getMessageSendFn0();
 
    // fprintf( stderr, "#CallArgs %ld\n", CallArgs.size());
    // fprintf( stderr, "#ActualArgs %ld\n", ActualArgs.size());
@@ -2963,8 +2979,8 @@ CGObjCMulleRuntime::GenerateMessageSendSuper(CodeGen::CodeGenFunction &CGF,
 
    int optLevel = CGM.getLangOpts().OptimizeSize ? -1 : CGM.getCodeGenOpts().OptimizationLevel;
 
-   Fn = IsClassMessage ? ObjCTypes.getMessageSendMetaSuperFn( optLevel)
-                       : ObjCTypes.getMessageSendSuperFn( optLevel);
+   Fn = IsClassMessage ? ObjCTypes.getMessageSendMetaSuperFn( optLevel, inline_calls)
+                       : ObjCTypes.getMessageSendSuperFn( optLevel, inline_calls);
 
    // this could be shared with normal send
    MessageSendInfo MSI = getMessageSendInfo( Method, ResultType, ActualArgs, true);
@@ -3119,15 +3135,16 @@ static   Expr  *unparenthesizedAndUncastedExpr( Expr *expr)
 
 struct find_info
 {
-   Stmt   *next;
-   bool   insideLoop;
+   Stmt             *next;
+   BinaryOperator   *inAssignment;  // this is only set, if stmt is inside an assignment
+   bool             insideLoop;
 };
 
 
 bool   findNextStatementInParent( Stmt *stmt, Stmt *parent, struct find_info *info)
 {
    bool   found;
-
+   BinaryOperator  *op;
    found = false;
 
    for( Stmt::child_iterator
@@ -3158,6 +3175,30 @@ bool   findNextStatementInParent( Stmt *stmt, Stmt *parent, struct find_info *in
       {
          info->insideLoop = true;
       }
+
+      //
+      // If we are part of a binary assigment, we will have actually
+      // back up to "before" stmt
+      //
+      if( op = dyn_cast< BinaryOperator>( parent))
+      {
+         switch( op->getOpcode())
+         {
+         default :    break;
+         case BO_Assign    :
+         case BO_MulAssign :
+         case BO_DivAssign :
+         case BO_RemAssign :
+         case BO_AddAssign :
+         case BO_SubAssign :
+         case BO_ShlAssign :
+         case BO_ShrAssign :
+         case BO_AndAssign :
+         case BO_XorAssign :
+         case BO_OrAssign  :
+            info->inAssignment = op;
+         }
+      }
    }
 
    return( found);
@@ -3168,8 +3209,9 @@ struct find_info   findNextStatementInBody( Stmt *s, Stmt *body)
 {
    struct find_info  info;
 
-   info.next       = nullptr;
-   info.insideLoop = false;
+   info.next         = nullptr;
+   info.insideLoop   = false;
+   info.inAssignment = nullptr;
 
    findNextStatementInParent( s, body, &info);
    return( info);
@@ -3247,18 +3289,23 @@ public:
    {
       // fprintf( stderr, "%s %p (%s)\n", s->getStmtClassName(), s, __PRETTY_FUNCTION__);
 
+      // initially false, as SkipAfterStatement is set later
       skipThisStatement = SkipAfterStatement != nullptr;
 
+      // initially skipped, as SkipAfterStatement is set later
       if( SkipAfterStatement == s)
       {
          skipThisStatement = true;
          SkipAfterStatement = nullptr;
       }
 
+      // initially false as NextStatement is null
       if( NextStatement == s)
       {
          stopCollectingTaints = true;
       }
+
+      // collect in any case
       LastStatement = s;
 
       return( true);
@@ -3273,12 +3320,12 @@ public:
 
        // fprintf( stderr, "-> %s %p (%s)\n", s->getStmtClassName(), s, __PRETTY_FUNCTION__);
 
-       flag = RecursiveASTVisitor<MulleStatementVisitor>::TraverseStmt( s);
+      flag = RecursiveASTVisitor<MulleStatementVisitor>::TraverseStmt( s);
 
        // fprintf( stderr, "<- %s %p (%s) (%s) (status=%d)\n", s->getStmtClassName(), s, __PRETTY_FUNCTION__, flag ? "true" : "false", status);
       if( returnFalseIfAnyTaintReference && status)
          return( false);
-      return( flag);;
+      return( flag);
    }
 
    bool VisitDeclRefExpr(DeclRefExpr *E)
@@ -3464,7 +3511,8 @@ public:
          return( true);
       }
 
-      // ok check if leftside is a pointer
+      // ok check if leftside is a pointer, for the other checks another
+      // visitor wil do it
       lhs = op->getLHS();
       lhs = unparenthesizedAndUncastedExpr( lhs);
       if( (ref = dyn_cast< DeclRefExpr>( lhs)))
@@ -3509,6 +3557,7 @@ public:
       return( true);
    }
 
+
    bool VisitObjCMessageExpr(ObjCMessageExpr *d)
    {
       if( skipThisStatement)
@@ -3516,22 +3565,31 @@ public:
 
       // fprintf( stderr, "[] %s %p (%s)\n", d->getStmtClassName(), d, __PRETTY_FUNCTION__);
 
-      if( d == Call)
-      {
-         struct find_info  info;
+      // if this is not "our" call, ignore
+      if( d != Call)
+         return( true);
 
-         if( ! CheckObjCArguments( d))
-            return( false);
+      struct find_info  info;
 
-         info = findNextStatementInBody( d, Method->getBody());
-         if( info.insideLoop)
-            return( false);
+      if( ! CheckObjCArguments( d))
+         return( false);
 
-         // reset status now
-         status = 0;
-         returnFalseIfAnyTaintReference = true;
-         NextStatement = info.next;
-      }
+      info = findNextStatementInBody( d, Method->getBody());
+      if( info.insideLoop)
+         return( false);
+
+      // for example as in
+      // *foo = [a call:*foo with:bar];
+      // if we are inside an assignment expression
+      // it's too complicated
+      if( info.inAssignment != nullptr)
+         return( false);
+
+      // reset status now
+      status = 0;
+      returnFalseIfAnyTaintReference = true;
+      NextStatement = info.next;
+
       return( true);
    }
 };
@@ -3549,11 +3607,15 @@ public:
 // 3. Run through the whole function until we encounter the MesssageExpr,
 //    collect variables that may alias our _param in the meantime. If we hit a
 //    label we return false (currently)
+// 3a. If our MessageExpr is part of an assignment, we bail.
+//    This is to avoid *foo = [call a:*foo b:*bar] scenarios, where *foo
+//    is inside _param.
 // 4. Find the next statement after MesssageExpr
 // 5. Continue with the regular callbacks until this statement hits
 // 6. Now continue the flow of the statements including this one.
 //    If we hit a loop statement going up the parents
-//    we return false. If we find a DeclVarExpr hitting the taints we return false.
+//    we return false. If we find a DeclVarExpr hitting the taints we return
+//    false.
 // 6. We reach the end, we return true
 //
 
@@ -4331,7 +4393,7 @@ CGObjCRuntimeLifetimeMarker  CGObjCMulleRuntime::GenerateCallArgs( CodeGenFuncti
    // First see if we even have that (we could be in a C function)
    // only do this when optimizing.
    //
-   if( CGM.getCodeGenOpts().OptimizationLevel >= 2)
+   //if( CGM.getCodeGenOpts().OptimizationLevel >= 2)
    {
       if( OptimizeReuseParam( CGF, Args, Expr, RD, Record.getAddress(CGF), Marker))
          return( Marker);

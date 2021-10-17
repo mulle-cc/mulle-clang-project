@@ -2317,7 +2317,14 @@ void CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
       Opts.ObjCClasscallUseSelf = 1;
     if( Args.hasArg( OPT_fobjc_classcall_init_use_self))
       Opts.ObjCClasscallUseSelf = 2;
-
+    if( Args.hasArg( OPT_fobjc_inline_method_calls))
+    {
+       int   x = 4;
+       StringRef value = Args.getLastArgValue(OPT_fobjc_inline_method_calls);
+       if( value.size() != 0)
+        value.getAsInteger( 10, x);
+      Opts.ObjCInlineMethodCalls = x;  // default if set (else why set ?)
+    }
     // @mulle-objc@: handle AAM and TPS options <
 
     if (Args.hasArg(OPT_fobjc_gc_only))

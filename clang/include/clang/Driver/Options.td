@@ -2068,6 +2068,8 @@ def fobjc_classcall_use_self : Flag<["-"], "fobjc-classcall-use-self">, Group<f_
 def fobjc_classcall_init_use_self : Flag<["-"], "fobjc-classcall-init-use-self">, Group<f_Group>, Flags<[CC1Option]>,
   HelpText<"+[Class call] in init/dealloc and related methods relies on self being set and alive">;
 def fno_objc_classcall_use_self : Flag<["-"], "fno-objc-classcall-use-self">, Group<f_Group>;
+def fobjc_inline_method_calls : Flag<["-"], "fobjc-inline-method-calls">, Group<f_Group>, Flags<[CC1Option]>,
+  HelpText<"Choose emthod call inlining code (0-4)">;
 // @mulle-objc@ options <
 def fobjc_arc : Flag<["-"], "fobjc-arc">, Group<f_Group>, Flags<[CC1Option]>,
   HelpText<"Synthesize retain and release calls for Objective-C pointers">;

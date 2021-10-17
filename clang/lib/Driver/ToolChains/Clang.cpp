@@ -3599,6 +3599,8 @@ static void RenderObjCOptions(const ToolChain &TC, const Driver &D,
          CmdArgs.push_back( "-fobjc-classcall-use-self");
       if( Args.hasArg( options::OPT_fobjc_classcall_init_use_self))
          CmdArgs.push_back( "-fobjc-classcall-init-use-self");
+      if( Args.hasArg( options::OPT_fobjc_inline_method_calls))
+         CmdArgs.push_back( "-fobjc-inline-method-calls");
 
       Args.ClaimAllArgs(options::OPT_fobjc_tps);
       Args.ClaimAllArgs(options::OPT_fobjc_fcs);

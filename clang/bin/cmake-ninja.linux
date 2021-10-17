@@ -14,13 +14,14 @@ cmake \
    -DLLVM_ENABLE_PROJECTS="libcxxabi;libcxx;compiler-rt;clang" \
    -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE:-Release}" \
    -DCMAKE_EXE_LINKER_FLAGS="-Wl,--reduce-memory-overheads" \
-   -DCMAKE_INSTALL_PREFIX="${PREFIX:-/opt}/mulle-clang-project/${NAME:-12.0.0.0}" \
+   -DCMAKE_INSTALL_PREFIX="${PREFIX:-/opt}/mulle-clang-project/${NAME:-12.0.0.1}" \
    -DCLANG_VENDOR='mulle' \
    -DCMAKE_INSTALL_MESSAGE='LAZY' \
    -G Ninja \
+   ${CMAKEFLAGS} \
    ../mulle-clang-project/llvm &&
-ninja &&
+ninja ${NINJAFLAGS} "$@"  &&
 echo "Ninja install with sudo may require a password" >&2 &&
-${INSTALL_SUDO} ninja install
+${INSTALL_SUDO} ninja ${NINJAFLAGS} ${INSTALLFLAGS} install
 
 # pass in INSTALL_SUDO via env if needed
