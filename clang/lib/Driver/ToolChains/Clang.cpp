@@ -3600,8 +3600,14 @@ static void RenderObjCOptions(const ToolChain &TC, const Driver &D,
       if( Args.hasArg( options::OPT_fobjc_classcall_init_use_self))
          CmdArgs.push_back( "-fobjc-classcall-init-use-self");
       if( Args.hasArg( options::OPT_fobjc_inline_method_calls))
-         CmdArgs.push_back( "-fobjc-inline-method-calls");
-
+      {
+         StringRef value = Args.getLastArgValue(options::OPT_fobjc_inline_method_calls);
+         CmdArgs.push_back( Args.MakeArgString( "-fobjc-inline-method-calls=" + value));
+      }
+      if( Args.hasArg( options::OPT_fobjc_reuse_param))
+         CmdArgs.push_back( "-fobjc-reuse-param");
+      if( Args.hasArg( options::OPT_fno_objc_reuse_param))
+         CmdArgs.push_back( "-fno-objc-reuse-param");
       Args.ClaimAllArgs(options::OPT_fobjc_tps);
       Args.ClaimAllArgs(options::OPT_fobjc_fcs);
       Args.ClaimAllArgs(options::OPT_fno_objc_aam);

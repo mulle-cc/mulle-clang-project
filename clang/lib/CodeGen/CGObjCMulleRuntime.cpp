@@ -87,6 +87,13 @@ namespace {
       uint32_t   runtime_version;
    };
 
+   enum INLINE_CALL_LEVEL
+   {
+      INLINE_CALL_NONE,
+      INLINE_CALL_MINIMAL,
+      INLINE_CALL_PARTIAL,
+      INLINE_CALL_FULL
+   };
 
    // FIXME: We should find a nicer way to make the labels for metadata, string
    // concatenation is lame.
@@ -105,18 +112,16 @@ namespace {
       /// might need another one, when params is null..
       ///
 
-      llvm::FunctionCallee  getMessageSendFn( int optLevel, int inline_calls) const {
+      llvm::FunctionCallee  getMessageSendFn( enum INLINE_CALL_LEVEL inline_calls) const {
          StringRef    name;
          // Add the non-lazy-bind attribute, since objc_msgSend is likely to
          // be called a lot.
          switch( inline_calls)
          {
-         case 4  : name = "mulle_objc_object_call_inline"; break;
-         case 3  :
-         case 2  : name = "mulle_objc_object_call_inline_partial"; break;
-         default :
-         case -1 : name = "mulle_objc_object_call_inline_minimal"; break;
-         case 0  : name = "mulle_objc_object_call"; break;
+         case INLINE_CALL_FULL     : name = "mulle_objc_object_call_inline"; break;
+         case INLINE_CALL_PARTIAL  : name = "mulle_objc_object_call_inline_partial"; break;
+         case INLINE_CALL_MINIMAL  : name = "mulle_objc_object_call_inline_minimal"; break;
+         default                   : name = "mulle_objc_object_call"; break;
          }
 
          llvm::Type *params[] = { ObjectPtrTy, SelectorIDTy, ParamsPtrTy };
@@ -132,19 +137,17 @@ namespace {
       }
 
       // just the same but differently typed for llvm
-      llvm::FunctionCallee getMessageSendNoParamFn( int optLevel, int inline_calls) const {
+      llvm::FunctionCallee getMessageSendNoParamFn( enum INLINE_CALL_LEVEL inline_calls) const {
          StringRef    name;
          // Add the non-lazy-bind attribute, since objc_msgSend is likely to
          // be called a lot.
 
          switch( inline_calls)
          {
-         case 4  : name = "mulle_objc_object_call_inline"; break;
-         case 3  :
-         case 2  : name = "mulle_objc_object_call_inline_partial"; break;
-         default :
-         case -1 : name = "mulle_objc_object_call_inline_minimal"; break;
-         case 0  : name = "mulle_objc_object_call"; break;
+         case INLINE_CALL_FULL     : name = "mulle_objc_object_call_inline"; break;
+         case INLINE_CALL_PARTIAL  : name = "mulle_objc_object_call_inline_partial"; break;
+         case INLINE_CALL_MINIMAL  : name = "mulle_objc_object_call_inline_minimal"; break;
+         default                   : name = "mulle_objc_object_call"; break;
          }
 
          llvm::Type *params[] = { ObjectPtrTy, SelectorIDTy };
@@ -200,17 +203,15 @@ namespace {
       /// The messenger used for super calls from instance methods
       /// and class methods too
 
-      llvm::FunctionCallee getMessageSendSuperFn( int optLevel, int inline_calls) const
+      llvm::FunctionCallee getMessageSendSuperFn( enum INLINE_CALL_LEVEL inline_calls) const
       {
          StringRef    name;
 
          switch( inline_calls)
          {
-         case 4  : name = "mulle_objc_object_supercall_inline"; break;
-         case 3  :
-         case 2  : name = "mulle_objc_object_supercall_inline_partial"; break;
-         default :
-         case 0  : name = "mulle_objc_object_supercall"; break;
+         case INLINE_CALL_FULL     : name = "mulle_objc_object_supercall_inline"; break;
+         case INLINE_CALL_PARTIAL  : name = "mulle_objc_object_supercall_inline_partial"; break;
+         default                   : name = "mulle_objc_object_supercall"; break;
          }
 
          llvm::Type *params[] = { ObjectPtrTy, SelectorIDTy, ParamsPtrTy, SuperIDTy  };
@@ -227,9 +228,9 @@ namespace {
          return( C);
       }
 
-      llvm::FunctionCallee getMessageSendMetaSuperFn( int optLevel, int inline_calls) const
+      llvm::FunctionCallee getMessageSendMetaSuperFn(  enum INLINE_CALL_LEVEL inline_calls) const
       {
-         return( getMessageSendSuperFn( optLevel, inline_calls));
+         return( getMessageSendSuperFn( inline_calls));
       }
 
 
@@ -749,7 +750,6 @@ namespace {
       ProtocolName,
    };
 
-
 # pragma mark - Actual Runtime Start
    /*
     * Biting the hand that feeds, but damn if this files isn't way
@@ -857,7 +857,7 @@ namespace {
       uint32_t      user_version;
       int32_t       no_tagged_pointers;
       int32_t       no_fast_calls;
-      int32_t       inline_calls;
+      enum INLINE_CALL_LEVEL    inline_calls;
       std::string   universe_name;
       llvm::Constant  *UniverseID;
 
@@ -1618,9 +1618,29 @@ ObjCTypes(cgm) {
    // fprintf( stderr, "universe_name: \"%s\"\n", universe_name.c_str());
    no_tagged_pointers = CGM.getLangOpts().ObjCDisableTaggedPointers;
    no_fast_calls      = CGM.getLangOpts().ObjCDisableFastCalls;
-   inline_calls       = CGM.getLangOpts().ObjCInlineMethodCalls;
 
-   // fprintf( stderr, "ObjCInlineMethodCalls=%d\n", inline_calls);
+   switch( CGM.getLangOpts().ObjCInlineMethodCalls)
+   {
+   case 0  :  switch( CGM.getLangOpts().OptimizeSize ? -1 : (int) CGM.getCodeGenOpts().OptimizationLevel)
+              {
+              case -1 : inline_calls = INLINE_CALL_MINIMAL; break;
+              case 0  : inline_calls = INLINE_CALL_NONE; break;
+              case 1  : inline_calls = INLINE_CALL_MINIMAL; break;
+              case 2  :
+              case 3  : inline_calls = INLINE_CALL_PARTIAL; break;
+              default : inline_calls = INLINE_CALL_FULL; break;
+              }
+              break;
+   case 1  :  inline_calls = INLINE_CALL_NONE; break;
+   case 2  :  inline_calls = INLINE_CALL_MINIMAL; break;
+   case 3  :  inline_calls = INLINE_CALL_PARTIAL; break;
+   default :  inline_calls = INLINE_CALL_FULL;
+   }
+
+//   fprintf( stderr, "OptimizationLevel=%d\n", CGM.getCodeGenOpts().OptimizationLevel);
+//   fprintf( stderr, "ObjCInlineMethodCalls=%d\n", CGM.getLangOpts().ObjCInlineMethodCalls);
+//   fprintf( stderr, "inline_calls=%d\n", inline_calls);
+
    memset( fastclassids, 0, sizeof( fastclassids));
 
    fastclassids_defined = 0;
@@ -2025,10 +2045,13 @@ void   CGObjCMulleRuntime::ParserDidFinish( clang::Parser *P)
       }
    }
 
+   // not super useful, should be a pragma
    if( GetMacroDefinitionUnsignedIntegerValue( PP, "__MULLE_OBJC_INLINE_METHOD_CALLS__", &value))
    {
-      //fprintf( stderr, "__MULLE_OBJC_INLINE_METHOD_CALLS__ %d\n", (int) value);
-      inline_calls = value;
+      // fprintf( stderr, "__MULLE_OBJC_INLINE_METHOD_CALLS__ %d\n", (int) value);
+      inline_calls = (int) value < 0 ? INLINE_CALL_NONE
+                                     : (value <= INLINE_CALL_FULL ? (enum INLINE_CALL_LEVEL) value
+                                                                  : INLINE_CALL_FULL);
    }
 }
 
@@ -2036,24 +2059,24 @@ void   CGObjCMulleRuntime::ParserDidFinish( clang::Parser *P)
 /*
  * Lookup Class via Object NoFCS = no fast classes
  */
-static const char   *getObjectNoFCSLookupClassFunctionName( int optLevel) {
-   switch( optLevel)
+static const char   *getObjectNoFCSLookupClassFunctionName( enum INLINE_CALL_LEVEL inline_calls) {
+   switch( inline_calls)
    {
-   default : return( "mulle_objc_object_lookup_infraclass_inline_nofail_nofast");
-   case 1  :
-   case -1 :
-   case 0  : return( "mulle_objc_object_lookup_infraclass_nofail_nofast");
+   case INLINE_CALL_FULL    :
+   case INLINE_CALL_PARTIAL :
+             return( "mulle_objc_object_lookup_infraclass_inline_nofail_nofast");
+   default : return( "mulle_objc_object_lookup_infraclass_nofail_nofast");
    }
 }
 
 
-static const char   *getObjectFCSLookupClassFunctionName( int optLevel) {
-   switch( optLevel)
+static const char   *getObjectFCSLookupClassFunctionName( enum INLINE_CALL_LEVEL inline_calls) {
+   switch( inline_calls)
    {
-   default : return( "mulle_objc_object_lookup_infraclass_inline_nofail");
-   case 1  :
-   case -1 :
-   case 0  : return( "mulle_objc_object_lookup_infraclass_nofail");
+   case INLINE_CALL_FULL    :
+   case INLINE_CALL_PARTIAL :
+             return( "mulle_objc_object_lookup_infraclass_inline_nofail");
+   default : return( "mulle_objc_object_lookup_infraclass_nofail");
    }
 }
 
@@ -2061,24 +2084,25 @@ static const char   *getObjectFCSLookupClassFunctionName( int optLevel) {
 /*
  * Lookup Class via Runtime NoFCS = no fast classes
  */
-static const char   *getRuntimeNoFCSLookupClassFunctionName( int optLevel) {
-   switch( optLevel)
+static const char   *getRuntimeNoFCSLookupClassFunctionName( enum INLINE_CALL_LEVEL inline_calls) {
+   switch( inline_calls)
    {
-   default : return( "mulle_objc_global_lookup_infraclass_inline_nofail_nofast");
-   case 1  :
-   case -1 :
-   case 0  : return( "mulle_objc_global_lookup_infraclass_nofail_nofast");
+   case INLINE_CALL_FULL    :
+   case INLINE_CALL_PARTIAL :
+
+             return( "mulle_objc_global_lookup_infraclass_inline_nofail_nofast");
+   default : return( "mulle_objc_global_lookup_infraclass_nofail_nofast");
    }
 }
 
 
-static const char   *getRuntimeFCSLookupClassFunctionName( int optLevel) {
-   switch( optLevel)
+static const char   *getRuntimeFCSLookupClassFunctionName( enum INLINE_CALL_LEVEL inline_calls) {
+   switch( inline_calls)
    {
-   default : return( "mulle_objc_global_lookup_infraclass_inline_nofail");
-   case 1  :
-   case -1 :
-   case 0  : return( "mulle_objc_global_lookup_infraclass_nofail");
+   case INLINE_CALL_FULL    :
+   case INLINE_CALL_PARTIAL :
+             return( "mulle_objc_global_lookup_infraclass_inline_nofail");
+   default : return( "mulle_objc_global_lookup_infraclass_nofail");
    }
 }
 
@@ -2090,11 +2114,10 @@ llvm::Value *CGObjCMulleRuntime::GetClass(CodeGenFunction &CGF,
    llvm::Value *classPtr;
    StringRef  name;
 
-   int optLevel = CGM.getLangOpts().OptimizeSize ? -1 : CGM.getCodeGenOpts().OptimizationLevel;
    if( this->no_fast_calls)
-      name = getRuntimeNoFCSLookupClassFunctionName( optLevel);
+      name = getRuntimeNoFCSLookupClassFunctionName( inline_calls);
    else
-      name = getRuntimeFCSLookupClassFunctionName( optLevel);
+      name = getRuntimeFCSLookupClassFunctionName( inline_calls);
 
    SmallVector<llvm::Type *,2> Types;
    Types.push_back( ObjCTypes.UniverseIDTy);
@@ -2142,9 +2165,7 @@ llvm::Value *CGObjCMulleRuntime::GetClass(CodeGenFunction &CGF,
    llvm::Value  *classID;
    llvm::Value  *classPtr;
    StringRef    name;
-   int          optLevel;
 
-   optLevel = CGM.getLangOpts().OptimizeSize ? -1 : CGM.getCodeGenOpts().OptimizationLevel;
    classID  = _HashConstantForString( OID->getName().str());
 
    SmallVector<llvm::Type *,3> Types;
@@ -2165,9 +2186,9 @@ llvm::Value *CGObjCMulleRuntime::GetClass(CodeGenFunction &CGF,
    Params.push_back( classID);
 
     if( this->no_fast_calls)
-       name = getObjectNoFCSLookupClassFunctionName( optLevel);
+       name = getObjectNoFCSLookupClassFunctionName( inline_calls);
     else
-       name = getObjectFCSLookupClassFunctionName( optLevel);
+       name = getObjectFCSLookupClassFunctionName( inline_calls);
 
    classPtr = CGF.EmitNounwindRuntimeCall(ObjCTypes.getRuntimeFn( name, Types),
                                           Params,
@@ -2862,16 +2883,15 @@ CodeGen::RValue CGObjCMulleRuntime::GenerateMessageSend(CodeGen::CodeGenFunction
    //
    // this runs through patched code, to produce what we need
    //
-   int optLevel = CGM.getLangOpts().OptimizeSize ? -1 : CGM.getCodeGenOpts().OptimizationLevel;
 
    // tagged pointers bloat the code too much IMO (make decision later)
    // if( optLevel > 1 && ! no_tagged_pointers)
    //   optLevel = 1;
 
    if( ! CallArgs.size())
-      Fn = ObjCTypes.getMessageSendNoParamFn( optLevel, inline_calls); // : ObjCTypes.getMessageSendFn0();
+      Fn = ObjCTypes.getMessageSendNoParamFn( inline_calls); // : ObjCTypes.getMessageSendFn0();
    else
-      Fn = ObjCTypes.getMessageSendFn( optLevel, inline_calls); // : ObjCTypes.getMessageSendFn0();
+      Fn = ObjCTypes.getMessageSendFn( inline_calls); // : ObjCTypes.getMessageSendFn0();
 
    // fprintf( stderr, "#CallArgs %ld\n", CallArgs.size());
    // fprintf( stderr, "#ActualArgs %ld\n", ActualArgs.size());
@@ -2977,10 +2997,8 @@ CGObjCMulleRuntime::GenerateMessageSendSuper(CodeGen::CodeGenFunction &CGF,
 
    llvm::FunctionCallee Fn;
 
-   int optLevel = CGM.getLangOpts().OptimizeSize ? -1 : CGM.getCodeGenOpts().OptimizationLevel;
-
-   Fn = IsClassMessage ? ObjCTypes.getMessageSendMetaSuperFn( optLevel, inline_calls)
-                       : ObjCTypes.getMessageSendSuperFn( optLevel, inline_calls);
+   Fn = IsClassMessage ? ObjCTypes.getMessageSendMetaSuperFn( inline_calls)
+                       : ObjCTypes.getMessageSendSuperFn( inline_calls);
 
    // this could be shared with normal send
    MessageSendInfo MSI = getMessageSendInfo( Method, ResultType, ActualArgs, true);
@@ -3137,6 +3155,7 @@ struct find_info
 {
    Stmt             *next;
    BinaryOperator   *inAssignment;  // this is only set, if stmt is inside an assignment
+   int              assignmentDepth;
    bool             insideLoop;
 };
 
@@ -3197,6 +3216,7 @@ bool   findNextStatementInParent( Stmt *stmt, Stmt *parent, struct find_info *in
          case BO_XorAssign :
          case BO_OrAssign  :
             info->inAssignment = op;
+            info->assignmentDepth++;
          }
       }
    }
@@ -3209,9 +3229,10 @@ struct find_info   findNextStatementInBody( Stmt *s, Stmt *body)
 {
    struct find_info  info;
 
-   info.next         = nullptr;
-   info.insideLoop   = false;
-   info.inAssignment = nullptr;
+   info.next            = nullptr;
+   info.insideLoop      = false;
+   info.inAssignment    = nullptr;
+   info.assignmentDepth = 0;
 
    findNextStatementInParent( s, body, &info);
    return( info);
@@ -3581,10 +3602,28 @@ public:
       // for example as in
       // *foo = [a call:*foo with:bar];
       // if we are inside an assignment expression
-      // it's too complicated
+      // it's too complicated. Well, except if the assignment depth is only 1
+      // e.g. a = b = [a call:*foo with:bar] is depth 2. If it's only 1 and
+      // the left side is harmless, we continue. That's so we can do
+      // rval = [a call:*foo with:b]; return( rval); which is fairly common
+      // Postpone better optimization pass to mulle-cc.
+      //
       if( info.inAssignment != nullptr)
-         return( false);
+      {
+         Stmt   *lhs;
 
+         if( info.assignmentDepth != 1)
+            return( false);
+
+         lhs = info.inAssignment->getLHS();
+
+         MulleStatementVisitor   SubVisitor( Method, Param, &taintedLoves, &supertaintedLoves);
+
+         SubVisitor.TraverseStmt( lhs);
+
+         if( SubVisitor.GetStatus())
+            return( false);
+      }
       // reset status now
       status = 0;
       returnFalseIfAnyTaintReference = true;
@@ -4389,11 +4428,15 @@ CGObjCRuntimeLifetimeMarker  CGObjCMulleRuntime::GenerateCallArgs( CodeGenFuncti
    PushArgumentsIntoRecord( CGF, RD, Record, Expr);
 
    //
-   // ok lets see if we can't use _params as an argument
-   // First see if we even have that (we could be in a C function)
-   // only do this when optimizing.
+   // Ok lets see if we can reuse _params for arguments/return value.
    //
-   //if( CGM.getCodeGenOpts().OptimizationLevel >= 2)
+   // First see if we even have that (we could be in a C function)
+   // only do this when optimizing. Or it's turned on explicitly (1) and
+   // not turned off explicitily (2)
+   //
+   if( CGM.getLangOpts().ObjCReuseParam == 1 ||
+       (CGM.getLangOpts().ObjCReuseParam == 0 && \
+       CGM.getCodeGenOpts().OptimizationLevel >= 2))
    {
       if( OptimizeReuseParam( CGF, Args, Expr, RD, Record.getAddress(CGF), Marker))
          return( Marker);
@@ -5576,8 +5619,9 @@ llvm::Constant *CGObjCMulleRuntime::EmitLoadInfoList(Twine Name,
    unsigned int   bits;
 
    bits  = optLevel << 8;
-   bits |= this->no_tagged_pointers ? 0x4 : 0x0;
+   bits |= (unsigned int) ((int) this->inline_calls << 4) & 0x70;
    bits |= this->no_fast_calls  ? 0x8 : 0x0;
+   bits |= this->no_tagged_pointers ? 0x4 : 0x0;
    bits |= CGM.getLangOpts().ObjCAllocsAutoreleasedObjects ? 0x2 : 0;
    bits |= 0;         // we are sorted, so unsorted == 0
 

@@ -68,15 +68,15 @@ The following table represents option pairs, that logically exclude each other.
 Either one is always defined.
 
 Name                    | Compiler        | Default | Description
-------------------------|-----------------|-------|--------------------
-`__MULLE_OBJC_AAM__`    | .aam file       | -     | AAM is enabled
-`__MULLE_OBJC_NO_AAM__` | .m file         | -     | AAM is not enabled
- &nbsp;                 | &nbsp;          | &nbsp;|
-`__MULLE_OBJC_TPS__`    | -fobjc-tps      | YES   | TPS (tagged pointer support) is enabled
-`__MULLE_OBJC_NO_TPS__` | -fno-objc-tps   | NO    | TPS is not enabled
-&nbsp;                  | &nbsp;          | &nbsp;|
-`__MULLE_OBJC_FCS__`    | -fobjc-fcs      | YES   | FCS fast method/class support is enabled
-`__MULLE_OBJC_NO_FCS__` | -fno-objc-fcs   | NO    | FCS is not enabled
+------------------------|-----------------|---------|--------------------
+`__MULLE_OBJC_AAM__`    | .aam file       | -       | AAM is enabled
+`__MULLE_OBJC_NO_AAM__` | .m file         | -       | AAM is not enabled
+ &nbsp;                 | &nbsp;          | &nbsp;  |
+`__MULLE_OBJC_TPS__`    | -fobjc-tps      | YES     | TPS (tagged pointer support) is enabled
+`__MULLE_OBJC_NO_TPS__` | -fno-objc-tps   | NO      | TPS is not enabled
+&nbsp;                  | &nbsp;          | &nbsp;  |
+`__MULLE_OBJC_FCS__`    | -fobjc-fcs      | YES     | FCS fast method/class support is enabled
+`__MULLE_OBJC_NO_FCS__` | -fno-objc-fcs   | NO      | FCS is not enabled
 
 
 ## Macros used in Code Generation
@@ -120,46 +120,70 @@ Function                        | Memo
 `mulle_objc_exception_match`    | `@catch`
 
 
-### -O0, -Os
+### Inlining method calls
+
+With `-fobjc-inline-method-calls=[1-4]` you can control the level of inlining.
+If you don't specify it, the optimization level is mapped to a inlining
+setting. (See table below)
+
+`cmake` unfortunately sets `-O3` as the optimization level, for Release builds.
+So full inlining will not be chosen for `-O3`.
+
+
+Inlining         | -fobjc-inline-method-calls | Optimization Level (if -fobjc-inline-method-calls is unset)
+-----------------|----------------------------|------------------------
+No inlining      | 1                          | -O0
+Minimal inlining | 2                          | -O1
+Partial inlining | 3                          | -O2/-O3
+Full inlining    | 4                          | -O4+
+
+
+### No inlining
 
 Function                                            | Memo
 ----------------------------------------------------|-------------
 `mulle_objc_object_call`                            | `[self foo:bar]`
 `mulle_objc_object_supercall`                       | `[super foo:bar]`
+&nbsp;                                              |
 `mulle_objc_object_lookup_infraclass_nofail`        | `[Foo ...` for methods
 `mulle_objc_object_lookup_infraclass_nofast_nofail` | `__MULLE_OBJC_NO_FCS__`
 `mulle_objc_global_lookup_infraclass_nofail`        | `[Foo ...` for functions
 `mulle_objc_global_lookup_infraclass_nofast_nofail` | `__MULLE_OBJC_NO_FCS__`
 
 
-### -O1
+### Minimal inlining
 
-Like -O0, but two functions are replaced with partially inlining versions:
-
-Function                                            | Memo
-----------------------------------------------------|-------------
-`mulle_objc_object_call_inline_partial`             | `[self foo:bar]`
-`mulle_objc_object_supercall_inline_partial`        | `[super foo:bar]`
-
-
-### -O2
-
-Like -O1, but four functions are replaced with four inlining functions, and
-two new inlining functions are used:
+Like "No inlining" but one function is replaced with a minimally inlining
+version:
 
 Function                                            | Memo
 ----------------------------------------------------|-------------
-`mulle_objc_object_lookup_infraclass_inline_nofail` | `[Foo ...` for methods
-`mulle_objc_global_lookup_infraclass_inline_nofail` |  `__MULLE_OBJC_NO_FCS__`
+`mulle_objc_object_call_inline_minimal`             | `[self foo:bar]`
+
+
+### Partial inlining
+
+Like "No inlining" but four functions are replaced with four inlining
+functions, and two new inlining functions are used:
+
+Function                                                   | Memo
+-----------------------------------------------------------|-------------
+`mulle_objc_object_call_inline_partial`                    | `[self foo:bar]`
+`mulle_objc_object_supercall_inline_partial`               | `[super foo:bar]`
+&nbsp;                                                     |
+`mulle_objc_object_lookup_infraclass_inline_nofail`        | `[Foo ...` for methods
+`mulle_objc_global_lookup_infraclass_inline_nofail`        |  `__MULLE_OBJC_NO_FCS__`
 `mulle_objc_object_lookup_infraclass_inline_nofail_nofast` | `[Foo ...` for functions
 `mulle_objc_global_lookup_infraclass_inline_nofail_nofast` | `__MULLE_OBJC_NO_FCS__`
-`mulle_objc_object_retain_inline`                   | `[foo retain]`
-`mulle_objc_object_release_inline`                  | `[foo release]`
+`mulle_objc_object_retain_inline`                          | `[foo retain]`
+`mulle_objc_object_release_inline`                         | `[foo release]`
 
 
-### -O3
 
-Like -O3, but two functions are replaced with inlining functions:
+### Full inlining
+
+Like "Partial inlining", but two functions are replaced with fully inlined
+functions:
 
 Function                                            | Memo
 ----------------------------------------------------|-------------
