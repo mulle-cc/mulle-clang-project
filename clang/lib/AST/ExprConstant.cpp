@@ -7246,7 +7246,7 @@ static bool handleLValueToRValueBitCast(EvalInfo &Info, APValue &DestValue,
   return true;
 }
 
-// @mulle-objc@: give access to hash calculation >>>
+// @mulle-objc@: give access to hash calculation >
 extern "C"
 {
 //
@@ -7307,7 +7307,7 @@ uint32_t  MulleObjCUniqueIdHashForString( std::string s)
 }
 
 } // extern C
-// @mulle-objc@: give access to hash calculation <<<
+// @mulle-objc@: give access to hash calculation <
 
 
 template <class Derived>

@@ -9808,7 +9808,7 @@ public:
                                        StringRef Name);
   // @mulle-objc@ compiler: additional method CheckMulleObjCFunctionDefined <
 
-  // @mulle-objc@ AAM:  check that selectors conform
+  // @mulle-objc@ AAM:  check that selectors conform >
   int   CheckSelectorForAAM( Selector Sel,
                              ObjCMethodDecl *Method,
                              QualType ReceiverType,

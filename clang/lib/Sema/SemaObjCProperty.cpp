@@ -1780,7 +1780,7 @@ Decl *Sema::ActOnPropertyImplDecl(Scope *S,
     }
   }
 
-  // @mulle-objc@ new property attribute container >>>
+  // @mulle-objc@ new property attribute container >
   // Unsuccessfully Coping with the Natural Beauty of C++ copy/paste coding
   // --- simplified, because we don't do C++ support --
   if (ObjCMethodDecl *adderMethod = property->getAdderMethodDecl()) {
@@ -1809,7 +1809,7 @@ Decl *Sema::ActOnPropertyImplDecl(Scope *S,
       PIDecl->setRemoverMethodDecl(OMD);
     }
   }
-  // @mulle-objc@ new property attribute container <<<
+  // @mulle-objc@ new property attribute container <
 
   if (IC) {
     if (Synthesize)
@@ -2677,7 +2677,7 @@ static void AddPropertyAttrs(Sema &S, ObjCMethodDecl *PropertyMethod,
 }
 
 
-// @mulle-objc@ new property attribute container >>>
+// @mulle-objc@ new property attribute container >
 
 void  Sema::VerifyPropertyNonGetterMethod( ObjCPropertyDecl *property,
                                            ObjCMethodDecl *method,
@@ -2794,7 +2794,7 @@ ObjCMethodDecl  *Sema::CreatePropertyNonGetterMethod( ObjCContainerDecl *CD,
    return( Method);
 }
 
-// @mulle-objc@ new property attribute container <<<
+// @mulle-objc@ new property attribute container <
 
 /// ProcessPropertyDecl - Make sure that any user-defined setter/getter methods
 /// have the property type and issue diagnostics if they don't.
@@ -2886,7 +2886,7 @@ void Sema::ProcessPropertyDecl(ObjCPropertyDecl *property) {
       Diag(SetterMethod->getLocation(), diag::note_declared_at);
     }
   }
-  // @mulle-objc@ new property attribute container >>>
+  // @mulle-objc@ new property attribute container >
   VerifyPropertyNonGetterMethod( property, SetterMethod, "setter");
 
   bool IsContainerProperty = property->isContainer();
@@ -2925,7 +2925,7 @@ void Sema::ProcessPropertyDecl(ObjCPropertyDecl *property) {
                                     property->getLocation());
     VerifyPropertyNonGetterMethod( property, RemoverMethod, "remover");
   }
-  // @mulle-objc@ new property attribute container <<<
+  // @mulle-objc@ new property attribute container <
 
   // Synthesize getter/setter methods if none exist.
   // Find the default getter and if one not found, add one.
@@ -3022,7 +3022,7 @@ void Sema::ProcessPropertyDecl(ObjCPropertyDecl *property) {
                                        SetterMethod->getClassInterface());
     property->setSetterMethodDecl(SetterMethod);
 
-    // @mulle-objc@ new property attribute container >>>
+    // @mulle-objc@ new property attribute container >
     if( IsContainerProperty)
     {
       if (!AdderMethod) {
@@ -3041,7 +3041,7 @@ void Sema::ProcessPropertyDecl(ObjCPropertyDecl *property) {
         RemoverMethod->setPropertyAccessor(true);
       property->setRemoverMethodDecl(RemoverMethod);
     }
-    // @mulle-objc@ new property attribute container <<<
+    // @mulle-objc@ new property attribute container <
  }
   // Add any synthesized methods to the global pool. This allows us to
   // handle the following, which is supported by GCC (and part of the design).

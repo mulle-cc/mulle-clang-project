@@ -658,7 +658,7 @@ std::string SelectorTable::getPropertyNameFromSetterSelector(Selector Sel) {
 }
 
 
-// @mulle-objc@ new property attribute container >>>
+// @mulle-objc@ new property attribute container >
 SmallString<64>
 SelectorTable::constructAdderName(StringRef Name) {
   SmallString<64> SetterName("addTo");
@@ -704,7 +704,7 @@ std::string SelectorTable::getPropertyNameFromRemoverSelector(Selector Sel) {
   assert(Name.startswith("removeFrom") && "invalid remover name");
   return (Twine(toLowercase(Name[10])) + Name.drop_front(11)).str();
 }
-// @mulle-objc@ new property attribute container <<<
+// @mulle-objc@ new property attribute container <
 
 size_t SelectorTable::getTotalMemory() const {
   SelectorTableImpl &SelTabImpl = getSelectorTableImpl(Impl);

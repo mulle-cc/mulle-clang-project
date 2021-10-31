@@ -903,15 +903,55 @@ void CodeGenFunction::StartObjCMethod(const ObjCMethodDecl *OMD,
 }
 
 
+llvm::Value   *CodeGenFunction::GetMetaABIParamAddressLValue( const Decl *FuncDecl)
+{
+ const ObjCMethodDecl   *MD;
+   RecordDecl             *RD;
+   QualType               recordTy;
+   QualType               recordPtrTy;
+   llvm::Type             *llvmRecType;
+   llvm::Type             *llvmPointerType;
+   llvm::Value            *paramAddr;
+   //unsigned               alignment ;
+   QualType               longType;
+
+   MD = dyn_cast<ObjCMethodDecl>( FuncDecl);
+         // return value: wrap scalar in aggregate, return pointer if in method
+   if( ! MD)
+      return( NULL);
+
+   RD = MD->getRvalRecord();
+   if( ! RD)
+   {
+      return( NULL);
+   }
+
+   recordTy    = CGM.getContext().getTagDeclType( RD);
+   recordPtrTy = CGM.getContext().getPointerType( recordTy);
+   llvmRecType = CGM.getTypes().ConvertTypeForMem( recordTy);
+   llvmPointerType = llvmRecType->getPointerTo();
+
+   auto it = LocalDeclMap.find( MD->getParamDecl());
+   CodeGen::Address  param = it->getSecond();
+
+   // store ScalarExpr in alloca
+   // alignment = CGM.getContext().getTypeAlignInChars( recordPtrTy).getQuantity();
+   paramAddr = Builder.CreateBitCast( Builder.CreateAlignedLoad( param.getPointer(),
+                                                                 getPointerAlign(),
+                                                                 "_param.rval"),
+                                      llvmPointerType);
+   return( paramAddr);
+}
+
 // @mulle-objc@ MetaABI: > put rval into _param if needed
 void   CodeGenFunction::EmitMetaABIWriteScalarReturnValue( const Decl *FuncDecl, llvm::Value *exprResult, QualType exprType)
 {
    const ObjCMethodDecl   *MD;
    RecordDecl             *RD;
    QualType               recordTy;
-   QualType               recordPtrTy;
-   llvm::Type             *llvmRecType;
-   llvm::Type             *llvmPointerType;
+//   QualType               recordPtrTy;
+//   llvm::Type             *llvmRecType;
+//   llvm::Type             *llvmPointerType;
    llvm::Value            *paramAddr;
    //unsigned               alignment ;
    QualType               longType;
@@ -937,20 +977,11 @@ void   CodeGenFunction::EmitMetaABIWriteScalarReturnValue( const Decl *FuncDecl,
       return;
    }
 
-   recordTy    = CGM.getContext().getTagDeclType( RD);
-   recordPtrTy = CGM.getContext().getPointerType( recordTy);
-   llvmRecType = CGM.getTypes().ConvertTypeForMem( recordTy);
-   llvmPointerType = llvmRecType->getPointerTo();
-
-   auto it = LocalDeclMap.find( MD->getParamDecl());
-   CodeGen::Address  param = it->getSecond();
+   recordTy = CGM.getContext().getTagDeclType( RD);
 
    // store ScalarExpr in alloca
    // alignment = CGM.getContext().getTypeAlignInChars( recordPtrTy).getQuantity();
-   paramAddr = Builder.CreateBitCast( Builder.CreateAlignedLoad( param.getPointer(),
-                                                                 getPointerAlign(),
-                                                                 "_param.rval"),
-                                      llvmPointerType);
+   paramAddr = GetMetaABIParamAddressLValue( FuncDecl);
 
    LValue Record = MakeNaturalAlignAddrLValue( paramAddr, recordTy);
    LValue Field = EmitLValueForField( Record, *RD->field_begin());
@@ -975,6 +1006,16 @@ void   CodeGenFunction::EmitMetaABIWriteAggregateReturnValue( const Decl *FuncDe
                       MakeAddrLValue( ExprResult, ExprType),
                       ExprType,
                       getOverlapForReturnValue()); // copy/paste. Is this correct ?
+
+   llvm::Value   *paramAddr;
+   // CharUnits     alignment;
+
+  // store pointer in returnValue , needed for nil detection
+  // alignment = CGM.getContext().getTypeAlignInChars( CGM.getContext().VoidPtrTy);
+   paramAddr = GetMetaABIParamAddressLValue( FuncDecl);
+
+   llvm::Value *newParam = Builder.CreateBitCast( paramAddr, VoidPtrTy);
+   Builder.CreateStore( newParam, ReturnValue);
 }
 
 
@@ -1036,8 +1077,7 @@ void   CodeGenFunction::EmitMetaABIWriteReturnValue( const Decl *FuncDecl, const
                                                 AggValueSlot::IsNotAliased,
                                                 AggValueSlot::DoesNotOverlap));
 
-         // store pointer in returnValue
-         // OMIT this, it's superflous
+         // store pointer in returnValue , needed for nil detection
          llvm::Value *newParam = Builder.CreateBitCast( paramAddr, VoidPtrTy);
          Builder.CreateStore( newParam, ReturnValue);
          return;

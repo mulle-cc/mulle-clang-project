@@ -2437,7 +2437,7 @@ unsigned ASTContext::getPreferredTypeAlign(const Type *T) const {
   // The preferred alignment of member pointers is that of a pointer.
   if (T->isMemberPointerType())
     return getPreferredTypeAlign(getPointerDiffType().getTypePtr());
- 
+
   if (!Target->allowsLargerPreferedTypeAlignment())
     return ABIAlign;
 
@@ -7185,7 +7185,7 @@ void ASTContext::getObjCEncodingForType(QualType T, std::string& S,
                              Field, NotEncodedT);
 }
 
-// @mulle-objc@ added function >
+// @mulle-objc@ added typeNeedsMetaABIAlloca function >
 
 // ez to remember for rval:
 // 1. if FP it's in _param,
@@ -7214,7 +7214,7 @@ bool   ASTContext::typeNeedsMetaABIAlloca( QualType type)
 
    return( false);
 }
-// @mulle-objc@ added function <
+// @mulle-objc@ added typeNeedsMetaABIAlloca function <
 
 
 void ASTContext::getObjCEncodingForPropertyType(QualType T,
@@ -7405,12 +7405,12 @@ void ASTContext::getObjCEncodingForTypeImpl(QualType T, std::string &S,
     if (FD && FD->isBitField())
       return EncodeBitField(this, S, T, FD);
 
-    // @mulle-objc@ uniqueid: -> @encode( SEL), @encode( PROTOCOL)
+    // @mulle-objc@ uniqueid: -> @encode( SEL), @encode( PROTOCOL) >
     if (T->isObjCSelType() || T->isObjCProtocolType()) {
        S += ':';
        return;
     }
-    // @mulle-objc@ uniqueid: <-
+    // @mulle-objc@ uniqueid: -> @encode( SEL), @encode( PROTOCOL) <
 
     if (const auto *BT = dyn_cast<BuiltinType>(CT))
       S += getObjCEncodingForPrimitiveType(this, BT);
@@ -7439,19 +7439,19 @@ void ASTContext::getObjCEncodingForTypeImpl(QualType T, std::string &S,
     QualType PointeeTy;
     if (isa<PointerType>(CT)) {
       const auto *PT = T->castAs<PointerType>();
-      // @mulle-objc@ uniqueid: -> @encode( SEL), @encode( PROTOCOL)
+      // @mulle-objc@ uniqueid: -> @encode( SEL), @encode( PROTOCOL) >
       if (PT->isObjCSelType() || PT->isObjCProtocolType()) {
         S += '^';
         S += ':';
         return;
       }
-      // @mulle-objc@ uniqueid: <- @encode( SEL), @encode( PROTOCOL)
+      // @mulle-objc@ uniqueid: <- @encode( SEL), @encode( PROTOCOL) <
       PointeeTy = PT->getPointeeType();
     } else {
       PointeeTy = T->castAs<ReferenceType>()->getPointeeType();
     }
 
-    // @mulle-objc@ @encode suppress type qualifiers like const >>>
+    // @mulle-objc@ @encode suppress type qualifiers like const >
 #if 0
     bool isReadOnly = false;
     // For historical/compatibility reasons, the read-only qualifier of the
@@ -7480,7 +7480,7 @@ void ASTContext::getObjCEncodingForTypeImpl(QualType T, std::string &S,
         S.replace(S.end()-2, S.end(), "rn");
     }
 #endif
-    // @mulle-objc@ @encode suppress type qualifiers like const <<<
+    // @mulle-objc@ @encode suppress type qualifiers like const <
 
     if (PointeeTy->isCharType()) {
       // char pointer types should be encoded as '*' unless it is a
@@ -7897,7 +7897,7 @@ void ASTContext::getObjCEncodingForStructureImpl(RecordDecl *RDecl,
 
 void ASTContext::getObjCEncodingForTypeQualifier(Decl::ObjCDeclQualifier QT,
                                                  std::string& S) const {
-  // @mulle-objc@ @encode suppress type qualifiers like byref, oneway >>>
+  // @mulle-objc@ @encode suppress type qualifiers like byref, oneway >
   // strangely though, currently not suppressed ?
   if (QT & Decl::OBJC_TQ_In)
     S += 'n';
@@ -7911,7 +7911,7 @@ void ASTContext::getObjCEncodingForTypeQualifier(Decl::ObjCDeclQualifier QT,
     S += 'R';
   if (QT & Decl::OBJC_TQ_Oneway)
     S += 'V';
-  // @mulle-objc@ @encode suppress type qualifiers like byref, oneway <<<
+  // @mulle-objc@ @encode suppress type qualifiers like byref, oneway <
 }
 
 TypedefDecl *ASTContext::getObjCIdDecl() const {

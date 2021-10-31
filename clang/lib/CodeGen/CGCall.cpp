@@ -489,7 +489,7 @@ CodeGenTypes::arrangeObjCMessageSendSignature(const ObjCMethodDecl *MD,
   argTys.push_back(Context.getCanonicalParamType(receiverType));
   argTys.push_back(Context.getCanonicalParamType(Context.getObjCSelType()));
 
-   // @mulle-objc@ MetaABI: Hack ObjCMessageSendSignature
+   // @mulle-objc@ MetaABI: Hack ObjCMessageSendSignature ...
    if( Context.getLangOpts().ObjCRuntime.hasMulleMetaABI())
    {
       RecordDecl *RD = MD->getParamRecord();

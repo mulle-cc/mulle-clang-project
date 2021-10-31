@@ -30,9 +30,9 @@ enum class Language : uint8_t {
   C,
   CXX,
   ObjC,
-// @mulle-objc@ >
+// @mulle-objc@ add ObjCAAM as a frontend language >
   ObjCAAM,
-// @mulle-objc@ <
+// @mulle-objc@ add ObjCAAM as a frontend language<
   ObjCXX,
   OpenCL,
   CUDA,

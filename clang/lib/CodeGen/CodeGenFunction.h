@@ -2058,6 +2058,8 @@ public:
 
   // @mulle-objc@ MetaABI: write/read return values >
 
+  llvm::Value      *GetMetaABIParamAddressLValue( const Decl *FuncDecl);
+
   void             EmitMetaABIWriteScalarReturnValue( const Decl *FuncDecl,
                                                       llvm::Value *ExprResult,
                                                       QualType ExprType);

@@ -2082,7 +2082,7 @@ bool Type::isUnsignedIntegerOrEnumerationType() const {
     return(( BT->getKind() >= BuiltinType::Bool &&
              BT->getKind() <= BuiltinType::UInt128) ||
              BT->getKind() == BuiltinType::ObjCSel ||
-             BT->getKind() == BuiltinType::ObjCProtocol); // @mulle-objc@ uniqueid: ObjCSel is integral
+             BT->getKind() == BuiltinType::ObjCProtocol);
   }
   // @mulle-objc@ uniqueid: ObjCSel, ObjCProtocol is integral <
 
@@ -2760,7 +2760,7 @@ bool Type::isPromotableIntegerType() const {
     case BuiltinType::Char8:
     case BuiltinType::Char16:
     case BuiltinType::Char32:
-    /// @mulle-objc@ uniqueid: make it integer promotable <
+    /// @mulle-objc@ uniqueid: make it integer promotable >
     case BuiltinType::ObjCSel:
     case BuiltinType::ObjCProtocol:
     /// @mulle-objc@ uniqueid: make it integer promotable <

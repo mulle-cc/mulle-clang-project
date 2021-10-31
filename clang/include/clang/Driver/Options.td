@@ -2049,7 +2049,7 @@ def fno_verbose_asm : Flag<["-"], "fno-verbose-asm">, Group<f_Group>, Flags<[CC1
   MarshallingInfoNegativeFlag<CodeGenOpts<"AsmVerbose">>;
 def fno_working_directory : Flag<["-"], "fno-working-directory">, Group<f_Group>;
 def fno_wrapv : Flag<["-"], "fno-wrapv">, Group<f_Group>;
-// @mulle-objc@ options >
+// @mulle-objc@ compiler options >
 def fobjc_tps : Flag<["-"], "fobjc-tps">, Group<f_Group>, Flags<[CC1Option]>,
   HelpText<"use Objective-C tagged pointers for literals">;
 def fno_objc_tps : Flag<["-"], "fno-objc-tps">, Group<f_Group>, Flags<[CC1Option]>,
@@ -2074,7 +2074,7 @@ def fobjc_reuse_param : Flag<["-"], "fobjc-reuse-param">, Group<f_Group>, Flags<
   HelpText<"Allow _param to be reused for a method call">;
 def fno_objc_reuse_param : Flag<["-"], "fno-objc-reuse-param">, Group<f_Group>, Flags<[CC1Option]>,
   HelpText<"Disallow _param to be reused for a method call">;
-// @mulle-objc@ options <
+// @mulle-objc@ compiler options <
 def fobjc_arc : Flag<["-"], "fobjc-arc">, Group<f_Group>, Flags<[CC1Option]>,
   HelpText<"Synthesize retain and release calls for Objective-C pointers">;
 def fno_objc_arc : Flag<["-"], "fno-objc-arc">, Group<f_Group>;

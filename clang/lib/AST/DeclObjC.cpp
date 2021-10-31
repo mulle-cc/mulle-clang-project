@@ -827,12 +827,12 @@ ObjCMethodDecl::ObjCMethodDecl(
   setOverriding(false);
   setHasSkippedBody(false);
 
-  /// @mulle-objc@ MetaABI: initialize storage of parameter ivars >>>
+  /// @mulle-objc@ MetaABI: initialize storage of parameter ivars >
   ParamDecl = nullptr;
   ParamRecord = nullptr;
   RvalRecord = nullptr;
   _isMetaABIVoidPointerParam = false;
-  /// @mulle-objc@ MetaABI: initialize storage of parameter ivars <<<
+  /// @mulle-objc@ MetaABI: initialize storage of parameter ivars <
   setImplicit(isImplicitlyDeclared);
 }
 
