@@ -5,8 +5,8 @@
 #
 # When the llvm project makes releases, they are in a branch as well as
 # tags. mulle-clang development corresponds to each versions branch, but
-# we use a 'tag' to do the merge. So we have mulle_objclang_90 corresponding
-# to release/9.0x and so forth.
+# we use a 'tag' to do the merge. So we have mulle/12.0.0 corresponding
+# to llvmorg-12.0.0 and so forth.
 # When it's time to release, we create a new branch and squash all the
 # accumulated commits into this new branch. So effectively from the original
 # llvm project, we are only one (big) commit away.
@@ -16,13 +16,13 @@
 
 # Current branch we are developing from and the llvm tag where it
 # branched of from
-OLD_LLVM_TAG="llvmorg-11.0.0"
-OLD_MULLE_DEV_BRANCH="mulle/11.0.0"
+OLD_LLVM_TAG="llvmorg-12.0.0"
+OLD_MULLE_DEV_BRANCH="mulle/12.0.0"
 
 # The llvm where we want to glom our changes unto
-NEW_LLVM_TAG="llvmorg-12.0.0"
+NEW_LLVM_TAG="llvmorg-13.0.0"
 # the name of the new branch we want to develop on from now
-NEW_MULLE_DEV_BRANCH="mulle/12.0.0"
+NEW_MULLE_DEV_BRANCH="mulle/13.0.0"
 
 # usually don't edit these
 
@@ -46,22 +46,22 @@ migrate()
 
    if ! git rev-parse --verify "${OLD_LLVM_TAG}" > /dev/null 2>&1
    then
-      echo "Tag ${OLD_LLVM_TAG} must exist" >&2 && exit 1
+      echo "Old llvm tag ${OLD_LLVM_TAG} must exist" >&2 && exit 1
    fi
 
    if ! git rev-parse --verify "${NEW_LLVM_TAG}" > /dev/null 2>&1
    then
-      echo "Tag ${NEW_LLVM_TAG} must exist" >&2 && exit 1
+      echo "New llvm tag ${NEW_LLVM_TAG} must exist" >&2 && exit 1
    fi
 
    if ! git rev-parse --verify "${OLD_MULLE_DEV_BRANCH}" > /dev/null 2>&1
    then
-      echo "Branch ${OLD_MULLE_DEV_BRANCH} must exist" >&2 && exit 1
+      echo "Old mulle branch ${OLD_MULLE_DEV_BRANCH} must exist" >&2 && exit 1
    fi
 
    if git rev-parse --verify "${NEW_MULLE_DEV_BRANCH}" > /dev/null 2>&1
    then
-      echo "Branch ${NEW_MULLE_DEV_BRANCH} must not exist" >&2 && exit 1
+      echo "New mulle branch ${NEW_MULLE_DEV_BRANCH} must not exist" >&2 && exit 1
    fi
 
    #
@@ -182,7 +182,8 @@ cleanup()
 # Since an old version of this script gets will get checked out over the new
 # One we copy script to /tmp and exec there
 #
-[ ! -e "${LLVM_PROJECT}/BUILD_MULLE_CLANG.md" ] && echo "cd to the root of llvm_project" >&2 && exit 1
+[ ! -e "${LLVM_PROJECT}/BUILD_MULLE_CLANG.md" ] \
+&& echo "cd to the root of mulle-clang-project/llvm-project" >&2 && exit 1
 
 case "$0" in
    "${TMPDIR:-/tmp}"*)
