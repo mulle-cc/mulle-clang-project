@@ -9,7 +9,7 @@
 # MEMO: If you can't use ninja copy this file and make it cmake-make or so.
 
 PREFIX="${PREFIX:-${HOME}}"
-INSTALL_PREFIX="${PREFIX}/mulle-clang-project/${MULLE_CLANG_VERSION:-13.0.0.0}"
+INSTALL_PREFIX="${PREFIX}/mulle-clang-project/${MULLE_CLANG_VERSION:-13.0.0.2}"
 
 if [ ! -d "${INSTALL_PREFIX}" ] 
 then 
@@ -30,13 +30,36 @@ cmake.exe \
    ../mulle-clang-project/llvm &&
 ninja.exe ${NINJAFLAGS} "$@"  &&
 echo "Ninja install with sudo may require a password" >&2 &&
-${INSTALL_SUDO} ninja.exe ${NINJAFLAGS} ${INSTALLFLAGS} install  &&
-(
-   cd "${INSTALL_PREFIX}/bin" &&
-   for bin in clang*.exe 
-   do
-      mv "$bin" "mulle-$bin"
-   done
-)
+${INSTALL_SUDO} ninja.exe ${NINJAFLAGS} ${INSTALLFLAGS} install  || exit 1
 
-# pass in INSTALL_SUDO via env if needed
+
+# postprocess: remove llvm stuff that is not needed
+#              rename llvm stuff we need to m
+
+
+cd "${INSTALL_PREFIX}/bin" &&
+for bin in *
+do
+   case "${bin}" in
+      clang-[0-9]*)
+         ${INSTALL_SUDO} mv "$bin" "mulle-clang" || exit 1
+      ;;
+
+      llvm-nm)
+         ${INSTALL_SUDO} mv "$bin" "mulle-nm" || exit 1
+      ;;
+
+      analyze-build*|scan-build*)
+         ${INSTALL_SUDO} mv "$bin" "mulle-${bin}" || exit 1
+      ;;
+
+      mulle-*)
+         # protection if overwriting old /opt dir with contents
+      ;;
+
+      *)
+         echo "Removing ${bin}" >&2 &&
+         ${INSTALL_SUDO} rm "${bin}" || exit 1
+      ;;
+   esac
+done

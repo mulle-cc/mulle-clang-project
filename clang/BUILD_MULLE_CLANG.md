@@ -4,6 +4,7 @@ Executable          | Description
 --------------------|--------------------------------
 `mulle-clang`       | The compiler
 `mulle-scan-build`  | The analyzer frontend
+`mulle-nm`          | Symbol lister
 
 
 ## Prerequisites
@@ -25,39 +26,48 @@ If you are configuring a virtual machine, give it some more cores!
 
 ## Installing on Linux or FreeBSD
 
-You need the **bash** shell and **curl** (or **wget** )and you may want to get **sudo** happening to
-install packages (or run the script as **root**). bash is usually already present.
+You need the **bash** shell and **curl** (or **wget** )and you may want to
+get **sudo** happening to install packages (or run the script as **root**).
+bash is usually already present.
 
 
 <a name="common-generic"></a>
 ### Common generic instructions
 
-Build and install using the `install-mulle-clang` script.
 
-The script downloads and builds the compiler and the dependencies. If your
-machine is puny and weak, try to get pre-built binary packages from somewhere
-as this project is huge.
+#### 1. Download sources
 
-
-1. Download the script, don't clone the whole repository yet
+Get a tarball or zip of [mulle-clang-project](//github.com/mulle-cc/mulle-clang-project/releases/).
+Cloning the repository will take forever and just waste space. The instructions
+here might be stale, so check out what's new and current:
 
 ```
-mkdir mulle-clang
-cd mulle-clang
-curl -L -O "https://raw.githubusercontent.com/Codeon-GmbH/mulle-clang/mulle_objclang_100/bin/install-mulle-clang"
+mkdir mulle-clang-130
+cd mulle-clang-130
+curl -L -O "https://github.com/mulle-cc/mulle-clang-project/archive/refs/tags/13.0.0.2.tar.gz"
 ```
 
-2. Build the compiler. Here is an example, where the compiler is installed into
-   `opt` and the symlink to the compiler is installed in `/usr/local/bin`:
+#### 2. Install prerequisites
 
-```
-chmod 755 install-mulle-clang
-./install-mulle-clang --clang-prefix /opt
-./install-mulle-clang install --symlink-prefix /usr/local
+Depending on your platform, you may need to install some prerequisites. There
+is a script that used to be able to fetch all the prerquisites, but it may have
+become stale:
+
+``` bash
+./clang/bin/install-prerequisites
 ```
 
-Depending on your platform, the script will ask you to install some more
-prerequisites.
+#### 3. Build and install the compiler
+
+``` bash
+# look at available scripts
+ls mulle-clang-project/clang/bin/*.*
+
+# this will also install,
+INSTALL_SUDO=sudo ./clang/bin/cmake-make.linux
+```
+
+
 
 
 ## Windows: Installing further prerequisites

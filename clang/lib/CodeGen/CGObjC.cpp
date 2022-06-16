@@ -1113,15 +1113,31 @@ CodeGen::RValue   CodeGenFunction::EmitMetaABIReadReturnValue( const ObjCMethodD
       // be optimized away by the compiler.
       //
       V = Param.getScalarVal();
+
       // use return value slot, which is an allocaed aggregate of proper type
       Address   Dst = Return.getValue();
 
-      // is this ever used ?
+      llvm::AllocaInst  *alloca;
+      llvm::Value       *emitMarker;
+      llvm::CallInst    *stackpointer;
+
+      alloca       = NULL;
+      stackpointer = NULL;
+      emitMarker   = NULL;
+
+      // is this ever used ? YES unfortunately
       if( ! Dst.isValid())
       {
-         llvm::AllocaInst  *alloca = Builder.CreateAlloca( getTypes().ConvertTypeForMem( ResultType));
+         // Save the stack.
+         llvm::Function *F = CGM.getIntrinsic(llvm::Intrinsic::stacksave);
+         stackpointer      = Builder.CreateCall(F, {}, "inalloca.save");
+
+         // alloca some memory
+         llvm::Type *llvmType = getTypes().ConvertTypeForMem( ResultType);
+         alloca = Builder.CreateAlloca( llvmType);
          Dst = Address( alloca, Alignment);
       }
+
       //
       // memcpy stuff from _param
       //
@@ -1149,6 +1165,12 @@ CodeGen::RValue   CodeGenFunction::EmitMetaABIReadReturnValue( const ObjCMethodD
       {
          V = Builder.CreateLoad( Dst);
          Rvalue = RValue::get(V);
+      }
+
+      if( stackpointer)
+      {
+         llvm::Function *F = CGM.getIntrinsic(llvm::Intrinsic::stackrestore);
+         Builder.CreateCall(F, stackpointer);
       }
    }
    else
