@@ -7038,6 +7038,11 @@ ObjCRuntime Clang::AddObjCRuntimeArgs(const ArgList &args,
   // If we have no runtime argument, ask the toolchain for its default runtime.
   // However, the rewriter only really supports the Mac runtime, so assume that.
   ObjCRuntime runtime;
+
+// @mulle-objc@ always use mulle-objc use standard clang for others >
+// following functions always returns mulle-objc
+   runtime = getToolChain().getDefaultObjCRuntime(isNonFragile);
+#if 0
   if (!runtimeArg) {
     switch (rewriteKind) {
     case RK_None:
@@ -7072,6 +7077,8 @@ ObjCRuntime Clang::AddObjCRuntimeArgs(const ArgList &args,
     else
       runtime = ObjCRuntime(ObjCRuntime::GCC, VersionTuple());
   }
+#endif
+// @mulle-objc@ always use mulle-objc use standard clang for others <
 
   if (llvm::any_of(inputs, [](const InputInfo &input) {
         return types::isObjC(input.getType());
