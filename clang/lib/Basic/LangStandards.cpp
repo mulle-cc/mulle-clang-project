@@ -66,10 +66,12 @@ LangStandard::Kind clang::getDefaultLanguageStandard(clang::Language Lang,
       return LangStandard::lang_gnu99;
     return LangStandard::lang_gnu17;
   case Language::ObjC:
-    if (CLANG_DEFAULT_STD_C != LangStandard::lang_unspecified)
-      return CLANG_DEFAULT_STD_C;
-
-    return LangStandard::lang_gnu11;
+  // @mulle-objc@ AAM: .aam filename extension support ->
+  case Language::ObjCAAM:
+  // @mulle-objc@ AAM: .aam filename extension support -<
+  // @mulle-objc@ C11 should be standard now -<
+     return LangStandard::lang_c11;
+    // @mulle-objc@ C11 should be standard now -<
   case Language::CXX:
   case Language::ObjCXX:
     if (CLANG_DEFAULT_STD_CXX != LangStandard::lang_unspecified)
