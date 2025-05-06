@@ -11,6 +11,8 @@
 
 #include "clang/CodeGen/BackendUtil.h"
 #include "clang/CodeGen/CodeGenAction.h"
+// We need the full definition of CodeGenerator, which is in ModuleBuilder.h
+#include "clang/CodeGen/ModuleBuilder.h"
 
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/Support/Timer.h"
@@ -94,6 +96,12 @@ public:
   void CompleteExternalDeclaration(DeclaratorDecl *D) override;
   void AssignInheritanceModel(CXXRecordDecl *RD) override;
   void HandleVTable(CXXRecordDecl *RD) override;
+  // @mulle-objc@ compiler: pass through Parser to ObjCRuntime when finished >
+  void ParserDidFinish(Parser *P) override {
+    if(Gen)
+      Gen->ParserDidFinish(P);
+  }
+  // @mulle-objc@ compiler: pass through Parser to ObjCRuntime when finished <
 
   // Links each entry in LinkModules into our module.  Returns true on error.
   bool LinkInModules(llvm::Module *M);

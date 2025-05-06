@@ -3699,6 +3699,10 @@ public:
   void ActOnDocumentableDecl(Decl *D);
   void ActOnDocumentableDecls(ArrayRef<Decl *> Group);
 
+  // @mulle-objc@ >> specific methods for parameters
+  ExprResult GetMulle_paramFieldExpr(FieldDecl *FD, Scope *S, SourceLocation NameLoc);
+  // @mulle-objc@ << specific methods for parameters
+
   enum class FnBodyKind {
     /// C++26 [dcl.fct.def.general]p1
     /// function-body:

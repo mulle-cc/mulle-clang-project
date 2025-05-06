@@ -417,6 +417,7 @@ static FullSourceLoc ConvertBackendLocation(const llvm::SMDiagnostic &D,
     case llvm::DS_Remark:                                                      \
       DiagID = diag::remark_fe_##GroupName;                                    \
       break;                                                                   \
+    // ... existing code ...
     case llvm::DS_Note:                                                        \
       DiagID = diag::note_fe_##GroupName;                                      \
       break;                                                                   \
@@ -505,6 +506,21 @@ BackendConsumer::InlineAsmDiagHandler(const llvm::DiagnosticInfoInlineAsm &D) {
   // We handled all the possible severities.
   return true;
 }
+
+// @mulle-objc@ commented out >
+// static void InlineAsmDiagHandler(const llvm::SMDiagnostic &SM,void *Context,
+//                                  unsigned LocCookie) {
+//   SourceLocation Loc = SourceLocation::getFromRawEncoding(LocCookie);
+//   ((BackendConsumer*)Context)->InlineAsmDiagHandler2(SM, Loc);
+// }
+// @mulle-objc@ commented out <
+
+/// @mulle-objc@ compiler: pass through Parser to ObjCRuntime when finished >
+// void BackendConsumer::ParserDidFinish( Parser *P) {
+//     if( Gen)
+//         Gen->ParserDidFinish( P);
+// }
+/// @mulle-objc@ compiler: pass through Parser to ObjCRuntime when finished <
 
 bool
 BackendConsumer::StackSizeDiagHandler(const llvm::DiagnosticInfoStackSize &D) {

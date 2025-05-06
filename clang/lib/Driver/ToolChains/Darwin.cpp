@@ -1009,7 +1009,9 @@ ObjCRuntime Darwin::getDefaultObjCRuntime(bool isNonFragile) const {
   }
   if (isNonFragile)
     return ObjCRuntime(ObjCRuntime::MacOSX, TargetVersion);
-  return ObjCRuntime(ObjCRuntime::FragileMacOSX, TargetVersion);
+ // @mulle-objc@ compiler: use Mulle runtime as default >
+   return ObjCRuntime(ObjCRuntime::Mulle, TargetVersion);
+ // @mulle-objc@ compiler: use Mulle runtime as default <
 }
 
 /// Darwin provides a blocks runtime starting in MacOS X 10.6 and iOS 3.2.

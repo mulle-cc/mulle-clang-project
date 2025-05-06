@@ -882,6 +882,9 @@ SimplifiedTypeClass clang::getSimplifiedTypeClass(CanQualType T) {
     case BuiltinType::ObjCId:
     case BuiltinType::ObjCClass:
     case BuiltinType::ObjCSel:
+    /// @mulle-objc@ uniqueid: add builtin type for PROTOCOL >
+    case BuiltinType::ObjCProtocol:
+    /// @mulle-objc@ uniqueid: add builtin type for PROTOCOL <
       return STC_ObjectiveC;
 
     default:
@@ -1640,6 +1643,9 @@ static bool isObjCReceiverType(ASTContext &C, QualType T) {
     case BuiltinType::ObjCId:
     case BuiltinType::ObjCClass:
     case BuiltinType::ObjCSel:
+    /// @mulle-objc@ uniqueid: add builtin type for PROTOCOL >
+    case BuiltinType::ObjCProtocol:
+    /// @mulle-objc@ uniqueid: add builtin type for PROTOCOL <
       return true;
 
     default:
@@ -7563,8 +7569,10 @@ static void AddObjCVisibilityResults(const LangOptions &LangOpts,
   Results.AddResult(Result(OBJC_AT_KEYWORD_NAME(NeedAt, "private")));
   Results.AddResult(Result(OBJC_AT_KEYWORD_NAME(NeedAt, "protected")));
   Results.AddResult(Result(OBJC_AT_KEYWORD_NAME(NeedAt, "public")));
-  if (LangOpts.ObjC)
+  // @mulle-objc@ no support for Java :) package >
+  if (LangOpts.ObjC && ! LangOpts.ObjCRuntime.hasMulleMetaABI())
     Results.AddResult(Result(OBJC_AT_KEYWORD_NAME(NeedAt, "package")));
+  // @mulle-objc@ no support for Java :) package <
 }
 
 void SemaCodeCompletion::CodeCompleteObjCAtVisibility(Scope *S) {
@@ -7674,6 +7682,24 @@ void SemaCodeCompletion::CodeCompleteObjCPropertyFlags(Scope *S,
   if (!ObjCPropertyFlagConflicts(Attributes,
                                  ObjCPropertyAttribute::kind_atomic))
     Results.AddResult(CodeCompletionResult("atomic"));
+  // @mulle-objc@ new property attributes serializable, container, dynamic >
+  if (!ObjCPropertyFlagConflicts(Attributes, ObjCPropertyAttribute::kind_dynamic))
+    Results.AddResult(CodeCompletionResult("dynamic"));
+  if (!ObjCPropertyFlagConflicts(Attributes, ObjCPropertyAttribute::kind_serializable))
+    Results.AddResult(CodeCompletionResult("serializable"));
+  if (!ObjCPropertyFlagConflicts(Attributes, ObjCPropertyAttribute::kind_nonserializable))
+    Results.AddResult(CodeCompletionResult("nonserializable"));
+  if (!ObjCPropertyFlagConflicts(Attributes, ObjCPropertyAttribute::kind_autorelease))
+    Results.AddResult(CodeCompletionResult("autorelease"));
+  if (!ObjCPropertyFlagConflicts(Attributes, ObjCPropertyAttribute::kind_noautorelease))
+    Results.AddResult(CodeCompletionResult("noautorelease"));
+  if (!ObjCPropertyFlagConflicts(Attributes, ObjCPropertyAttribute::kind_container))
+    Results.AddResult(CodeCompletionResult("container"));
+  if (!ObjCPropertyFlagConflicts(Attributes, ObjCPropertyAttribute::kind_observable))
+    Results.AddResult(CodeCompletionResult("observable"));
+  if (!ObjCPropertyFlagConflicts(Attributes, ObjCPropertyAttribute::kind_relationship))
+    Results.AddResult(CodeCompletionResult("relationship"));
+  // @mulle-objc@ new property attributes serializable, container, dynamic <
 
   // Only suggest "weak" if we're compiling for ARC-with-weak-references or GC.
   if (getLangOpts().ObjCWeak || getLangOpts().getGC() != LangOptions::NonGC)
@@ -7926,6 +7952,15 @@ void SemaCodeCompletion::CodeCompleteObjCPropertySetter(Scope *S) {
                             Results.getCompletionContext(), Results.data(),
                             Results.size());
 }
+
+// @mulle-objc@ new property attributes container >
+void SemaCodeCompletion::CodeCompleteObjCPropertyAdder(Scope *S) {
+   CodeCompleteObjCPropertySetter( S);
+}
+void SemaCodeCompletion::CodeCompleteObjCPropertyRemover(Scope *S) {
+   CodeCompleteObjCPropertySetter( S);
+}
+// @mulle-objc@ new property attributes container >
 
 void SemaCodeCompletion::CodeCompleteObjCPassingType(Scope *S, ObjCDeclSpec &DS,
                                                      bool IsParameter) {
@@ -9279,6 +9314,12 @@ static void AddObjCKeyValueCompletions(ObjCPropertyDecl *Property,
                                CXCursor_ObjCInstanceMethodDecl));
     }
   }
+
+  //
+  // @mulle-objc@ new property attribute container >
+  // TODO: code completion for adder and remover
+  // @mulle-objc@ new property attribute container <
+  //
 
   // Indexed and unordered accessors
   unsigned IndexedGetterPriority = CCP_CodePattern;

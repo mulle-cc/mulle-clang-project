@@ -176,6 +176,10 @@ public:
   void CodeCompleteObjCPropertyFlags(Scope *S, ObjCDeclSpec &ODS);
   void CodeCompleteObjCPropertyGetter(Scope *S);
   void CodeCompleteObjCPropertySetter(Scope *S);
+  // @mulle-objc@ >> adder + remover
+  void CodeCompleteObjCPropertyAdder(Scope *S);
+  void CodeCompleteObjCPropertyRemover(Scope *S);
+  // @mulle-objc@ << adder + remover
   void CodeCompleteObjCPassingType(Scope *S, ObjCDeclSpec &DS,
                                    bool IsParameter);
   void CodeCompleteObjCMessageReceiver(Scope *S);

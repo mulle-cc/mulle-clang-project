@@ -1162,6 +1162,43 @@ public:
 
   /// Return the property name for the given setter selector.
   static std::string getPropertyNameFromSetterSelector(Selector Sel);
+
+// @mulle-objc@ > adder and remover selector 
+  /// Return the default setter name for the given identifier.
+  ///
+  /// This is "set" + \p Name where the initial character of \p Name
+  /// has been capitalized.
+  static SmallString<64> constructAdderName(StringRef Name);
+
+  /// Return the default setter selector for the given identifier.
+  ///
+  /// This is "set" + \p Name where the initial character of \p Name
+  /// has been capitalized.
+  static Selector constructAdderSelector(IdentifierTable &Idents,
+                                          SelectorTable &SelTable,
+                                          const IdentifierInfo *Name);
+
+  /// Return the property name for the given setter selector.
+  static std::string getPropertyNameFromAdderSelector(Selector Sel);
+
+  /// Return the default setter name for the given identifier.
+  ///
+  /// This is "set" + \p Name where the initial character of \p Name
+  /// has been capitalized.
+  static SmallString<64> constructRemoverName(StringRef Name);
+
+  /// Return the default setter selector for the given identifier.
+  ///
+  /// This is "set" + \p Name where the initial character of \p Name
+  /// has been capitalized.
+  static Selector constructRemoverSelector(IdentifierTable &Idents,
+                                          SelectorTable &SelTable,
+                                          const IdentifierInfo *Name);
+
+  /// Return the property name for the given remover selector.
+  static std::string getPropertyNameFromRemoverSelector(Selector Sel);
+
+// @mulle-objc@ < adder and remove selector 
 };
 
 }  // namespace clang

@@ -397,6 +397,13 @@ void SemaObjC::ActOnStartOfObjCMethodDef(Scope *FnBodyScope, Decl *D) {
 
   SemaRef.PushOnScopeChains(MDecl->getSelfDecl(), FnBodyScope);
   SemaRef.PushOnScopeChains(MDecl->getCmdDecl(), FnBodyScope);
+   // @mulle-objc@ MetaABI: save scope for later retrieval in ActonMethod >
+   bool hasMetaABIParam;
+
+   hasMetaABIParam = getLangOpts().ObjCRuntime.hasMulleMetaABI() && MDecl->getParamDecl();
+   if( hasMetaABIParam)
+      SemaRef.PushOnScopeChains(MDecl->getParamDecl(), FnBodyScope);
+   // @mulle-objc@ MetaABI: save scope for later retrieval in ActonMethod <
 
   // The ObjC parser requires parameter names so there's no need to check.
   SemaRef.CheckParmsForFunctionDef(MDecl->parameters(),
@@ -409,9 +416,41 @@ void SemaObjC::ActOnStartOfObjCMethodDef(Scope *FnBodyScope, Decl *D) {
       Diag(Param->getLocation(), diag::warn_arc_strong_pointer_objc_pointer) <<
             Param->getType();
 
-    if (Param->getIdentifier())
-      SemaRef.PushOnScopeChains(Param, FnBodyScope);
+     // @mulle-objc@ MetaABI: Remove Parameters from Scope >
+     // (nat) pushing the param identifier on the scope is done here
+     //
+     if( ! hasMetaABIParam)
+     {
+       if (Param->getIdentifier())
+         SemaRef.PushOnScopeChains(Param, FnBodyScope);
+     }
+     // @mulle-objc@ MetaABI: Remove Parameters from Scope <
   }
+
+  //
+  // @mulle-objc@ AAM:  check that family is compatible >
+  // certain methods returning retained objects can not
+  // be used.
+  //
+  if( getLangOpts().ObjCAllocsAutoreleasedObjects)
+  {
+     switch (MDecl->getMethodFamily())
+     {
+     case ObjCMethodFamily::OMF_alloc       :
+     case ObjCMethodFamily::OMF_new         :
+     case ObjCMethodFamily::OMF_copy        :
+     case ObjCMethodFamily::OMF_mutableCopy :
+     case ObjCMethodFamily::OMF_autorelease :
+     case ObjCMethodFamily::OMF_release     :
+     case ObjCMethodFamily::OMF_retain      :
+     case ObjCMethodFamily::OMF_retainCount :
+         Diag(MDecl->getLocation(), diag::err_mulle_aam_unsupported_method_family)
+            << MDecl->getSelector();
+          break;
+     default : break ;
+     }
+  }
+  // @mulle-objc@ AAM: check that family is compatible <
 
   // In ARC, disallow definition of retain/release/autorelease/retainCount
   if (getLangOpts().ObjCAutoRefCount) {
@@ -2787,16 +2826,28 @@ static void CheckProtocolMethodDefs(
         // Ugly, but necessary. Method declared in protocol might have
         // have been synthesized due to a property declared in the class which
         // uses the protocol.
-        if (ObjCMethodDecl *MethodInClass = IDecl->lookupMethod(
-                method->getSelector(), true /* instance */,
-                true /* shallowCategoryLookup */, false /* followSuper */))
-          if (C || MethodInClass->isPropertyAccessor())
-            continue;
-        unsigned DIAG = diag::warn_unimplemented_protocol_method;
-        if (!S.Diags.isIgnored(DIAG, Impl->getLocation())) {
-          WarnUndefinedMethod(S, Impl, method, IncompleteImpl, DIAG, PDecl);
-        }
-      }
+            if (ObjCMethodDecl *MethodInClass =
+                  IDecl->lookupMethod(method->getSelector(),
+                                      true /* instance */,
+                                      true /* shallowCategoryLookup */,
+                                      false /* followSuper */))
+              if (C || MethodInClass->isPropertyAccessor())
+                continue;
+            // @mulle-objc@ allow protocol methods to be redeclared as optional >
+            if (ObjCMethodDecl *NearestMethod =
+                  IDecl->lookupMethod(method->getSelector(),
+                                      true /* instance */,
+                                      false /* shallowCategoryLookup */,
+                                      true /* followSuper */))
+              if ( NearestMethod->getImplementationControl() == ObjCImplementationControl::Optional)
+                continue;
+            // @mulle-objc@ allow protocol methods to be redeclared as optional <
+
+            unsigned DIAG = diag::warn_unimplemented_protocol_method;
+            if (!S.Diags.isIgnored(DIAG, Impl->getLocation())) {
+              WarnUndefinedMethod(S, Impl, method, IncompleteImpl, DIAG, PDecl);
+            }
+          }
     }
   // check unimplemented class methods
   for (auto *method : PDecl->class_methods()) {
@@ -2814,6 +2865,15 @@ static void CheckProtocolMethodDefs(
                                    false /* followSuper */))
         continue;
 
+      // @mulle-objc@ allow protocol methods to be redeclared as optional >
+      if (ObjCMethodDecl *NearestMethod =
+         IDecl->lookupMethod(method->getSelector(),
+                             true /* instance */,
+                             false /* shallowCategoryLookup */,
+                             true /* followSuper */))
+         if ( NearestMethod->getImplementationControl() == ObjCImplementationControl::Optional)
+            continue;
+      // @mulle-objc@ allow protocol methods to be redeclared as optional <
       unsigned DIAG = diag::warn_unimplemented_protocol_method;
       if (!S.Diags.isIgnored(DIAG, Impl->getLocation())) {
         WarnUndefinedMethod(S, Impl, method, IncompleteImpl, DIAG, PDecl);
@@ -2842,8 +2902,21 @@ void SemaObjC::MatchAllMethodDeclarations(
     if (!I->isPropertyAccessor() &&
         !InsMap.count(I->getSelector())) {
       if (ImmediateClass)
-        WarnUndefinedMethod(SemaRef, IMPDecl, I, IncompleteImpl,
-                            diag::warn_undef_method_impl);
+         // @mulle-objc@ language: remove warnings for unimplemented instance methods like -retain, -release which are always defined >
+         if( getLangOpts().ObjCRuntime.hasMulleMetaABI())
+         {
+            std::string   s;
+
+            s = I->getNameAsString();
+            if( s != "release" &&
+                s != "retain")
+               WarnUndefinedMethod(SemaRef, IMPDecl, I, IncompleteImpl,
+                                   diag::warn_undef_method_impl);
+         }
+         else
+         // @mulle-objc@ language: remove warnings for unimplemented instance methods like -retain, -release which are always defined <
+           WarnUndefinedMethod(SemaRef, IMPDecl, I, IncompleteImpl,
+                               diag::warn_undef_method_impl);
       continue;
     } else {
       ObjCMethodDecl *ImpMethodDecl =
@@ -2872,8 +2945,22 @@ void SemaObjC::MatchAllMethodDeclarations(
     if (!I->isPropertyAccessor() &&
         !ClsMap.count(I->getSelector())) {
       if (ImmediateClass)
+      {
+         // @mulle-objc@ language: remove warnings for unimplemented class methods like +new, +alloc which are always defined
+         if( getLangOpts().ObjCRuntime.hasMulleMetaABI())
+         {
+            std::string   s;
+
+            s = I->getNameAsString();
+            if( s != "new" &&
+                s != "alloc")
+            WarnUndefinedMethod(SemaRef, IMPDecl, I, IncompleteImpl,
+                                diag::warn_undef_method_impl);
+         }
+         else
         WarnUndefinedMethod(SemaRef, IMPDecl, I, IncompleteImpl,
                             diag::warn_undef_method_impl);
+      }
     } else {
       ObjCMethodDecl *ImpMethodDecl =
         IMPDecl->getClassMethod(I->getSelector());
@@ -2998,6 +3085,13 @@ void SemaObjC::ImplMethodsVsClassMethods(Scope *S, ObjCImplDecl *IMPDecl,
     InsMap.insert(P->getGetterName());
     if (!P->getSetterName().isNull())
       InsMap.insert(P->getSetterName());
+
+    // @mulle-objc@ new property attribute container >
+    if (!P->getAdderName().isNull())
+      InsMap.insert(P->getAdderName());
+    if (!P->getRemoverName().isNull())
+      InsMap.insert(P->getRemoverName());
+    // @mulle-objc@ new property attribute container <
   }
 
   // Check and see if properties declared in the interface have either 1)
@@ -4109,10 +4203,19 @@ Decl *SemaObjC::ActOnAtEnd(Scope *S, SourceRange AtEnd,
             if (ObjCMethodDecl *GetterMethod =
                     Ext->getInstanceMethod(Property->getGetterName()))
               GetterMethod->setPropertyAccessor(true);
-            if (!Property->isReadOnly())
+            // @mulle-objc@ new property attribute container >
+            if (!Property->isReadOnly()) {
               if (ObjCMethodDecl *SetterMethod
                     = Ext->getInstanceMethod(Property->getSetterName()))
                 SetterMethod->setPropertyAccessor(true);
+              if (ObjCMethodDecl *AdderMethod
+                    = Ext->getInstanceMethod(Property->getAdderName()))
+                AdderMethod->setPropertyAccessor(true);
+              if (ObjCMethodDecl *RemoverMethod
+                    = Ext->getInstanceMethod(Property->getRemoverName()))
+                RemoverMethod->setPropertyAccessor(true);
+            }
+            // @mulle-objc@ new property attribute container <
           }
         }
       }
@@ -4770,6 +4873,136 @@ ParmVarDecl *SemaObjC::ActOnMethodParmDeclaration(Scope *S,
   return Param;
 }
 
+//
+// @mulle-objc@ MetaABI: creates a struct from method parameters
+// >>>
+unsigned int   SemaObjC::metaABIDescription( SmallVector<ParmVarDecl*, 16> &Params,
+                                         QualType resultType)
+{
+   unsigned int   desc;
+
+   desc = 0;
+   if( ! resultType->isVoidType())
+   {
+      desc = MetaABIVoidPtrRval;
+      if( Context.typeNeedsMetaABIAlloca( resultType))
+         desc = MetaABIRvalAsStruct;  // must be as struct then
+   }
+
+   switch( Params.size())
+   {
+   case 0 :
+      break;
+   case 1 :
+      if( Params[ 0]->getType()->isIncompleteType( 0))
+         return( MetaABIParamAsStruct);
+
+      if( Context.typeNeedsMetaABIAlloca( Params[ 0]->getType()))
+         desc |= MetaABIParamAsStruct;
+      else
+         desc |= MetaABIVoidPtrParam;
+      break;
+
+   default :
+      desc |= MetaABIParamAsStruct;
+      break;
+   }
+   return( desc);
+}
+
+
+void   SemaObjC::SetMulleObjCParam( ObjCMethodDecl *ObjCMethod,
+                                Selector Sel,
+                                SmallVector<ParmVarDecl*, 16> *Params,
+                                QualType resultType,
+                                unsigned int abiDesc,
+                                SourceLocation   Loc)
+{
+   std::string  RecordName;
+   QualType     PtrTy;
+
+   // - (void *) foo; is ez no parameter or bogus parameter
+   if( abiDesc & MetaABIRvalAsStruct)
+   {
+      // i am lazy and stuff records into records...
+      RecordName = "rval." + Sel.getAsString();
+      IdentifierInfo  *RecordID = &Context.Idents.get( RecordName);
+
+      RecordDecl  *RD = RecordDecl::Create( Context, TagTypeKind::Struct, CurContext, Loc, Loc, RecordID);
+      FieldDecl   *FD;
+
+      FD = FieldDecl::Create( Context, RD,
+                             Loc, Loc,
+                             &Context.Idents.get("rval"),
+                             resultType,
+                             nullptr,
+                             nullptr,
+                             false,  // Mutable... only for C++
+                             ICIS_NoInit);
+      RD->addDecl( FD);
+      RD->completeDefinition();
+
+      // some voodoo, blindly copied
+      AddAlignmentAttributesForRecord(RD);
+      AddMsStructLayoutForRecord(RD);
+      ObjCMethod->setRvalRecord( RD);
+   }
+
+   //
+   // this could be trouble, if someone has declared the same method
+   // already ? check this
+   //
+   RecordName = "p." + Sel.getAsString();
+   IdentifierInfo  *RecordID = &Context.Idents.get( RecordName);
+
+   RecordDecl  *RD = RecordDecl::Create( Context, TagTypeKind::Struct, CurContext, Loc, Loc, RecordID);
+
+   for (unsigned i = 0, e = Params->size(); i != e; ++i)
+   {
+      ParmVarDecl *Param = (*Params)[ i];
+      FieldDecl   *FD;
+
+      FD = FieldDecl::Create( Context, RD,
+                             Param->getLocation(), Param->getEndLoc(),
+                             Param->getIdentifier(),
+                             Param->getType(),
+                             Param->getTypeSourceInfo(),
+                             Param->getDefaultArg(),
+                             false,  // Mutable... only for C++
+                             ICIS_NoInit);
+      RD->addDecl( FD);
+   }
+   RD->completeDefinition();
+
+   // some voodoo, blindly copied
+   AddAlignmentAttributesForRecord(RD);
+   AddMsStructLayoutForRecord(RD);
+
+   ObjCMethod->setParamRecord( RD);
+
+   // (nat) fake it up, so that every method looks exactly alike
+   //       add our _param implicit decl now.
+   //
+   // convert record to a QualType
+   QualType RecTy = Context.getTagDeclType(RD);
+   PtrTy = Context.getPointerType( RecTy);
+
+   ImplicitParamDecl  *Param = ImplicitParamDecl::Create(Context,
+                                                         ObjCMethod,
+                                                         Loc,
+                                                         &Context.Idents.get("_param"),
+                                                         PtrTy,
+                                                         ImplicitParamKind::Other);
+
+   ObjCMethod->setParamDecl( Param);
+   // this is implicitly done later in ActOnStartOfObjCMethodDef
+   //      IdResolver.AddDecl(Param);  // this adds it to search scope!
+}
+
+// <<<
+// @mulle-objc@ MetaABI: creates a struct from method parameters
+
+
 Decl *SemaObjC::ActOnMethodDeclaration(
     Scope *S, SourceLocation MethodLoc, SourceLocation EndLoc,
     tok::TokenKind MethodType, ObjCDeclSpec &ReturnQT, ParsedType ReturnType,
@@ -4779,7 +5012,8 @@ Decl *SemaObjC::ActOnMethodDeclaration(
     ParmVarDecl **ArgInfo, DeclaratorChunk::ParamInfo *CParamInfo,
     unsigned CNumArgs, // c-style args
     const ParsedAttributesView &AttrList, tok::ObjCKeywordKind MethodDeclKind,
-    bool isVariadic, bool MethodDefinition) {
+    bool isVariadic, bool MethodDefinition)
+{
   ASTContext &Context = getASTContext();
   // Make sure we can establish a context for the method.
   if (!SemaRef.CurContext->isObjCContainer()) {
@@ -4822,6 +5056,17 @@ Decl *SemaObjC::ActOnMethodDeclaration(
     ParmVarDecl *Param = ArgInfo[I];
     Param->setDeclContext(ObjCMethod);
     SemaRef.ProcessAPINotes(Param);
+    // @mulle-objc@ MetaABI: Remove Parameters from Scope >
+    // (nat) This is done before already.... but we don't want it anyway.
+    //       Keep regular parameters outside of the scopes.
+    if( ! getLangOpts().ObjCRuntime.hasMulleMetaABI())
+    {
+       S->AddDecl(Param);
+       // Scope, IdResolver ??
+       IdResolver.AddDecl(Param);
+    }
+    // @mulle-objc@ MetaABI: Remove Parameters from Scope <
+
     Params.push_back(Param);
   }
 
@@ -4839,6 +5084,38 @@ Decl *SemaObjC::ActOnMethodDeclaration(
   }
 
   ObjCMethod->setMethodParams(Context, Params, SelectorLocs);
+  // @mulle-objc@ MetaABI: create ParamRecord >
+  // the params are what is used for syntax checks and all the
+  // other good stuff.
+  //
+  // The actual ParameterBlock that is used for code generation
+  // is kept separately. For now we assume that there
+  // is alwas a _param block, except if there are no arguments.
+  // If we have only one parameter fitting into a void *,
+  // we also don't need a _param block, but keep the argument as is
+  //
+  if( getLangOpts().ObjCRuntime.hasMulleMetaABI())
+  {
+     unsigned int   desc;
+
+     desc = metaABIDescription( Params, resultDeclType);
+     if( isVariadic)
+        desc |= MetaABIParamAsStruct;
+
+     if( desc == MetaABIVoidPtrParam)
+     {
+        ParmVarDecl *Param = Params[ 0];
+        // reinstitute as regular parameter
+        S->AddDecl(Param);
+        IdResolver.AddDecl(Param);
+        ObjCMethod->setMetaABIVoidPointerParam( true);
+     }
+     else
+        if( desc)
+           SetMulleObjCParam( ObjCMethod, Sel, &Params, resultDeclType, desc, MethodLoc);
+  }
+  // DONE
+  // @mulle-objc@ MetaABI: create ParamRecord <
   ObjCMethod->setObjCDeclQualifier(
     CvtQTToAstBitMask(ReturnQT.getObjCDeclQualifier()));
 
@@ -4863,6 +5140,22 @@ Decl *SemaObjC::ActOnMethodDeclaration(
     // made visible yet, so it can be overridden by a later
     // user-specified implementation.
     for (ObjCPropertyImplDecl *PropertyImpl : ImpDecl->property_impls()) {
+      // @mulle-objc container adder/setter >
+      if (auto *Remover = PropertyImpl->getRemoverMethodDecl())
+        if (Remover->getSelector() == Sel &&
+            Remover->isInstanceMethod() == ObjCMethod->isInstanceMethod()) {
+          assert(Remover->isSynthesizedAccessorStub() && "autosynth stub expected");
+          PropertyImpl->setRemoverMethodDecl(ObjCMethod);
+          break;
+        }
+      if (auto *Adder = PropertyImpl->getAdderMethodDecl())
+        if (Adder->getSelector() == Sel &&
+            Adder->isInstanceMethod() == ObjCMethod->isInstanceMethod()) {
+          assert(Adder->isSynthesizedAccessorStub() && "autosynth stub expected");
+          PropertyImpl->setAdderMethodDecl(ObjCMethod);
+          break;
+        }
+      // @mulle-objc container adder/setter >
       if (auto *Setter = PropertyImpl->getSetterMethodDecl())
         if (Setter->getSelector() == Sel &&
             Setter->isInstanceMethod() == ObjCMethod->isInstanceMethod()) {

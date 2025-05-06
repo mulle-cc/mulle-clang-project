@@ -1811,6 +1811,10 @@ void X86_64ABIInfo::classify(QualType Ty, uint64_t OffsetBase, Class &Lo,
     } else if (k == BuiltinType::Float128) {
       Lo = SSE;
       Hi = SSEUp;
+    /// @mulle-objc@ uniqueid: add builtin type for PROTOCOL and SEL >
+    } else if (k == BuiltinType::ObjCSel || k == BuiltinType::ObjCProtocol) {
+       Current = Integer;
+    /// @mulle-objc@ uniqueid: add builtin type for PROTOCOL and SEL <      
     } else if (k == BuiltinType::LongDouble) {
       const llvm::fltSemantics *LDF = &getTarget().getLongDoubleFormat();
       if (LDF == &llvm::APFloat::IEEEquad()) {
