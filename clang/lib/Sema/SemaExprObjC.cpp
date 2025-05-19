@@ -3567,7 +3567,8 @@ static void RemoveSelectorFromWarningCache(SemaObjC &S, Expr *Arg) {
 bool SemaObjC::CheckMulleObjCFunctionDefined( Scope *S, SourceLocation Loc, StringRef Name)
 {
    DeclarationName   DN;
-   IdentifierInfo    *II;
+   const IdentifierInfo    *II;
+   ASTContext &Context = getASTContext();
 
    // hacked together without a clue
    II  = &Context.Idents.get( Name);
@@ -3578,8 +3579,8 @@ bool SemaObjC::CheckMulleObjCFunctionDefined( Scope *S, SourceLocation Loc, Stri
    // then use LookupName with this object as first parameter passed by reference
    // TODO: try to make this even more obsure just for C++'s sake
    //
-   LookupResult   Result( *this, DN, Loc, LookupOrdinaryName);
-   LookupName(Result, S, false);
+   LookupResult Result(SemaRef, DN, Loc, Sema::LookupOrdinaryName);
+   SemaRef.LookupName(Result, S, false);
 
    if( Result.getResultKind() == LookupResult::Found)
       return( true);
@@ -5162,12 +5163,12 @@ QualType SemaObjC::FindCompositeObjCPointerType(ExprResult &LHS,
   // And the same for uniqueid_t / PROTOCOL
   if (Context.isObjCProtocolType(LHSTy) &&
       (Context.hasSameType(RHSTy, Context.getObjCPROTOCOLRedefinitionType()))) {
-    RHS = ImpCastExprToType(RHS.get(), LHSTy, CK_BitCast);
+    RHS = SemaRef.ImpCastExprToType(RHS.get(), LHSTy, CK_BitCast);
     return LHSTy;
   }
   if (Context.isObjCProtocolType(RHSTy) &&
       (Context.hasSameType(LHSTy, Context.getObjCPROTOCOLRedefinitionType()))) {
-    LHS = ImpCastExprToType(LHS.get(), RHSTy, CK_BitCast);
+    LHS = SemaRef.ImpCastExprToType(LHS.get(), RHSTy, CK_BitCast);
     return RHSTy;
   }
   /// @mulle-objc@ uniqueid: add builtin type for PROTOCOL <

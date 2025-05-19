@@ -1559,12 +1559,12 @@ public:
    // @mulle-objc@: allow @selector/@protocol as compile-time constant
    // This should only get called if hasConstantSelector is true
 
-   llvm::Constant *VisitObjCSelectorExpr(ObjCSelectorExpr *E, QualType T) {
+   llvm::Constant *VisitObjCSelectorExpr(const ObjCSelectorExpr *E, QualType T) {
         // This must be an @selector initializing an array in a static initializer.
       return( CGM.getObjCRuntime().GenerateConstantSelector(E->getSelector()));
    }
 
-   llvm::Constant *VisitObjCProtocolExpr(ObjCProtocolExpr *E, QualType T) {
+   llvm::Constant *VisitObjCProtocolExpr(const ObjCProtocolExpr *E, QualType T) {
         // This must be an @protocol initializing an array in a static initializer.
       return( CGM.getObjCRuntime().GenerateConstantProtocol(E->getProtocol()));
    }

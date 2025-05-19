@@ -4880,6 +4880,7 @@ unsigned int   SemaObjC::metaABIDescription( SmallVector<ParmVarDecl*, 16> &Para
                                          QualType resultType)
 {
    unsigned int   desc;
+   ASTContext &Context = getASTContext();
 
    desc = 0;
    if( ! resultType->isVoidType())
@@ -4920,6 +4921,7 @@ void   SemaObjC::SetMulleObjCParam( ObjCMethodDecl *ObjCMethod,
 {
    std::string  RecordName;
    QualType     PtrTy;
+   ASTContext &Context = getASTContext();
 
    // - (void *) foo; is ez no parameter or bogus parameter
    if( abiDesc & MetaABIRvalAsStruct)
@@ -4928,7 +4930,7 @@ void   SemaObjC::SetMulleObjCParam( ObjCMethodDecl *ObjCMethod,
       RecordName = "rval." + Sel.getAsString();
       IdentifierInfo  *RecordID = &Context.Idents.get( RecordName);
 
-      RecordDecl  *RD = RecordDecl::Create( Context, TagTypeKind::Struct, CurContext, Loc, Loc, RecordID);
+      RecordDecl  *RD = RecordDecl::Create( Context, TagTypeKind::Struct, SemaRef.CurContext, Loc, Loc, RecordID);
       FieldDecl   *FD;
 
       FD = FieldDecl::Create( Context, RD,
@@ -4943,8 +4945,8 @@ void   SemaObjC::SetMulleObjCParam( ObjCMethodDecl *ObjCMethod,
       RD->completeDefinition();
 
       // some voodoo, blindly copied
-      AddAlignmentAttributesForRecord(RD);
-      AddMsStructLayoutForRecord(RD);
+      SemaRef.AddAlignmentAttributesForRecord(RD);
+      SemaRef.AddMsStructLayoutForRecord(RD);
       ObjCMethod->setRvalRecord( RD);
    }
 
@@ -4955,7 +4957,7 @@ void   SemaObjC::SetMulleObjCParam( ObjCMethodDecl *ObjCMethod,
    RecordName = "p." + Sel.getAsString();
    IdentifierInfo  *RecordID = &Context.Idents.get( RecordName);
 
-   RecordDecl  *RD = RecordDecl::Create( Context, TagTypeKind::Struct, CurContext, Loc, Loc, RecordID);
+   RecordDecl  *RD = RecordDecl::Create( Context, TagTypeKind::Struct, SemaRef.CurContext, Loc, Loc, RecordID);
 
    for (unsigned i = 0, e = Params->size(); i != e; ++i)
    {
@@ -4975,8 +4977,8 @@ void   SemaObjC::SetMulleObjCParam( ObjCMethodDecl *ObjCMethod,
    RD->completeDefinition();
 
    // some voodoo, blindly copied
-   AddAlignmentAttributesForRecord(RD);
-   AddMsStructLayoutForRecord(RD);
+   SemaRef.AddAlignmentAttributesForRecord(RD);
+   SemaRef.AddMsStructLayoutForRecord(RD);
 
    ObjCMethod->setParamRecord( RD);
 
@@ -5063,7 +5065,7 @@ Decl *SemaObjC::ActOnMethodDeclaration(
     {
        S->AddDecl(Param);
        // Scope, IdResolver ??
-       IdResolver.AddDecl(Param);
+        SemaRef.IdResolver.AddDecl(Param);
     }
     // @mulle-objc@ MetaABI: Remove Parameters from Scope <
 
@@ -5107,7 +5109,7 @@ Decl *SemaObjC::ActOnMethodDeclaration(
         ParmVarDecl *Param = Params[ 0];
         // reinstitute as regular parameter
         S->AddDecl(Param);
-        IdResolver.AddDecl(Param);
+        SemaRef.IdResolver.AddDecl(Param);
         ObjCMethod->setMetaABIVoidPointerParam( true);
      }
      else

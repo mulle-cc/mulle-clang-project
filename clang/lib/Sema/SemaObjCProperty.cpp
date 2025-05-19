@@ -11,6 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "clang/Sema/SemaInternal.h"
 #include "clang/AST/ASTMutationListener.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/ExprCXX.h"
@@ -21,6 +22,9 @@
 #include "clang/Sema/Initialization.h"
 #include "clang/Sema/SemaObjC.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringRef.h"
 
 using namespace clang;
 
@@ -192,7 +196,7 @@ Decl *SemaObjC::ActOnProperty(Scope *S, SourceLocation AtLoc,
                       !(Attributes & ObjCPropertyAttribute::kind_readonly));
 
   // @mulle-objc@ >>>language: property is always nonatomic
-  if( getLangOpts().ObjCRuntime.hasMulleMetaABI())
+  if( SemaRef.Context.getLangOpts().ObjCRuntime.hasMulleMetaABI())
   {
      Attributes |= ObjCPropertyAttribute::kind_nonatomic;
   }
@@ -201,22 +205,22 @@ Decl *SemaObjC::ActOnProperty(Scope *S, SourceLocation AtLoc,
   // Proceed with constructing the ObjCPropertyDecls.
   ObjCContainerDecl *ClassDecl = cast<ObjCContainerDecl>(SemaRef.CurContext);
   ObjCPropertyDecl *Res = nullptr;
-  if (ObjCCategoryDecl *CDecl = dyn_cast<ObjCCategoryDecl>(ClassDecl)) {
-    if (CDecl->IsClassExtension()) {
-      Res = HandlePropertyInClassExtension(S, AtLoc, LParenLoc,
-                                           FD,
-                                           GetterSel, ODS.getGetterNameLoc(),
-                                           SetterSel, ODS.getSetterNameLoc(),
-// @mulle-objc@ new property attribute container >
-                                           AdderSel, ODS.getAdderNameLoc(),
-                                           RemoverSel, ODS.getRemoverNameLoc(),
-// @mulle-objc@ new property attribute container <
+  if (ObjCCategoryDecl *CDecl = dyn_cast<ObjCCategoryDecl>(ClassDecl)) {      if (CDecl->IsClassExtension()) {
+        Res = HandlePropertyInClassExtension(S, AtLoc, LParenLoc,
+                                             FD,
+                                             GetterSel, ODS.getGetterNameLoc(),
+                                             SetterSel, ODS.getSetterNameLoc(),
+// @mulle-objc@ new property accessors >
+                                             AdderSel, ODS.getAdderNameLoc(),
+                                             RemoverSel, ODS.getRemoverNameLoc(),
+// @mulle-objc@ new property accessors <
                                            isReadWrite, Attributes,
                                            ODS.getPropertyAttributes(),
                                            T, TSI, MethodImplKind);
-      if (!Res)
-        return nullptr;
-    }
+        if (!Res)
+          return nullptr;
+      }
+
   }
 
   if (!Res) {
@@ -232,20 +236,18 @@ Decl *SemaObjC::ActOnProperty(Scope *S, SourceLocation AtLoc,
                              MethodImplKind);
     if (lexicalDC)
       Res->setLexicalDeclContext(lexicalDC);
-  }
-
-  // @mulle-objc@ language: introduce ivar for property at declaration time >
-  if( Context.getLangOpts().ObjCRuntime.hasMulleMetaABI())
+  }  // @mulle-objc@ language: introduce ivar for property at declaration time >
+  if( SemaRef.Context.getLangOpts().ObjCRuntime.hasMulleMetaABI())
   {
      ObjCIvarDecl       *Ivar;
      ObjCInterfaceDecl  *ClassDeclared;
-
+  
      //
      // can only do this for classes not protocols or categories
      //
      if (ObjCInterfaceDecl *CDecl = dyn_cast<ObjCInterfaceDecl>(ClassDecl))
      {
-        Ivar = CDecl->lookupInstanceVariableOfProperty( Context, Res->getIdentifier(), ClassDeclared);
+        Ivar = CDecl->lookupInstanceVariableOfProperty( SemaRef.Context, Res->getIdentifier(), ClassDeclared);
         //
         // if marked dynamic, do not auto-add an ivar
         // if there is one already, we could warn, but its OK
@@ -253,15 +255,15 @@ Decl *SemaObjC::ActOnProperty(Scope *S, SourceLocation AtLoc,
         if( ! Ivar && ! (Res->getPropertyAttributesAsWritten() & ObjCPropertyAttribute::kind_dynamic))
         {
            // create an Ivar and add it
-           Ivar = ObjCIvarDecl::Create( Context, CDecl,
-                                       AtLoc ,LParenLoc, Res->getDefaultSynthIvarName(Context),
+           Ivar = ObjCIvarDecl::Create( SemaRef.Context, CDecl,
+                                       AtLoc ,LParenLoc, Res->getDefaultSynthIvarName(SemaRef.Context),
                                        Res->getType(), /*Dinfo=*/nullptr,
                                        ObjCIvarDecl::Protected,
                                        (Expr *)nullptr, true);
-           if (RequireNonAbstractType(AtLoc,
+           if (SemaRef.RequireNonAbstractType(AtLoc,
                                       Res->getType(),
                                       diag::err_abstract_type_in_decl,
-                                      AbstractSynthesizedIvarType))
+                                      Sema::AbstractSynthesizedIvarType))
            {
               Diag( Res->getLocation(), diag::note_property_declare);
               Ivar->setInvalidDecl();
@@ -269,11 +271,12 @@ Decl *SemaObjC::ActOnProperty(Scope *S, SourceLocation AtLoc,
            CDecl->addDecl(Ivar);
            CDecl->makeDeclVisibleInContext(Ivar);
         }
-
+  
         Res->setPropertyIvarDecl( Ivar);
      }
   }
   // @mulle-objc@ language: introduce ivar for property at declaration time <
+
 
   // Validate the attributes on the @property.
   CheckObjCPropertyAttributes(Res, AtLoc, Attributes,
@@ -485,16 +488,17 @@ static void checkAtomicPropertyMismatch(Sema &S,
 ObjCPropertyDecl *SemaObjC::HandlePropertyInClassExtension(
     Scope *S, SourceLocation AtLoc, SourceLocation LParenLoc,
     FieldDeclarator &FD, Selector GetterSel, SourceLocation GetterNameLoc,
-    Selector SetterSel, SourceLocation SetterNameLoc, const bool isReadWrite,
+    Selector SetterSel, SourceLocation SetterNameLoc, 
 // @mulle-objc@ new property attributes container >
-                                     Selector AdderSel,
-                                     SourceLocation AdderNameLoc,
-                                     Selector RemoverSel,
-                                     SourceLocation RemoverNameLoc,
+    Selector AdderSel,
+    SourceLocation AdderNameLoc,
+    Selector RemoverSel,
+    SourceLocation RemoverNameLoc,
 // @mulle-objc@ new property attributes container <
-  ObjCCategoryDecl *CDecl = cast<ObjCCategoryDecl>(SemaRef.CurContext);
-    TypeSourceInfo *TSI, tok::ObjCKeywordKind MethodImplKind) {
+    const bool isReadWrite,
     unsigned &Attributes, const unsigned AttributesAsWritten, QualType T,
+    TypeSourceInfo *TSI, tok::ObjCKeywordKind MethodImplKind) {    
+  ObjCCategoryDecl *CDecl = cast<ObjCCategoryDecl>(SemaRef.CurContext);
   // Diagnose if this property is already in continuation class.
   DeclContext *DC = SemaRef.CurContext;
   const IdentifierInfo *PropertyId = FD.D.getIdentifier();
@@ -646,13 +650,14 @@ ObjCPropertyDecl *SemaObjC::CreatePropertyDecl(
     Scope *S, ObjCContainerDecl *CDecl, SourceLocation AtLoc,
     SourceLocation LParenLoc, FieldDeclarator &FD, Selector GetterSel,
     SourceLocation GetterNameLoc, Selector SetterSel,
-    SourceLocation SetterNameLoc, const bool isReadWrite,
+    SourceLocation SetterNameLoc,
 // @mulle-objc@ new property attributes container >
                                            Selector AdderSel,
                                            SourceLocation AdderNameLoc,
                                            Selector RemoverSel,
                                            SourceLocation RemoverNameLoc,
 // @mulle-objc@ new property attributes container <
+   const bool isReadWrite,
     const unsigned Attributes, const unsigned AttributesAsWritten, QualType T,
     TypeSourceInfo *TInfo, tok::ObjCKeywordKind MethodImplKind,
     DeclContext *lexicalDC) {
@@ -1356,7 +1361,7 @@ Decl *SemaObjC::ActOnPropertyImplDecl(
     // @synthesize
     // @mulle-objc@ language: fix lookup of ivar variable for properties >
     ObjCInterfaceDecl *ClassDeclared;
-    if( Context.getLangOpts().ObjCRuntime.hasMulleMetaABI())
+    if( SemaRef.Context.getLangOpts().ObjCRuntime.hasMulleMetaABI())
     {
       if( property->getPropertyAttributes() & ObjCPropertyAttribute::kind_dynamic)
       {
@@ -2653,7 +2658,7 @@ static void AddPropertyAttrs(Sema &S, ObjCMethodDecl *PropertyMethod,
       if( auto *AnnotateAttr = dyn_cast<clang::AnnotateAttr>(A))
       {
          llvm::StringRef Annotation = AnnotateAttr->getAnnotation();
-         if( Annotation.startswith("objc_user_"))
+         if( Annotation.starts_with("objc_user_"))
          {
             PropertyMethod->addAttr(A->clone(S.Context));
          }
@@ -2666,10 +2671,12 @@ static void AddPropertyAttrs(Sema &S, ObjCMethodDecl *PropertyMethod,
 
 // @mulle-objc@ new property attribute container >
 
-void  Sema::VerifyPropertyNonGetterMethod( ObjCPropertyDecl *property,
+void  SemaObjC::VerifyPropertyNonGetterMethod( ObjCPropertyDecl *property,
                                            ObjCMethodDecl *method,
                                            std::string name)
 {
+  ASTContext &Context = getASTContext();
+
   if (!property->isReadOnly() && method) {
     if (Context.getCanonicalType(method->getReturnType()) !=
         Context.VoidTy)
@@ -2688,12 +2695,13 @@ void  Sema::VerifyPropertyNonGetterMethod( ObjCPropertyDecl *property,
 }
 
 
-ObjCMethodDecl  *Sema::CreatePropertyNonGetterMethod( ObjCContainerDecl *CD,
+ObjCMethodDecl  *SemaObjC::CreatePropertyNonGetterMethod( ObjCContainerDecl *CD,
                                                       ObjCPropertyDecl *property,
                                                       Selector Selector,
                                                       bool isSetter)
 {
    ObjCMethodDecl  *Method;
+  ASTContext &Context = getASTContext();
 
    // No instance/class method of same name as property setter name was
    // found.
@@ -2748,14 +2756,14 @@ ObjCMethodDecl  *Sema::CreatePropertyNonGetterMethod( ObjCContainerDecl *CD,
    //
    // @mulle-objc@ MetaABI: fix up setter parameter if needed
    //
-   if( Context.getLangOpts().ObjCRuntime.hasMulleMetaABI())
+   if( SemaRef.Context.getLangOpts().ObjCRuntime.hasMulleMetaABI())
    {
       if( Context.typeNeedsMetaABIAlloca( property->getType()))
       {
          SmallVector<ParmVarDecl*, 16> Params;
          Params.push_back(Argument);
 
-         ObjC().SetMulleObjCParam( Method, Selector, &Params, property->getType(), MetaABIParamAsStruct, Loc);
+         SemaRef.ObjC().SetMulleObjCParam( Method, Selector, &Params, property->getType(), MetaABIParamAsStruct, Loc);
       }
       else
       {
@@ -2763,7 +2771,7 @@ ObjCMethodDecl  *Sema::CreatePropertyNonGetterMethod( ObjCContainerDecl *CD,
       }
    }
 
-   AddPropertyAttrs(*this, Method, property);
+   AddPropertyAttrs(SemaRef, Method, property);
 
    if (property->isDirectProperty())
       Method->addAttr(ObjCDirectAttr::CreateImplicit(Context, Loc));
@@ -2875,7 +2883,7 @@ void SemaObjC::ProcessPropertyDecl(ObjCPropertyDecl *property) {
     }
   }
   // @mulle-objc@ new property attribute container >
-  VerifyPropertyNonGetterMethod( property, SetterMethod, "setter");
+  SemaObjC::VerifyPropertyNonGetterMethod( property, SetterMethod, "setter");
 
   bool IsContainerProperty = property->isContainer();
 
@@ -2959,12 +2967,12 @@ void SemaObjC::ProcessPropertyDecl(ObjCPropertyDecl *property) {
     //
     // @mulle-objc@ MetaABI: fix up getter parameter if needed >
     //
-    if( Context.getLangOpts().ObjCRuntime.hasMulleMetaABI())
+    if( getLangOpts().ObjCRuntime.hasMulleMetaABI())
     {
        if( Context.typeNeedsMetaABIAlloca( resultTy))
        {
           SmallVector<ParmVarDecl*, 16> Params;
-          ObjC().SetMulleObjCParam( GetterMethod, property->getSetterName(), &Params, resultTy, Sema::MetaABIRvalAsStruct, Loc);
+          SemaRef.ObjC().SetMulleObjCParam( GetterMethod, property->getSetterName(), &Params, resultTy, SemaObjC::MetaABIRvalAsStruct, Loc);
        }
     }
     // @mulle-objc@ MetaABI: fix up getter parameter if needed <
@@ -3000,7 +3008,7 @@ void SemaObjC::ProcessPropertyDecl(ObjCPropertyDecl *property) {
     if (!SetterMethod) {
       // @mulle-objc@ MetaABI: use our code to create a setter >
       // a huge piece of code is reused via a function
-      SetterMethod = CreatePropertyNonGetterMethod( CD, property, property->getSetterName(), true);
+      SetterMethod = SemaObjC::CreatePropertyNonGetterMethod( CD, property, property->getSetterName(), true);
       // @mulle-objc@ MetaABI: use our code to create a setter <
     } else
       // A user declared setter will be synthesize when @synthesize of
@@ -3015,7 +3023,7 @@ void SemaObjC::ProcessPropertyDecl(ObjCPropertyDecl *property) {
     if( IsContainerProperty)
     {
       if (!AdderMethod) {
-        AdderMethod = CreatePropertyNonGetterMethod( CD, property, property->getAdderName(), false);
+        AdderMethod = SemaObjC::CreatePropertyNonGetterMethod( CD, property, property->getAdderName(), false);
       } else
         // A user declared setter will be synthesize when @synthesize of
         // the property with the same name is seen in the @implementation
@@ -3023,7 +3031,7 @@ void SemaObjC::ProcessPropertyDecl(ObjCPropertyDecl *property) {
       property->setAdderMethodDecl(AdderMethod);
 
       if (!RemoverMethod) {
-        RemoverMethod = CreatePropertyNonGetterMethod( CD, property, property->getRemoverName(), false);
+        RemoverMethod = SemaObjC::CreatePropertyNonGetterMethod( CD, property, property->getRemoverName(), false);
       } else
         // A user declared setter will be synthesize when @synthesize of
         // the property with the same name is seen in the @implementation
@@ -3081,9 +3089,9 @@ void SemaObjC::ProcessPropertyDecl(ObjCPropertyDecl *property) {
     CheckObjCMethodOverrides(SetterMethod, CurrentClass, SemaObjC::RTC_Unknown);
   // @mulle-objc@ new property attribute container >
   if (AdderMethod)
-    CheckObjCMethodOverrides(AdderMethod, CurrentClass, Sema::RTC_Unknown);
+    CheckObjCMethodOverrides(AdderMethod, CurrentClass, SemaObjC::RTC_Unknown);
   if (RemoverMethod)
-    CheckObjCMethodOverrides(RemoverMethod, CurrentClass, Sema::RTC_Unknown);
+    CheckObjCMethodOverrides(RemoverMethod, CurrentClass, SemaObjC::RTC_Unknown);
   // @mulle-objc@ new property attribute container >
 }
 

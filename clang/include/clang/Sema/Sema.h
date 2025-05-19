@@ -3700,6 +3700,9 @@ public:
   void ActOnDocumentableDecls(ArrayRef<Decl *> Group);
 
   // @mulle-objc@ >> specific methods for parameters
+  ExprResult GetMulle_paramExpr(Scope *S, SourceLocation Loc, StringRef Name);
+  ExprResult GetMulle_paramExprAsType( QualType type, Scope *S, SourceLocation Loc, StringRef Name);
+
   ExprResult GetMulle_paramFieldExpr(FieldDecl *FD, Scope *S, SourceLocation NameLoc);
   // @mulle-objc@ << specific methods for parameters
 

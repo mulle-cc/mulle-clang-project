@@ -356,9 +356,6 @@ public:
                                           bool MethodDefinition);
 
   // @mulle-objc@ >> specific methods for parameters
-  ExprResult GetMulle_paramExpr(Scope *S, SourceLocation Loc, StringRef Name);
-  ExprResult GetMulle_paramExprAsType( QualType type, Scope *S, SourceLocation Loc, StringRef Name);
-
   int   CheckSelectorForAAM( Selector Sel,
                              ObjCMethodDecl *Method,
                              QualType ReceiverType,
@@ -970,6 +967,17 @@ public:
   /// setters and getters as needed.
   /// \param property The property declaration being processed
   void ProcessPropertyDecl(ObjCPropertyDecl *property);
+
+// @mulle-objc >> adder + remover
+  void  VerifyPropertyNonGetterMethod( ObjCPropertyDecl *property,
+                                       ObjCMethodDecl *method,
+                                       std::string name);
+
+  ObjCMethodDecl  *CreatePropertyNonGetterMethod( ObjCContainerDecl *CD,
+                                                  ObjCPropertyDecl *property,
+                                                  Selector Selector,
+                                                  bool isSetter);
+// @mulle-objc << adder + remover
 
   Decl *ActOnProperty(Scope *S, SourceLocation AtLoc, SourceLocation LParenLoc,
                       FieldDeclarator &FD, ObjCDeclSpec &ODS,
