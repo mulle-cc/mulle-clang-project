@@ -233,7 +233,7 @@ llvm::Value *CodeGenFunction::EmitObjCCollectionLiteral(const Expr *E,
   // Args.add(RValue::get(Objects.getPointer()), ArgQT);
 
   Address firstObject = Builder.CreateConstArrayGEP(Objects, 0);
-  Args.add(RValue::get(firstObject.getPointer()), ArgQT);
+  Args.add(RValue::get(firstObject.getBasePointer()), ArgQT);
   // @mulle-objc@ >> MetaABI: literal args code, fix original code 1 <
   if (DLE) {
     argDecl = *PI++;
@@ -241,7 +241,7 @@ llvm::Value *CodeGenFunction::EmitObjCCollectionLiteral(const Expr *E,
     // @mulle-objc@ >> MetaABI: literal args code, fix original code 2 >
     // Args.add(RValue::get(Keys.getPointer()), ArgQT);
     Address firstKey = Builder.CreateConstArrayGEP(Keys, 0);
-    Args.add(RValue::get(firstKey.getPointerTo()), ArgQT);
+    Args.add(RValue::get(firstKey.getBasePointer()), ArgQT);
   // @mulle-objc@ >> MetaABI: literal args code, fix original code 2 <
   }
   argDecl = *PI;
@@ -2559,14 +2559,16 @@ void CodeGenFunction::EmitObjCForCollectionStmt(const ObjCForCollectionStmt &S){
   // @mulle-objc@ MetaABI: needed to change fastenumeration parameters >
   if( getContext().getLangOpts().ObjCRuntime.hasMulleMetaABI())
   {
-     CountRV = CGM.getObjCRuntime().EmitFastEnumeratorCall( *this,
-                                                           ReturnValueSlot(),
-                                                           getContext().getNSUIntegerType(),
-                                                           FastEnumSel,
-                                                           Collection,
-                                                           StatePtr.getPointerTo(), StateTy,getPointerTo
-                                                           ItemsPtr.getPointerTo(), ItemsTy,
-                                                           Count, getContext().getNSUIntegerType());
+     CGObjCRuntime &Runtime = CGM.getObjCRuntime();
+
+     CountRV = Runtime.EmitFastEnumeratorCall( *this,
+                                                ReturnValueSlot(),
+                                                getContext().getNSUIntegerType(),
+                                                FastEnumSel,
+                                                Collection,
+                                                StatePtr.getBasePointer(), StateTy,
+                                                ItemsPtr.getBasePointer(), ItemsTy,
+                                                Count, getContext().getNSUIntegerType());
   }
   else
   {
@@ -2791,8 +2793,8 @@ void CodeGenFunction::EmitObjCForCollectionStmt(const ObjCForCollectionStmt &S){
                                                            getContext().getNSUIntegerType(),
                                                            FastEnumSel,
                                                            Collection,
-                                                           StatePtr.getPointerTo(), StateTy,
-                                                           ItemsPtr.getPointerTo(), ItemsTy,
+                                                           StatePtr.getBasePointer(), StateTy,
+                                                           ItemsPtr.getBasePointer(), ItemsTy,
                                                            Count, getContext().getNSUIntegerType());
   }
   else

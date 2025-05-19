@@ -417,12 +417,12 @@ static FullSourceLoc ConvertBackendLocation(const llvm::SMDiagnostic &D,
     case llvm::DS_Remark:                                                      \
       DiagID = diag::remark_fe_##GroupName;                                    \
       break;                                                                   \
-    // ... existing code ...
     case llvm::DS_Note:                                                        \
       DiagID = diag::note_fe_##GroupName;                                      \
       break;                                                                   \
     }                                                                          \
   } while (false)
+
 
 void BackendConsumer::SrcMgrDiagHandler(const llvm::DiagnosticInfoSrcMgr &DI) {
   const llvm::SMDiagnostic &D = DI.getSMDiag();
