@@ -1905,6 +1905,16 @@ static PredefinedIdentKind getPredefinedExprKind(tok::TokenKind Kind) {
     return PredefinedIdentKind::Func; // [C99 6.4.2.2]
   case tok::kw___FUNCTION__:
     return PredefinedIdentKind::Function;
+  // @mulle-objc@ > add __OBJC_CLASS__ keyword
+  case tok::kw___OBJC_CLASS__:            
+    return PredefinedIdentKind::ObjCClass;  // [MULLE/ALL]
+  case tok::kw___OBJC_CATEGORY__:        
+    return PredefinedIdentKind::ObjCCategory;  // [MULLE/ALL]
+  case tok::kw___MULLE_OBJC_CLASSID__:    
+    return PredefinedIdentKind::MulleObjCClassid; // [MULLE/ALL]
+  case tok::kw___MULLE_OBJC_CATEGORYID__: 
+    return PredefinedIdentKind::MulleObjCCategoryid; // [MULLE/ALL]
+  // @mulle-objc@ < add __OBJC_CLASS__ keyword    
   case tok::kw___FUNCDNAME__:
     return PredefinedIdentKind::FuncDName; // [MS]
   case tok::kw___FUNCSIG__:

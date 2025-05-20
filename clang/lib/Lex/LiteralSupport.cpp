@@ -446,6 +446,12 @@ bool clang::isFunctionLocalStringLiteralMacro(tok::TokenKind K,
   return LO.MicrosoftExt &&
          (K == tok::kw___FUNCTION__ || K == tok::kw_L__FUNCTION__ ||
           K == tok::kw___FUNCSIG__ || K == tok::kw_L__FUNCSIG__ ||
+          // @mulle-objc@      >  add __OBJC_CLASS__ keyword
+          K == tok::kw___OBJC_CLASS__ ||
+          K == tok::kw___OBJC_CATEGORY__ ||
+          K == tok::kw___MULLE_OBJC_CLASSID__ ||
+          K == tok::kw___MULLE_OBJC_CATEGORYID__ ||
+          // @mulle-objc@ < add __FUNCDNAME__ keyword
           K == tok::kw___FUNCDNAME__);
 }
 
