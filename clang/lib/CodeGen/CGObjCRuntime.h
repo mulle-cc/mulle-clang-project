@@ -401,12 +401,12 @@ public:
       : CallInfo(callInfo), MessengerType(messengerType) {}
   };
 
-  // @mulle-obj@ add isSuper to getMessageSendInfo >
+  // @mulle-objc@ add isSuper to getMessageSendInfo >
   MessageSendInfo getMessageSendInfo(const ObjCMethodDecl *method,
                                      QualType resultType,
                                      CallArgList &callArgs,
                                      bool isSuper = false);
-  // @mulle-obj@ add isSuper to getMessageSendInfo <
+  // @mulle-objc@ add isSuper to getMessageSendInfo <
   bool canMessageReceiverBeNull(CodeGenFunction &CGF,
                                 const ObjCMethodDecl *method,
                                 bool isSuper,
@@ -436,9 +436,9 @@ public:
 //TODO: This should include some way of selecting which runtime to target.
 CGObjCRuntime *CreateGNUObjCRuntime(CodeGenModule &CGM);
 CGObjCRuntime *CreateMacObjCRuntime(CodeGenModule &CGM);
-// @mulle-obj@ add CreateMulleObjCRuntime >
+// @mulle-objc@ add CreateMulleObjCRuntime >
 CGObjCRuntime *CreateMulleObjCRuntime(CodeGenModule &CGM);
-// @mulle-obj@ add CreateMulleObjCRuntime <
+// @mulle-objc@ add CreateMulleObjCRuntime <
 }
 }
 #endif

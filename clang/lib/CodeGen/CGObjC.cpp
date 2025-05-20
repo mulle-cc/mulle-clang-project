@@ -1138,7 +1138,8 @@ CodeGen::RValue   CodeGenFunction::EmitMetaABIReadReturnValue( const ObjCMethodD
       if( ! Dst.isValid())
       {
          // Save the stack.
-         llvm::Function *F = CGM.getIntrinsic(llvm::Intrinsic::stacksave);
+         llvm::Type *StackSaveRetTy = llvm::PointerType::get(llvm::Type::getInt8Ty(CGM.getLLVMContext()), 0);       
+         llvm::Function *F = CGM.getIntrinsic(llvm::Intrinsic::stacksave, {StackSaveRetTy});
          stackpointer      = Builder.CreateCall(F, {}, "inalloca.save");
 
          // alloca some memory
@@ -1177,7 +1178,8 @@ CodeGen::RValue   CodeGenFunction::EmitMetaABIReadReturnValue( const ObjCMethodD
 
       if( stackpointer)
       {
-         llvm::Function *F = CGM.getIntrinsic(llvm::Intrinsic::stackrestore);
+         llvm::Type *StackPointerTy = llvm::PointerType::get(llvm::Type::getInt8Ty(CGM.getLLVMContext()), 0);
+         llvm::Function *F = CGM.getIntrinsic(llvm::Intrinsic::stackrestore, {StackPointerTy});
          Builder.CreateCall(F, stackpointer);
       }
    }
