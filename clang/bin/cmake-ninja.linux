@@ -3,6 +3,17 @@
 [ "${TRACE}" = 'YES' ] && set -x && : "$0" "$@"
 [ "${DUMP_ENV}" = 'YES' ] && env | sort >&2
 
+# by default use sudo on linux here
+case "${INSTALL_SUDO}" in
+   [Nn*]|[Ff]*)
+      unset INSTALL_SUDO
+   ;;
+
+   "")
+      INSTALL_SUDO=sudo
+   ;;
+esac
+
 
 # It's assumed that the mono repo is unpacked in the current directory as
 # mulle-clang-project. Lets build it in 'build'.
@@ -57,7 +68,7 @@ cmake \
    -DLLVM_BUILD_LLVM_DYLIB='ON' \
    -DLLVM_BUILD_TESTS="OFF"  \
    -DLLVM_ENABLE_PROJECTS="clang;compiler-rt" \
-   -DLLVM_ENABLE_RUNTIMES="libcxxabi;libcxx"  \
+   -DLLVM_ENABLE_RUNTIMES="libcxxabi;libcxx;libunwind"  \
    -DLLVM_LINK_LLVM_DYLIB=ON \
    -DLLVM_PARALLEL_LINK_JOBS=$LINK_JOBS \
    -DLLVM_TARGETS_TO_BUILD="X86;ARM;AArch64" \

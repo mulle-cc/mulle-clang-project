@@ -3392,7 +3392,7 @@ static void encodeTypeForFunctionPointerAuth(const ASTContext &Ctx,
 
     // @mulle-objc@ >> hack (check this)
     case BuiltinType::ObjCProtocol:
-      OS << "<objc_object>";
+      OS << "<objc_protocol>";
       return;
     // @mulle-objc@ << hack (check this)
 

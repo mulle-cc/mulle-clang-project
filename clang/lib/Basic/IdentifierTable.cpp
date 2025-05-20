@@ -802,7 +802,7 @@ std::string SelectorTable::getPropertyNameFromSetterSelector(Selector Sel) {
   }
 // @mulle-objc@ setter name mulleFoo, setter = mulleSetFoo: <
 
-  assert(Name.startswith("set") && "invalid setter name");
+  assert(Name.starts_with("set") && "invalid setter name");
   return (Twine(toLowercase(Name[3])) + Name.drop_front(4)).str();
 }
 
@@ -843,7 +843,7 @@ std::string SelectorTable::getPropertyNameFromAdderSelector(Selector Sel) {
   }
 // @mulle-objc@ setter name mulleFoo, setter = mulleSetFoo: <
 
-  assert(Name.startswith("addTo") && "invalid adder name");
+  assert(Name.starts_with("addTo") && "invalid adder name");
   return (Twine(toLowercase(Name[5])) + Name.drop_front(6)).str();
 }
 
@@ -881,7 +881,7 @@ std::string SelectorTable::getPropertyNameFromRemoverSelector(Selector Sel) {
     return (Twine(toLowercase(Name[15])) + Name.drop_front(16)).str();
   }
 // @mulle-objc@ setter name mulleFoo, setter = mulleSetFoo: <
-  assert(Name.startswith("removeFrom") && "invalid remover name");
+  assert(Name.starts_with("removeFrom") && "invalid remover name");
   return (Twine(toLowercase(Name[10])) + Name.drop_front(11)).str();
 }
 // @mulle-objc@ new property attribute container <

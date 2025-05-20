@@ -932,7 +932,8 @@ llvm::Value   *CodeGenFunction::GetMetaABIParamAddressLValue( const Decl *FuncDe
    recordTy    = CGM.getContext().getTagDeclType( RD);
    recordPtrTy = CGM.getContext().getPointerType( recordTy);
    llvmRecType = CGM.getTypes().ConvertTypeForMem( recordTy);
-   llvmPointerType = llvmRecType->getPointerTo();
+   llvmPointerType = llvm::PointerType::get(llvmRecType, 0);
+   // llvmPointerType = llvmRecType->getPointerTo();
 
    auto it = LocalDeclMap.find( MD->getParamDecl());
    CodeGen::Address  param = it->getSecond();
@@ -1071,7 +1072,9 @@ void   CodeGenFunction::EmitMetaABIWriteReturnValue( const Decl *FuncDecl, const
          auto RVType = RV->getType();
          alignment = CGM.getContext().getTypeAlignInChars( RVType);
          auto llvmType = getTypes().ConvertTypeForMem( RVType); //->getPointerTo();
-         auto llvmPtrType = llvmType->getPointerTo();
+         // auto llvmPtrType = llvmType->getPointerTo();
+         auto llvmPtrType = llvm::PointerType::get(llvmType, 0);
+
          paramAddr = Builder.CreateBitCast( Builder.CreateLoad( param, "_param.rval"), llvmPtrType);
 
          EmitAggExpr(RV, AggValueSlot::forAddr( CodeGen::Address( paramAddr, llvmType, alignment),

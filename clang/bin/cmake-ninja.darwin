@@ -17,7 +17,7 @@ cmake \
    -DLLVM_BUILD_LLVM_DYLIB='ON' \
    -DLLVM_BUILD_TESTS="OFF"  \
    -DLLVM_ENABLE_PROJECTS="clang" \
-   -DLLVM_ENABLE_RUNTIMES="libcxxabi;libcxx"  \
+   -DLLVM_ENABLE_RUNTIMES="libcxxabi;libcxx;libunwind"  \
    -DLLVM_LINK_LLVM_DYLIB=ON \
    -DLLVM_PARALLEL_LINK_JOBS=4 \
 \

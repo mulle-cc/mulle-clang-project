@@ -236,7 +236,8 @@ Decl *SemaObjC::ActOnProperty(Scope *S, SourceLocation AtLoc,
                              MethodImplKind);
     if (lexicalDC)
       Res->setLexicalDeclContext(lexicalDC);
-  }  // @mulle-objc@ language: introduce ivar for property at declaration time >
+  }  
+  // @mulle-objc@ language: introduce ivar for property at declaration time >
   if( SemaRef.Context.getLangOpts().ObjCRuntime.hasMulleMetaABI())
   {
      ObjCIvarDecl       *Ivar;

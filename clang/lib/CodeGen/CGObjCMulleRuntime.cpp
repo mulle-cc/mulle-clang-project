@@ -534,7 +534,8 @@ namespace {
       /// GcReadWeakFn -- LLVM objc_read_weak (id *src) function.
       llvm::FunctionCallee getGcReadWeakFn() {
          // id objc_read_weak (id *)
-         llvm::Type *args[] = { ObjectPtrTy->getPointerTo() };
+         // llvm::Type *args[] = { ObjectPtrTy->getPointerTo() };
+         llvm::Type *args[] = { llvm::PointerType::get(ObjectPtrTy, 0) };
          llvm::FunctionType *FTy =
          llvm::FunctionType::get(ObjectPtrTy, args, false);
          return CGM.CreateRuntimeFunction(FTy, "mulle_objc_read_weak");
@@ -543,7 +544,8 @@ namespace {
       /// GcAssignWeakFn -- LLVM objc_assign_weak function.
       llvm::FunctionCallee getGcAssignWeakFn() {
          // id objc_assign_weak (id, id *)
-         llvm::Type *args[] = { ObjectPtrTy, ObjectPtrTy->getPointerTo() };
+         // llvm::Type *args[] = { ObjectPtrTy, ObjectPtrTy->getPointerTo() };
+         llvm::Type *args[] = { ObjectPtrTy, llvm::PointerType::get(ObjectPtrTy, 0) };
          llvm::FunctionType *FTy =
          llvm::FunctionType::get(ObjectPtrTy, args, false);
          return CGM.CreateRuntimeFunction(FTy, "mulle_objc_assign_weak");
@@ -552,7 +554,8 @@ namespace {
       /// GcAssignGlobalFn -- LLVM objc_assign_global function.
       llvm::FunctionCallee getGcAssignGlobalFn() {
          // id objc_assign_global(id, id *)
-         llvm::Type *args[] = { ObjectPtrTy, ObjectPtrTy->getPointerTo() };
+         // llvm::Type *args[] = { ObjectPtrTy, ObjectPtrTy->getPointerTo() };
+         llvm::Type *args[] = { ObjectPtrTy, llvm::PointerType::get(ObjectPtrTy, 0) };
          llvm::FunctionType *FTy =
          llvm::FunctionType::get(ObjectPtrTy, args, false);
          return CGM.CreateRuntimeFunction(FTy, "mulle_objc_assign_global");
@@ -561,7 +564,8 @@ namespace {
       /// GcAssignThreadLocalFn -- LLVM objc_assign_threadlocal function.
       llvm::FunctionCallee getGcAssignThreadLocalFn() {
          // id objc_assign_threadlocal(id src, id * dest)
-         llvm::Type *args[] = { ObjectPtrTy, ObjectPtrTy->getPointerTo() };
+         // llvm::Type *args[] = { ObjectPtrTy, ObjectPtrTy->getPointerTo() };
+         llvm::Type *args[] = { ObjectPtrTy, llvm::PointerType::get(ObjectPtrTy, 0) };
          llvm::FunctionType *FTy =
          llvm::FunctionType::get(ObjectPtrTy, args, false);
          return CGM.CreateRuntimeFunction(FTy, "mulle_objc_assign_threadlocal");
@@ -570,7 +574,9 @@ namespace {
       /// GcAssignIvarFn -- LLVM objc_assign_ivar function.
       llvm::FunctionCallee getGcAssignIvarFn() {
          // id objc_assign_ivar(id, id *, ptrdiff_t)
-         llvm::Type *args[] = { ObjectPtrTy, ObjectPtrTy->getPointerTo(),
+         // llvm::Type *args[] = { ObjectPtrTy, ObjectPtrTy->getPointerTo(),
+         //   CGM.PtrDiffTy };
+         llvm::Type *args[] = { ObjectPtrTy, llvm::PointerType::get(ObjectPtrTy, 0),
             CGM.PtrDiffTy };
          llvm::FunctionType *FTy =
          llvm::FunctionType::get(ObjectPtrTy, args, false);
@@ -588,7 +594,8 @@ namespace {
       /// GcAssignStrongCastFn -- LLVM objc_assign_strongCast function.
       llvm::FunctionCallee getGcAssignStrongCastFn() {
          // id objc_assign_strongCast(id, id *)
-         llvm::Type *args[] = { ObjectPtrTy, ObjectPtrTy->getPointerTo() };
+         // llvm::Type *args[] = { ObjectPtrTy, ObjectPtrTy->getPointerTo() };
+         llvm::Type *args[] = { ObjectPtrTy, llvm::PointerType::get(ObjectPtrTy, 0) };
          llvm::FunctionType *FTy =
          llvm::FunctionType::get(ObjectPtrTy, args, false);
          return CGM.CreateRuntimeFunction(FTy, "mulle_objc_assign_strong_cast");
@@ -691,7 +698,8 @@ namespace {
       public:
       /// ExceptionTryEnterFn - LLVM objc_exception_try_enter function.
       llvm::FunctionCallee getExceptionTryEnterFn() {
-         llvm::Type *params[] = { getExceptionDataTy( CGM)->getPointerTo(), UniverseIDTy };
+         // llvm::Type *params[] = { getExceptionDataTy( CGM)->getPointerTo(), UniverseIDTy };
+         llvm::Type *params[] = { llvm::PointerType::get(getExceptionDataTy(CGM), 0), UniverseIDTy };
          return CGM.CreateRuntimeFunction(
                                           llvm::FunctionType::get(CGM.VoidTy, params, false),
                                           "mulle_objc_exception_tryenter");
@@ -699,7 +707,7 @@ namespace {
 
       /// ExceptionTryExitFn - LLVM objc_exception_try_exit function.
       llvm::FunctionCallee getExceptionTryExitFn() {
-         llvm::Type *params[] = { getExceptionDataTy( CGM)->getPointerTo(), UniverseIDTy };
+         llvm::Type *params[] = { llvm::PointerType::get(getExceptionDataTy(CGM), 0), UniverseIDTy };
          return CGM.CreateRuntimeFunction(
                                           llvm::FunctionType::get(CGM.VoidTy, params, false),
                                           "mulle_objc_exception_tryexit");
@@ -707,7 +715,7 @@ namespace {
 
       /// ExceptionExtractFn - LLVM objc_exception_extract function.
       llvm::FunctionCallee getExceptionExtractFn() {
-         llvm::Type *params[] = { getExceptionDataTy( CGM)->getPointerTo(), UniverseIDTy };
+         llvm::Type *params[] = { llvm::PointerType::get(getExceptionDataTy(CGM), 0), UniverseIDTy };
          return CGM.CreateRuntimeFunction(llvm::FunctionType::get(ObjectPtrTy,
                                                                   params, false),
                                           "mulle_objc_exception_extract");
@@ -725,7 +733,7 @@ namespace {
       /// SetJmpFn - LLVM _setjmp function.
       llvm::FunctionCallee getSetJmpFn() {
          // This is specifically the prototype for x86.
-         llvm::Type *params[] = { CGM.Int32Ty->getPointerTo() };
+         llvm::Type *params[] = { llvm::PointerType::get(CGM.Int32Ty, 0) };
          return
          CGM.CreateRuntimeFunction(llvm::FunctionType::get(CGM.Int32Ty,
                                                            params, false),
@@ -5488,22 +5496,23 @@ llvm::Constant *CGObjCMulleRuntime::GetMethodConstant(const ObjCMethodDecl *MD) 
 
    // support for
    // #pragma clang attribute push(__attribute__((annotate("objc_user_0"))), apply_to = objc_method)
-   for( clang::Attr *Attr : MD->getAttrs())
-   {
-      if( auto *AnnotateAttr = dyn_cast<clang::AnnotateAttr>(Attr))
+   if( MD->hasAttrs())
+      for( clang::Attr *Attr : MD->getAttrs())
       {
-         if (AnnotateAttr->getAnnotation() == "objc_user_0")
-            bits |= 0x000800;
-         if (AnnotateAttr->getAnnotation() == "objc_user_1")
-            bits |= 0x001000;
-         if (AnnotateAttr->getAnnotation() == "objc_user_2")
-            bits |= 0x002000;
-         if (AnnotateAttr->getAnnotation() == "objc_user_3")
-            bits |= 0x004000;
-         if (AnnotateAttr->getAnnotation() == "objc_user_4")
-            bits |= 0x008000;
+         if( auto *AnnotateAttr = dyn_cast<clang::AnnotateAttr>(Attr))
+         {
+            if (AnnotateAttr->getAnnotation() == "objc_user_0")
+               bits |= 0x000800;
+            if (AnnotateAttr->getAnnotation() == "objc_user_1")
+               bits |= 0x001000;
+            if (AnnotateAttr->getAnnotation() == "objc_user_2")
+               bits |= 0x002000;
+            if (AnnotateAttr->getAnnotation() == "objc_user_3")
+               bits |= 0x004000;
+            if (AnnotateAttr->getAnnotation() == "objc_user_4")
+               bits |= 0x008000;
+         }
       }
-   }
 
    //
    // also remember method family (nice for checking if it's init or something)
