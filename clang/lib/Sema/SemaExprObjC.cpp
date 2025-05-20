@@ -4969,6 +4969,14 @@ DeclResult SemaObjC::LookupIvarInObjCMethod(LookupResult &Lookup, Scope *S,
   // Check for error condition which is already reported.
   if (!CurMethod)
     return DeclResult(true);
+    
+  // @mulle-objc@ MetaABI: Lookup _param-><n> >
+  if (SemaRef.getLangOpts().ObjCRuntime.hasMulleMetaABI()) {
+    FieldDecl *FD = CurMethod->FindParamRecordField(II);
+    if (FD)
+      return DeclResult(FD);
+  }
+  // @mulle-objc@ MetaABI: Lookup _param-><n> <
 
   // There are two cases to handle here.  1) scoped lookup could have failed,
   // in which case we should look for an ivar.  2) scoped lookup could have
