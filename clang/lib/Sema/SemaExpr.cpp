@@ -5269,7 +5269,7 @@ Sema::CreateBuiltinArraySubscriptExpr(Expr *Base, SourceLocation LLoc,
     // Use custom logic if this should be the pseudo-object subscript
     // expression.
     // @mulle-objc@ language: turn off array subscripting >
-    if (!LangOpts.isSubscriptPointerArithmetic() && ! LangOptions().ObjCRuntime.hasMulleMetaABI())
+    if (!LangOpts.isSubscriptPointerArithmetic() && ! LangOpts.ObjCRuntime.hasMulleMetaABI())
     // @mulle-objc@ language: turn off array subscripting <
       return ObjC().BuildObjCSubscriptExpression(RLoc, BaseExpr, IndexExpr, nullptr,
                                           nullptr);
@@ -18638,6 +18638,9 @@ static DeclContext *getParentOfCapturingContextOrNull(DeclContext *DC,
 
   VarDecl *Underlying = Var->getPotentiallyDecomposedVarDecl();
   if (Underlying) {
+    // @mulle-objc@ language: we dont capture so ignore this validation >
+    if( ! S.LangOpts.ObjCRuntime.hasMulleMetaABI())
+    // @mulle-objc@ language: we dont capture so ignore this validation <    
     if (Underlying->hasLocalStorage() && Diagnose)
       diagnoseUncapturableValueReferenceOrBinding(S, Loc, Var);
   }
