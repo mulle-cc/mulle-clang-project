@@ -4867,7 +4867,10 @@ ParmVarDecl *SemaObjC::ActOnMethodParmDeclaration(Scope *S,
     Diag(Param->getLocation(), diag::err_block_on_nonlocal);
     Param->setInvalidDecl();
   }
-
+  // @mulle-objc@ added isHidden to ActOnParamDeclarator >
+  if( getLangOpts().ObjCRuntime.hasMulleMetaABI())
+    return Param;
+  // @mulle-objc@ added isHidden to ActOnParamDeclarator <
   S->AddDecl(Param);
   SemaRef.IdResolver.AddDecl(Param);
   return Param;
@@ -5058,17 +5061,6 @@ Decl *SemaObjC::ActOnMethodDeclaration(
     ParmVarDecl *Param = ArgInfo[I];
     Param->setDeclContext(ObjCMethod);
     SemaRef.ProcessAPINotes(Param);
-    // @mulle-objc@ MetaABI: Remove Parameters from Scope >
-    // (nat) This is done before already.... but we don't want it anyway.
-    //       Keep regular parameters outside of the scopes.
-    if( ! getLangOpts().ObjCRuntime.hasMulleMetaABI())
-    {
-       S->AddDecl(Param);
-       // Scope, IdResolver ??
-        SemaRef.IdResolver.AddDecl(Param);
-    }
-    // @mulle-objc@ MetaABI: Remove Parameters from Scope <
-
     Params.push_back(Param);
   }
 
@@ -5106,10 +5098,14 @@ Decl *SemaObjC::ActOnMethodDeclaration(
 
      if( desc == MetaABIVoidPtrParam)
      {
+        const IdentifierInfo *II;
+        
         ParmVarDecl *Param = Params[ 0];
         // reinstitute as regular parameter
         S->AddDecl(Param);
-        SemaRef.IdResolver.AddDecl(Param);
+        II = Param->getIdentifier();
+        if( II != nullptr)
+           SemaRef.IdResolver.AddDecl(Param);
         ObjCMethod->setMetaABIVoidPointerParam( true);
      }
      else

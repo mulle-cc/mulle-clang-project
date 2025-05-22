@@ -15111,7 +15111,10 @@ static void CheckExplicitObjectParameter(Sema &S, ParmVarDecl *P,
 }
 
 Decl *Sema::ActOnParamDeclarator(Scope *S, Declarator &D,
-                                 SourceLocation ExplicitThisLoc) {
+// @mulle-objc@ added isHidden to ActOnParamDeclarator >
+                                 SourceLocation ExplicitThisLoc,
+                                 bool isHidden) {
+// @mulle-objc@ added isHidden to ActOnParamDeclarator <
   const DeclSpec &DS = D.getDeclSpec();
 
   // Verify C99 6.7.5.3p2: The only SCS allowed is 'register'.
@@ -15210,9 +15213,16 @@ Decl *Sema::ActOnParamDeclarator(Scope *S, Declarator &D,
                     S->getNextFunctionPrototypeIndex());
 
   // Add the parameter declaration into this scope.
+  // @mulle-objc@ added isHidden to ActOnParamDeclarator >
+  if( ! isHidden)
+  {
+  // @mulle-objc@ added isHidden to ActOnParamDeclarator <
   S->AddDecl(New);
   if (II)
     IdResolver.AddDecl(New);
+  // @mulle-objc@ added isHidden to ActOnParamDeclarator >
+  }
+  // @mulle-objc@ added isHidden to ActOnParamDeclarator <
 
   ProcessDeclAttributes(S, New, D);
 

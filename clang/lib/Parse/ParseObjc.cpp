@@ -1638,6 +1638,7 @@ Decl *Parser::ParseObjCMethodDecl(SourceLocation mLoc,
 
   bool isVariadic = false;
   bool cStyleParamWarned = false;
+
   // Parse the (optional) parameter list.
   while (Tok.is(tok::comma)) {
     ConsumeToken();
@@ -1658,7 +1659,10 @@ Decl *Parser::ParseObjCMethodDecl(SourceLocation mLoc,
                         DeclaratorContext::Prototype);
     ParseDeclarator(ParmDecl);
     const IdentifierInfo *ParmII = ParmDecl.getIdentifier();
-    Decl *Param = Actions.ActOnParamDeclarator(getCurScope(), ParmDecl);
+  // @mulle-objc@ added isHidden to ActOnParamDeclarator >
+    Decl *Param = Actions.ActOnParamDeclarator(getCurScope(), ParmDecl, {},   getLangOpts().ObjCRuntime.hasMulleMetaABI());
+  // in ActOnMethodDeclaration the first param will be unhidden if needed
+  // @mulle-objc@ added isHidden to ActOnParamDeclarator <
     CParamInfo.push_back(DeclaratorChunk::ParamInfo(ParmII,
                                                     ParmDecl.getIdentifierLoc(),
                                                     Param,
