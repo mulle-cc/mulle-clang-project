@@ -1018,6 +1018,10 @@ public:
                                    clang::ObjCIvarDecl *ivar_decl,
                                    const char *property_setter_name,
                                    const char *property_getter_name,
+   // @mulle-clang@ >> properties
+                                   const char *property_adder_name,
+                                   const char *property_remover_name,
+   // @mulle-clang@ <<
                                    uint32_t property_attributes,
                                    ClangASTMetadata metadata);
 

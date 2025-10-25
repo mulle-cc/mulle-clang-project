@@ -29,6 +29,10 @@ StringRef clang::languageToString(Language L) {
     return "C++";
   case Language::ObjC:
     return "Objective-C";
+  // @mulle-objc@ AAM: .aam filename extension support ->
+  case Language::ObjCAAM:
+    return "Objective-C AAM";
+  // @mulle-objc@ AAM: .aam filename extension support <-
   case Language::ObjCXX:
     return "Objective-C++";
   case Language::OpenCL:

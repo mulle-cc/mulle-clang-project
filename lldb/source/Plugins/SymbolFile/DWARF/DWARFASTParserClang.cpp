@@ -1964,6 +1964,9 @@ public:
     return TypeSystemClang::AddObjCClassProperty(
         m_class_opaque_type, m_property_name, m_property_opaque_type,
         /*ivar_decl=*/nullptr, m_property_setter_name, m_property_getter_name,
+// @mulle-objc@ >> properties
+        nullptr, nullptr,
+// @mulle-objc@ << properties
         m_property_attributes, m_metadata);
   }
 

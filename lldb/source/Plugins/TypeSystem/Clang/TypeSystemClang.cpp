@@ -4942,6 +4942,11 @@ lldb::Encoding TypeSystemClang::GetEncoding(lldb::opaque_compiler_type_t type,
     case clang::BuiltinType::NullPtr:
       return lldb::eEncodingUint;
 
+  // @mulle-clang@ >>
+    case clang::BuiltinType::Kind::ObjCProtocol:
+       break;
+// @mulle-clang@ <<
+
     case clang::BuiltinType::Kind::ARCUnbridgedCast:
     case clang::BuiltinType::Kind::BoundMember:
     case clang::BuiltinType::Kind::BuiltinFn:
@@ -7985,6 +7990,9 @@ bool TypeSystemClang::AddObjCClassProperty(
     const CompilerType &type, const char *property_name,
     const CompilerType &property_clang_type, clang::ObjCIvarDecl *ivar_decl,
     const char *property_setter_name, const char *property_getter_name,
+   // @mulle-clang@ >> properties
+    const char *property_adder_name, const char *property_remover_name,
+   // @mulle-clang@ << properties
     uint32_t property_attributes, ClangASTMetadata metadata) {
   if (!type || !property_clang_type.IsValid() || property_name == nullptr ||
       property_name[0] == '\0')
@@ -8038,35 +8046,35 @@ bool TypeSystemClang::AddObjCClassProperty(
   clang::Selector adder_sel, remover_sel;
 
   if (property_remover_name) {
-    std::string property_setter_no_colon(property_remover_name,
+    std::string property_remover_no_colon(property_remover_name,
                                          strlen(property_remover_name) - 1);
-    clang::IdentifierInfo *remover_ident =
+    const clang::IdentifierInfo *remover_ident =
         &clang_ast.Idents.get(property_remover_no_colon);
-    setter_sel = clang_ast.Selectors.getSelector(1, &remover_ident);
+    remover_sel = clang_ast.Selectors.getSelector(1, &remover_ident);
   } else if (!(property_attributes & DW_APPLE_PROPERTY_readonly)) {
     std::string remover_sel_string("removeFrom");
     remover_sel_string.push_back(::toupper(property_name[0]));
     remover_sel_string.append(&property_name[1]);
-    clang::IdentifierInfo *remover_ident =
+    const clang::IdentifierInfo *remover_ident =
         &clang_ast.Idents.get(remover_sel_string);
-    setter_sel = clang_ast.Selectors.getSelector(1, &remover_ident);
+    remover_sel = clang_ast.Selectors.getSelector(1, &remover_ident);
   }
   property_decl->setRemoverName(remover_sel);
   property_decl->setPropertyAttributes(ObjCPropertyAttribute::kind_remover);
 
   if (property_adder_name) {
-    std::string property_setter_no_colon(property_adder_name,
+    std::string property_adder_no_colon(property_adder_name,
                                          strlen(property_adder_name) - 1);
-    clang::IdentifierInfo *adder_ident =
+    const clang::IdentifierInfo *adder_ident =
         &clang_ast.Idents.get(property_adder_no_colon);
-    setter_sel = clang_ast.Selectors.getSelector(1, &adder_ident);
+    adder_sel = clang_ast.Selectors.getSelector(1, &adder_ident);
   } else if (!(property_attributes & DW_APPLE_PROPERTY_readonly)) {
     std::string adder_sel_string("addTo");
     adder_sel_string.push_back(::toupper(property_name[0]));
     adder_sel_string.append(&property_name[1]);
-    clang::IdentifierInfo *adder_ident =
+    const clang::IdentifierInfo *adder_ident =
         &clang_ast.Idents.get(adder_sel_string);
-    setter_sel = clang_ast.Selectors.getSelector(1, &adder_ident);
+    adder_sel = clang_ast.Selectors.getSelector(1, &adder_ident);
   }
   property_decl->setAdderName(adder_sel);
   property_decl->setPropertyAttributes(ObjCPropertyAttribute::kind_adder);
@@ -8233,11 +8241,11 @@ bool TypeSystemClang::AddObjCClassProperty(
     const bool isSynthesizedAccessorStub = false;
     const bool isImplicitlyDeclared = true;
     const bool isDefined = false;
-    const clang::ObjCMethodDecl::ImplementationControl impControl =
-        clang::ObjCMethodDecl::None;
+    const clang::ObjCImplementationControl impControl =
+        clang::ObjCImplementationControl::None;
     const bool HasRelatedResultType = false;
 
-    adder = clang::ObjCMethodDecl::CreateDeserialized(clang_ast, 0);
+    adder = clang::ObjCMethodDecl::CreateDeserialized(clang_ast, GlobalDeclID());
     adder->setDeclName(adder_sel);
     adder->setReturnType(result_type);
     adder->setDeclContext(class_interface_decl);
@@ -8252,8 +8260,7 @@ bool TypeSystemClang::AddObjCClassProperty(
     SetMemberOwningModule(adder, class_interface_decl);
 
     if (adder) {
-      if (metadata)
-        ast->SetMetadata(adder, *metadata);
+        ast->SetMetadata(adder, metadata);
 
       llvm::SmallVector<clang::ParmVarDecl *, 1> params;
       params.push_back(clang::ParmVarDecl::Create(
@@ -8285,11 +8292,11 @@ bool TypeSystemClang::AddObjCClassProperty(
     const bool isSynthesizedAccessorStub = false;
     const bool isImplicitlyDeclared = true;
     const bool isDefined = false;
-    const clang::ObjCMethodDecl::ImplementationControl impControl =
-        clang::ObjCMethodDecl::None;
+    const clang::ObjCImplementationControl impControl =
+        clang::ObjCImplementationControl::None;
     const bool HasRelatedResultType = false;
 
-    remover = clang::ObjCMethodDecl::CreateDeserialized(clang_ast, 0);
+    remover = clang::ObjCMethodDecl::CreateDeserialized(clang_ast, GlobalDeclID());
     remover->setDeclName(remover_sel);
     remover->setReturnType(result_type);
     remover->setDeclContext(class_interface_decl);
@@ -8304,8 +8311,7 @@ bool TypeSystemClang::AddObjCClassProperty(
     SetMemberOwningModule(remover, class_interface_decl);
 
     if (remover) {
-      if (metadata)
-        ast->SetMetadata(remover, *metadata);
+        ast->SetMetadata(remover, metadata);
 
       llvm::SmallVector<clang::ParmVarDecl *, 1> params;
       params.push_back(clang::ParmVarDecl::Create(
