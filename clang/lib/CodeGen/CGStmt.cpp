@@ -1689,21 +1689,37 @@ void CodeGenFunction::EmitReturnStmt(const ReturnStmt &S) {
   } else {
     switch (getEvaluationKind(RV->getType())) {
     case TEK_Scalar: {
-      llvm::Value *Ret = EmitScalarExpr(RV);
-      if (CurFnInfo->getReturnInfo().getKind() == ABIArgInfo::Indirect) {
-        EmitStoreOfScalar(Ret, MakeAddrLValue(ReturnValue, RV->getType()),
-                          /*isInit*/ true);
+      // @mulle-objc@ MetaABI: put rval into _param if needed
+      if (dyn_cast_or_null<ObjCMethodDecl>(CurFuncDecl) &&
+          getLangOpts().ObjCRuntime.hasMulleMetaABI()) {
+        EmitMetaABIWriteReturnValue(CurFuncDecl, RV);
       } else {
-        auto *I = Builder.CreateStore(Ret, ReturnValue);
-        addInstToCurrentSourceAtom(I, I->getValueOperand());
+        llvm::Value *Ret = EmitScalarExpr(RV);
+        if (CurFnInfo->getReturnInfo().getKind() == ABIArgInfo::Indirect) {
+          EmitStoreOfScalar(Ret, MakeAddrLValue(ReturnValue, RV->getType()),
+                            /*isInit*/ true);
+        } else {
+          auto *I = Builder.CreateStore(Ret, ReturnValue);
+          addInstToCurrentSourceAtom(I, I->getValueOperand());
+        }
+      }
       }
       break;
-    }
+
     case TEK_Complex:
+      // @mulle-objc@ MetaABI: put rval into _param if needed
+      if( dyn_cast_or_null<ObjCMethodDecl>(CurFuncDecl) && getLangOpts().ObjCRuntime.hasMulleMetaABI())
+         EmitMetaABIWriteReturnValue( CurFuncDecl, RV);
+      else
       EmitComplexExprIntoLValue(RV, MakeAddrLValue(ReturnValue, RV->getType()),
                                 /*isInit*/ true);
       break;
     case TEK_Aggregate:
+      // @mulle-objc@ MetaABI: put rval into _param if needed >
+      if( dyn_cast_or_null<ObjCMethodDecl>(CurFuncDecl) && getLangOpts().ObjCRuntime.hasMulleMetaABI())
+         EmitMetaABIWriteReturnValue( CurFuncDecl, RV);
+      else
+      // @mulle-objc@ MetaABI: put rval into _param if needed <
       EmitAggExpr(RV, AggValueSlot::forAddr(
                           ReturnValue, Qualifiers(),
                           AggValueSlot::IsDestructed,

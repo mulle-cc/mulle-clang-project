@@ -911,6 +911,17 @@ Sema::NameClassification Sema::ClassifyName(Scope *S, CXXScopeSpec &SS,
   // FIXME: This lookup really, really needs to be folded in to the normal
   // unqualified lookup mechanism.
   if (SS.isEmpty() && CurMethod && !isResultTypeOrTemplate(Result, NextToken)) {
+   // @mulle-objc@ MetaABI: Lookup _param-><name> >
+   if( getLangOpts().ObjCRuntime.hasMulleMetaABI())
+   {
+      FieldDecl   *FD;
+
+      FD = CurMethod->FindParamRecordField( Name);
+      if( FD) //
+        return( NameClassification::NonType(cast<NamedDecl>( FD)));
+   }
+   // @mulle-objc@ MetaABI: Lookup _param-><name> <
+
     DeclResult Ivar = ObjC().LookupIvarInObjCMethod(Result, S, Name);
     if (Ivar.isInvalid())
       return NameClassification::Error();
@@ -1259,13 +1270,61 @@ Sema::ActOnNameClassifiedAsDependentNonType(const CXXScopeSpec &SS,
                                     /*TemplateArgs=*/nullptr);
 }
 
+/* @mulle-objc@ MetaABI: GetMulle_paramFieldExpr create an expression to access _param->field >>> */
+ExprResult
+Sema::GetMulle_paramFieldExpr( FieldDecl *FD, Scope *S, SourceLocation Loc)
+{
+     // this couldn't be any easier...
+     DeclarationNameInfo   memberNameInfo( FD->getDeclName(), Loc);
+     DeclAccessPair        fakeFoundDecl = DeclAccessPair::make(FD, FD->getAccess());
+     ExprResult BaseExpr = GetMulle_paramExpr( S, Loc, "_param");
+     ExprResult CastExpr = DefaultLvalueConversion( BaseExpr.get());
+/*     ExprResult CastExpr = ImplicitCastExpr::Create(*Ctx, BaseExpr.get()->getType(), CK_LValueToRValue, BaseExpr.get(), nullptr, VK_PRValue);
+*/
+     ExprResult Result   = MemberExpr::Create( Context,
+                                              CastExpr.get(),
+                                              true,
+                                              SourceLocation(),   // (nat) blind add
+                                              CXXScopeSpec().getWithLocInContext(Context),
+                                              SourceLocation(), // invalid template location
+                                              FD,
+                                              fakeFoundDecl,
+                                              memberNameInfo,
+                                              nullptr,
+                                              FD->getType(),
+                                              VK_LValue, // maybe so, maybe not so
+                                              OK_Ordinary,
+                                              NOUR_None);
+
+     MarkAnyDeclReferenced(Loc, FD, true);
+
+     return( Result);
+}
+/* @mulle-objc@ MetaABI: GetMulle_paramFieldExpr create an expression to access _param->field <<< */
+
+
 ExprResult Sema::ActOnNameClassifiedAsNonType(Scope *S, const CXXScopeSpec &SS,
                                               NamedDecl *Found,
                                               SourceLocation NameLoc,
                                               const Token &NextToken) {
   if (getCurMethodDecl() && SS.isEmpty())
-    if (auto *Ivar = dyn_cast<ObjCIvarDecl>(Found->getUnderlyingDecl()))
+  // @mulle-objc@ MetaABI: Lookup _param-><name> >
+  {
+    if( getLangOpts().ObjCRuntime.hasMulleMetaABI())
+    {
+      FieldDecl   *FD;
+
+      FD = getCurMethodDecl()->FindParamRecordField( Found->getDeclName().getAsIdentifierInfo());
+      if( FD) //
+        return( GetMulle_paramFieldExpr( FD, S, NameLoc));
+  }
+  // @mulle-objc@ MetaABI: Lookup _param-><name> <
+
+  if (auto *Ivar = dyn_cast<ObjCIvarDecl>(Found->getUnderlyingDecl()))
       return ObjC().BuildIvarRefExpr(S, NameLoc, Ivar);
+  // @mulle-objc@ MetaABI: Lookup _param-><name> >
+  }
+  // @mulle-objc@ MetaABI: Lookup _param-><name> <
 
   // Reconstruct the lookup result.
   LookupResult Result(*this, Found->getDeclName(), NameLoc, LookupOrdinaryName);
@@ -1279,6 +1338,7 @@ ExprResult Sema::ActOnNameClassifiedAsNonType(Scope *S, const CXXScopeSpec &SS,
 ExprResult Sema::ActOnNameClassifiedAsOverloadSet(Scope *S, Expr *E) {
   // For an implicit class member access, transform the result into a member
   // access expression if necessary.
+
   auto *ULE = cast<UnresolvedLookupExpr>(E);
   if ((*ULE->decls_begin())->isCXXClassMember()) {
     CXXScopeSpec SS;
@@ -2194,6 +2254,9 @@ static void CheckPoppedLabel(LabelDecl *L, Sema &S,
 }
 
 void Sema::ActOnPopScope(SourceLocation Loc, Scope *S) {
+/// @mulle-objc@ protect mulle-objc from NRVO >
+  if( getLangOpts().CPlusPlus)
+/// @mulle-objc@ protect mulle-objc from NRVO <
   S->applyNRVO();
 
   if (S->decl_empty()) return;
@@ -2518,6 +2581,15 @@ void Sema::MergeTypedefNameDecl(Scope *S, TypedefNameDecl *New,
       // Install the built-in type for 'Class', ignoring the current definition.
       New->setTypeForDecl(Context.getObjCClassType().getTypePtr());
       return;
+    /// @mulle-objc@ uniqueid: add builtin type for PROTOCOL >
+    case 8:
+      if (!TypeID->isStr("PROTOCOL"))
+        break;
+      Context.setObjCPROTOCOLRedefinitionType(New->getUnderlyingType());
+      // Install the built-in type for 'PROTOCOL', ignoring the current definition.
+      New->setTypeForDecl(Context.getObjCPROTOCOLType().getTypePtr());
+      return;
+    /// @mulle-objc@ uniqueid: add builtin type for PROTOCOL <
     case 3:
       if (!TypeID->isStr("SEL"))
         break;
@@ -15314,7 +15386,10 @@ static void CheckExplicitObjectParameter(Sema &S, ParmVarDecl *P,
 }
 
 Decl *Sema::ActOnParamDeclarator(Scope *S, Declarator &D,
-                                 SourceLocation ExplicitThisLoc) {
+// @mulle-objc@ added isHidden to ActOnParamDeclarator >
+                                 SourceLocation ExplicitThisLoc,
+                                 bool isHidden) {
+// @mulle-objc@ added isHidden to ActOnParamDeclarator <
   const DeclSpec &DS = D.getDeclSpec();
 
   // Verify C99 6.7.5.3p2: The only SCS allowed is 'register'.
@@ -15415,9 +15490,16 @@ Decl *Sema::ActOnParamDeclarator(Scope *S, Declarator &D,
   warnOnCTypeHiddenInCPlusPlus(New);
 
   // Add the parameter declaration into this scope.
+  // @mulle-objc@ added isHidden to ActOnParamDeclarator >
+  if( ! isHidden)
+  {
+  // @mulle-objc@ added isHidden to ActOnParamDeclarator <
   S->AddDecl(New);
   if (II)
     IdResolver.AddDecl(New);
+  // @mulle-objc@ added isHidden to ActOnParamDeclarator >
+  }
+  // @mulle-objc@ added isHidden to ActOnParamDeclarator <
 
   ProcessDeclAttributes(S, New, D);
 

@@ -1996,6 +1996,16 @@ static PredefinedIdentKind getPredefinedExprKind(tok::TokenKind Kind) {
     return PredefinedIdentKind::Func; // [C99 6.4.2.2]
   case tok::kw___FUNCTION__:
     return PredefinedIdentKind::Function;
+  // @mulle-objc@ > add __OBJC_CLASS__ keyword
+  case tok::kw___OBJC_CLASS__:            
+    return PredefinedIdentKind::ObjCClass;  // [MULLE/ALL]
+  case tok::kw___OBJC_CATEGORY__:        
+    return PredefinedIdentKind::ObjCCategory;  // [MULLE/ALL]
+  case tok::kw___MULLE_OBJC_CLASSID__:    
+    return PredefinedIdentKind::MulleObjCClassid; // [MULLE/ALL]
+  case tok::kw___MULLE_OBJC_CATEGORYID__: 
+    return PredefinedIdentKind::MulleObjCCategoryid; // [MULLE/ALL]
+  // @mulle-objc@ < add __OBJC_CLASS__ keyword    
   case tok::kw___FUNCDNAME__:
     return PredefinedIdentKind::FuncDName; // [MS]
   case tok::kw___FUNCSIG__:
@@ -2785,6 +2795,17 @@ Sema::ActOnIdExpression(Scope *S, CXXScopeSpec &SS,
     LookupParsedName(R, S, &SS, /*ObjectType=*/QualType(),
                      /*AllowBuiltinCreation=*/!IvarLookupFollowUp);
 
+    // @mulle-objc@ MetaABI: Lookup _param-><n> >
+    if (II && !SS.isSet() && getCurMethodDecl()) {
+      if (getLangOpts().ObjCRuntime.hasMulleMetaABI()) {
+        FieldDecl *FD = getCurMethodDecl()->FindParamRecordField(II);
+        if (FD) {
+          return GetMulle_paramFieldExpr(FD, S, NameLoc);
+        }
+      }
+    }
+    // @mulle-objc@ MetaABI: Lookup _param-><n> <
+
     // If the result might be in a dependent base class, this is a dependent
     // id-expression.
     if (R.wasNotFoundInCurrentInstantiation() || SS.isInvalid())
@@ -2985,6 +3006,56 @@ ExprResult Sema::BuildQualifiedDeclarationNameExpr(
 
   return BuildDeclarationNameExpr(SS, R, /*ADL=*/false);
 }
+
+
+// @mulle-objc@ MetaABI: GetMulle_paramExpr create an expression to access _param by name >>
+ExprResult   Sema::GetMulle_paramExpr( Scope *S, SourceLocation Loc, StringRef Name)
+{
+   DeclarationName   DN;
+   IdentifierInfo    *II;
+
+   // hacked together without a clue
+   II  = &Context.Idents.get( Name);
+   DN  = DeclarationName( II);
+
+   LookupResult R( *this, DN, Loc, LookupOrdinaryName);
+   LookupParsedName( R, S, NULL, QualType());
+   if( ! R.empty())
+      return( BuildDeclarationNameExpr( CXXScopeSpec(), R, false));
+
+   // this can't really happen
+   return ExprError();
+}
+
+
+ExprResult   Sema::GetMulle_paramExprAsType( QualType type, Scope *S, SourceLocation Loc, StringRef Name)
+{
+   DeclarationName   DN;
+   IdentifierInfo    *II;
+   ExprResult        E;
+
+   // hacked together without a clue
+   II  = &Context.Idents.get( Name);
+   DN  = DeclarationName( II);
+
+   LookupResult R( *this, DN, Loc, LookupOrdinaryName);
+   LookupParsedName( R, S, NULL, QualType());
+   if( ! R.empty())
+   {
+      ValueDecl *VD = dyn_cast<ValueDecl>( R.getFoundDecl());
+      if( VD)
+      {
+         E = BuildDeclRefExpr( VD, type, VK_LValue, Loc);
+         E.get()->viewAST();
+         return( E);
+      }
+   }
+
+   // this can't really happen
+   return ExprError();
+}
+// @mulle-objc@ MetaABI: GetMulle_paramExpr create an expression to access _param by name <<
+
 
 ExprResult
 Sema::PerformObjectMemberConversion(Expr *From,
@@ -3511,6 +3582,15 @@ static void ConvertUTF8ToWideString(unsigned CharByteWidth, StringRef Source,
   Target.resize(ResultPtr - &Target[0]);
 }
 
+
+// @mulle-objc@: >>
+extern "C"
+{
+   extern uint32_t  MulleObjCUniqueIdHashForString( std::string s);
+}
+// @mulle-objc@: <<
+
+
 ExprResult Sema::BuildPredefinedExpr(SourceLocation Loc,
                                      PredefinedIdentKind IK) {
   Decl *currentDecl = getPredefinedExprDecl(CurContext);
@@ -3531,6 +3611,23 @@ ExprResult Sema::BuildPredefinedExpr(SourceLocation Loc,
     auto Str =
         PredefinedExpr::ComputeName(IK, currentDecl, ForceElaboratedPrinting);
     unsigned Length = Str.length();
+
+    // @mulle-objc@ < add __OBJC_CLASS__ keyword
+    if (IK == PredefinedIdentKind::MulleObjCClassid || IK == PredefinedIdentKind::MulleObjCCategoryid)
+    {
+        uint32_t   hash;
+
+        hash = 0;
+        if( Length != 0)
+        {
+           hash = MulleObjCUniqueIdHashForString( Str);
+           if( ! hash || hash == (uint32_t) -1)
+              return ExprError( Diag(Loc, diag::err_mulle_string_hash_invalid) << Str);  // fix string
+        }
+        ResTy = Context.IntTy.withConst();
+        return( IntegerLiteral::Create( Context, llvm::APInt( 32, hash), ResTy, Loc));
+    }
+    // @mulle-objc@ < add __OBJC_CLASS__ keyword
 
     llvm::APInt LengthI(32, Length + 1);
     if (IK == PredefinedIdentKind::LFunction ||
@@ -3561,6 +3658,26 @@ ExprResult Sema::BuildPredefinedExpr(SourceLocation Loc,
 
 ExprResult Sema::ActOnPredefinedExpr(SourceLocation Loc, tok::TokenKind Kind) {
   return BuildPredefinedExpr(Loc, getPredefinedExprKind(Kind));
+  PredefinedIdentKind IK;
+
+  switch (Kind) {
+  default: llvm_unreachable("Unknown simple primary expr!");
+  case tok::kw___func__: IK = PredefinedIdentKind::Func; break; // [C99 6.4.2.2]
+  case tok::kw___FUNCTION__: IK = PredefinedIdentKind::Function; break;
+  // @mulle-objc@ > add __OBJC_CLASS__ keyword
+  case tok::kw___OBJC_CLASS__:            IK = PredefinedIdentKind::ObjCClass; break; // [MULLE/ALL]
+  case tok::kw___OBJC_CATEGORY__:         IK = PredefinedIdentKind::ObjCCategory; break; // [MULLE/ALL]
+  case tok::kw___MULLE_OBJC_CLASSID__:    IK = PredefinedIdentKind::MulleObjCClassid; break; // [MULLE/ALL]
+  case tok::kw___MULLE_OBJC_CATEGORYID__: IK = PredefinedIdentKind::MulleObjCCategoryid; break; // [MULLE/ALL]
+  // @mulle-objc@ < add __OBJC_CLASS__ keyword
+  case tok::kw___FUNCDNAME__: IK = PredefinedIdentKind::FuncDName; break; // [MS]
+  case tok::kw___FUNCSIG__: IK = PredefinedIdentKind::FuncSig; break; // [MS]
+  case tok::kw_L__FUNCTION__: IK = PredefinedIdentKind::LFunction; break; // [MS]
+  case tok::kw_L__FUNCSIG__: IK = PredefinedIdentKind::LFuncSig; break; // [MS]
+  case tok::kw___PRETTY_FUNCTION__: IK = PredefinedIdentKind::PrettyFunction; break;
+  }
+
+  return BuildPredefinedExpr(Loc, IK);
 }
 
 ExprResult Sema::ActOnCharacterConstant(const Token &Tok, Scope *UDLScope) {
@@ -5239,9 +5356,11 @@ Sema::CreateBuiltinArraySubscriptExpr(Expr *Base, SourceLocation LLoc,
 
     // Use custom logic if this should be the pseudo-object subscript
     // expression.
-    if (!LangOpts.isSubscriptPointerArithmetic())
-      return ObjC().BuildObjCSubscriptExpression(RLoc, BaseExpr, IndexExpr,
-                                                 nullptr, nullptr);
+    // @mulle-objc@ language: turn off array subscripting >
+    if (!LangOpts.isSubscriptPointerArithmetic() && ! LangOpts.ObjCRuntime.hasMulleMetaABI())
+    // @mulle-objc@ language: turn off array subscripting <
+      return ObjC().BuildObjCSubscriptExpression(RLoc, BaseExpr, IndexExpr, nullptr,
+                                          nullptr);
 
     ResultType = PTy->getPointeeType();
   } else if (const PointerType *PTy = RHSTy->getAs<PointerType>()) {
@@ -8686,6 +8805,7 @@ QualType Sema::CheckConditionalOperands(ExprResult &Cond, ExprResult &LHS,
     << RHS.get()->getSourceRange();
   return QualType();
 }
+
 
 /// SuggestParentheses - Emit a note with a fixit hint that wraps
 /// ParenRange in parentheses.
@@ -18727,6 +18847,9 @@ static DeclContext *getParentOfCapturingContextOrNull(DeclContext *DC,
 
   VarDecl *Underlying = Var->getPotentiallyDecomposedVarDecl();
   if (Underlying) {
+    // @mulle-objc@ language: we dont capture so ignore this validation >
+    if( ! S.LangOpts.ObjCRuntime.hasMulleMetaABI())
+    // @mulle-objc@ language: we dont capture so ignore this validation <    
     if (Underlying->hasLocalStorage() && Diagnose)
       diagnoseUncapturableValueReferenceOrBinding(S, Loc, Var);
   }

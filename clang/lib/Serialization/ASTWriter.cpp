@@ -5583,8 +5583,10 @@ void ASTWriter::PrepareWritingSpecialDecls(Sema &SemaRef) {
   RegisterPredefDecl(Context.ObjCIdDecl, PREDEF_DECL_OBJC_ID_ID);
   RegisterPredefDecl(Context.ObjCSelDecl, PREDEF_DECL_OBJC_SEL_ID);
   RegisterPredefDecl(Context.ObjCClassDecl, PREDEF_DECL_OBJC_CLASS_ID);
-  RegisterPredefDecl(Context.ObjCProtocolClassDecl,
+  /// @mulle-objc@ uniqueid: add builtin type for PROTOCOL >
+  RegisterPredefDecl(Context.ObjCPROTOCOLDecl,
                      PREDEF_DECL_OBJC_PROTOCOL_ID);
+  /// @mulle-objc@ uniqueid: add builtin type for PROTOCOL <
   RegisterPredefDecl(Context.Int128Decl, PREDEF_DECL_INT_128_ID);
   RegisterPredefDecl(Context.UInt128Decl, PREDEF_DECL_UNSIGNED_INT_128_ID);
   RegisterPredefDecl(Context.ObjCInstanceTypeDecl,
@@ -6016,6 +6018,9 @@ ASTFileSignature ASTWriter::WriteASTCore(Sema *SemaPtr, StringRef isysroot,
     for (auto &Selector : AllSelectors)
       SemaPtr->ObjC().updateOutOfDateSelector(Selector);
   }
+  /// @mulle-objc@ uniqueid: add builtin type for PROTOCOL >
+  AddTypeRef( SemaPtr->Context, SemaPtr->Context.ObjCPROTOCOLRedefinitionType, SpecialTypes);
+  /// @mulle-objc@ uniqueid: add builtin type for PROTOCOL <
 
   if (Chain) {
     // Write the mapping information describing our module dependencies and how
