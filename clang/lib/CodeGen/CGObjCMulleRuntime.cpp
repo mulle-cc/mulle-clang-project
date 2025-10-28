@@ -297,8 +297,8 @@ namespace {
          if (!ExternalProtocolPtrTy) {
             // FIXME: It would be nice to unify this with the opaque type, so that the
             // IR comes out a bit cleaner.
-            CodeGen::CodeGenTypes &Types = CGM.getTypes();
-            ASTContext &Ctx = CGM.getContext();
+            // CodeGen::CodeGenTypes &Types = CGM.getTypes();  // unused
+            // ASTContext &Ctx = CGM.getContext();  // unused
             ExternalProtocolPtrTy = llvm::PointerType::get(CGM.getLLVMContext(), 0);
          }
 
@@ -544,7 +544,7 @@ namespace {
       llvm::FunctionCallee getGcAssignWeakFn() {
          // id objc_assign_weak (id, id *)
          // llvm::Type *args[] = { ObjectPtrTy, ObjectPtrTy->getPointerTo() };
-         llvm::Type *args[] = { ObjectPtrTy, llvm::PointerType::get(ObjectPtrTy, 0) };
+         llvm::Type *args[] = { ObjectPtrTy, llvm::PointerType::get(CGM.getLLVMContext(), 0) };
          llvm::FunctionType *FTy =
          llvm::FunctionType::get(ObjectPtrTy, args, false);
          return CGM.CreateRuntimeFunction(FTy, "mulle_objc_assign_weak");
@@ -554,7 +554,7 @@ namespace {
       llvm::FunctionCallee getGcAssignGlobalFn() {
          // id objc_assign_global(id, id *)
          // llvm::Type *args[] = { ObjectPtrTy, ObjectPtrTy->getPointerTo() };
-         llvm::Type *args[] = { ObjectPtrTy, llvm::PointerType::get(ObjectPtrTy, 0) };
+         llvm::Type *args[] = { ObjectPtrTy, llvm::PointerType::get(CGM.getLLVMContext(), 0) };
          llvm::FunctionType *FTy =
          llvm::FunctionType::get(ObjectPtrTy, args, false);
          return CGM.CreateRuntimeFunction(FTy, "mulle_objc_assign_global");
@@ -564,7 +564,7 @@ namespace {
       llvm::FunctionCallee getGcAssignThreadLocalFn() {
          // id objc_assign_threadlocal(id src, id * dest)
          // llvm::Type *args[] = { ObjectPtrTy, ObjectPtrTy->getPointerTo() };
-         llvm::Type *args[] = { ObjectPtrTy, llvm::PointerType::get(ObjectPtrTy, 0) };
+         llvm::Type *args[] = { ObjectPtrTy, llvm::PointerType::get(CGM.getLLVMContext(), 0) };
          llvm::FunctionType *FTy =
          llvm::FunctionType::get(ObjectPtrTy, args, false);
          return CGM.CreateRuntimeFunction(FTy, "mulle_objc_assign_threadlocal");
@@ -594,7 +594,7 @@ namespace {
       llvm::FunctionCallee getGcAssignStrongCastFn() {
          // id objc_assign_strongCast(id, id *)
          // llvm::Type *args[] = { ObjectPtrTy, ObjectPtrTy->getPointerTo() };
-         llvm::Type *args[] = { ObjectPtrTy, llvm::PointerType::get(ObjectPtrTy, 0) };
+         llvm::Type *args[] = { ObjectPtrTy, llvm::PointerType::get(CGM.getLLVMContext(), 0) };
          llvm::FunctionType *FTy =
          llvm::FunctionType::get(ObjectPtrTy, args, false);
          return CGM.CreateRuntimeFunction(FTy, "mulle_objc_assign_strong_cast");
@@ -698,7 +698,7 @@ namespace {
       /// ExceptionTryEnterFn - LLVM objc_exception_try_enter function.
       llvm::FunctionCallee getExceptionTryEnterFn() {
          // llvm::Type *params[] = { getExceptionDataTy( CGM)->getPointerTo(), UniverseIDTy };
-         llvm::Type *params[] = { llvm::PointerType::get(getExceptionDataTy(CGM), 0), UniverseIDTy };
+         llvm::Type *params[] = { llvm::PointerType::get(CGM.getLLVMContext(), 0), UniverseIDTy };
          return CGM.CreateRuntimeFunction(
                                           llvm::FunctionType::get(CGM.VoidTy, params, false),
                                           "mulle_objc_exception_tryenter");
@@ -706,7 +706,7 @@ namespace {
 
       /// ExceptionTryExitFn - LLVM objc_exception_try_exit function.
       llvm::FunctionCallee getExceptionTryExitFn() {
-         llvm::Type *params[] = { llvm::PointerType::get(getExceptionDataTy(CGM), 0), UniverseIDTy };
+         llvm::Type *params[] = { llvm::PointerType::get(CGM.getLLVMContext(), 0), UniverseIDTy };
          return CGM.CreateRuntimeFunction(
                                           llvm::FunctionType::get(CGM.VoidTy, params, false),
                                           "mulle_objc_exception_tryexit");
@@ -714,7 +714,7 @@ namespace {
 
       /// ExceptionExtractFn - LLVM objc_exception_extract function.
       llvm::FunctionCallee getExceptionExtractFn() {
-         llvm::Type *params[] = { llvm::PointerType::get(getExceptionDataTy(CGM), 0), UniverseIDTy };
+         llvm::Type *params[] = { llvm::PointerType::get(CGM.getLLVMContext(), 0), UniverseIDTy };
          return CGM.CreateRuntimeFunction(llvm::FunctionType::get(ObjectPtrTy,
                                                                   params, false),
                                           "mulle_objc_exception_extract");

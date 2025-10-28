@@ -914,7 +914,7 @@ llvm::Value   *CodeGenFunction::GetMetaABIParamAddressLValue( const Decl *FuncDe
    RecordDecl             *RD;
    QualType               recordTy;
    QualType               recordPtrTy;
-   llvm::Type             *llvmRecType;
+   // llvm::Type             *llvmRecType;  // unused
    llvm::Type             *llvmPointerType;
    llvm::Value            *paramAddr;
    //unsigned               alignment ;
@@ -932,8 +932,8 @@ llvm::Value   *CodeGenFunction::GetMetaABIParamAddressLValue( const Decl *FuncDe
 
    recordTy    = CGM.getContext().getTagDeclType( RD);
    recordPtrTy = CGM.getContext().getPointerType( recordTy);
-   llvmRecType = CGM.getTypes().ConvertTypeForMem( recordTy);
-   llvmPointerType = llvm::PointerType::get(llvmRecType, 0);
+   // llvmRecType = CGM.getTypes().ConvertTypeForMem( recordTy);  // unused
+   llvmPointerType = llvm::PointerType::get(CGM.getLLVMContext(), 0);
    // llvmPointerType = llvmRecType->getPointerTo();
 
    auto it = LocalDeclMap.find( MD->getParamDecl());
@@ -1074,7 +1074,7 @@ void   CodeGenFunction::EmitMetaABIWriteReturnValue( const Decl *FuncDecl, const
          alignment = CGM.getContext().getTypeAlignInChars( RVType);
          auto llvmType = getTypes().ConvertTypeForMem( RVType); //->getPointerTo();
          // auto llvmPtrType = llvmType->getPointerTo();
-         auto llvmPtrType = llvm::PointerType::get(llvmType, 0);
+         auto llvmPtrType = llvm::PointerType::get(CGM.getLLVMContext(), 0);
 
          paramAddr = Builder.CreateBitCast( Builder.CreateLoad( param, "_param.rval"), llvmPtrType);
 
@@ -1139,7 +1139,7 @@ CodeGen::RValue   CodeGenFunction::EmitMetaABIReadReturnValue( const ObjCMethodD
       if( ! Dst.isValid())
       {
          // Save the stack.
-         llvm::Type *StackSaveRetTy = llvm::PointerType::get(llvm::Type::getInt8Ty(CGM.getLLVMContext()), 0);       
+         llvm::Type *StackSaveRetTy = llvm::PointerType::get(CGM.getLLVMContext(), 0);       
          llvm::Function *F = CGM.getIntrinsic(llvm::Intrinsic::stacksave, {StackSaveRetTy});
          stackpointer      = Builder.CreateCall(F, {}, "inalloca.save");
 
@@ -1179,7 +1179,7 @@ CodeGen::RValue   CodeGenFunction::EmitMetaABIReadReturnValue( const ObjCMethodD
 
       if( stackpointer)
       {
-         llvm::Type *StackPointerTy = llvm::PointerType::get(llvm::Type::getInt8Ty(CGM.getLLVMContext()), 0);
+         llvm::Type *StackPointerTy = llvm::PointerType::get(CGM.getLLVMContext(), 0);
          llvm::Function *F = CGM.getIntrinsic(llvm::Intrinsic::stackrestore, {StackPointerTy});
          Builder.CreateCall(F, stackpointer);
       }
