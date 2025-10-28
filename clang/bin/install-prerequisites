@@ -699,7 +699,16 @@ setup_build_environment()
       linux)
          install_binary_if_missing "valgrind" "https://???"
 #         install_library_if_missing "python-dev" "https://www.python.org/downloads/release"
-         install_library_if_missing "python3-distutils" "https://docs.python.org/3/library/distutils.html"
+         (
+            . /etc/os-release 2> /dev/null
+            if [ "$ID" = "debian" ] && [ "$VERSION_ID" -ge 13 ]
+            then
+               install_library_if_missing "python3-setuptools" "https://docs.python.org/3/library/setuptools.html"
+            else
+               install_library_if_missing "python3-distutils" "https://docs.python.org/3/library/distutils.html"
+            fi
+         )
+
          install_library_if_missing "libxml2-dev" "https://xmlsoft.org"
          install_library_if_missing "libz-dev" "https://???"
          install_library_if_missing "libtinfo-dev" "https://???"
