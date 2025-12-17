@@ -580,6 +580,11 @@ public:
                            const ObjCMethodDecl *Method) override;
   llvm::Value *GetClass(CodeGenFunction &CGF,
                         const ObjCInterfaceDecl *OID) override;
+  // @mulle-objc@ get class >                        
+  llvm::Value *GetClass(CodeGenFunction &CGF,
+                        const ObjCInterfaceDecl *OID,
+                        llvm::Value *self) override;                        
+  // @mulle-objc@ get class <                        
   llvm::Value *GetSelector(CodeGenFunction &CGF, Selector Sel) override;
   Address GetAddrOfSelector(CodeGenFunction &CGF, Selector Sel) override;
   llvm::Value *GetSelector(CodeGenFunction &CGF,
@@ -2536,6 +2541,15 @@ llvm::Value *CGObjCGNU::GetClass(CodeGenFunction &CGF,
   return Value;
 }
 
+// @mulle-objc@ get class > 
+llvm::Value *CGObjCGNU::GetClass(CodeGenFunction &CGF,
+                                 const ObjCInterfaceDecl *OID,
+                                 llvm::Value *self) 
+{
+   return( GetClass( CGF, OID));   
+}  
+// @mulle-objc@ get class <                        
+
 llvm::Value *CGObjCGNU::EmitNSAutoreleasePoolClassRef(CodeGenFunction &CGF) {
   auto *Value  = GetClassNamed(CGF, "NSAutoreleasePool", false);
   if (CGM.getTriple().isOSBinFormatCOFF()) {
@@ -4449,7 +4463,10 @@ clang::CodeGen::CreateGNUObjCRuntime(CodeGenModule &CGM) {
   case ObjCRuntime::MacOSX:
   case ObjCRuntime::iOS:
   case ObjCRuntime::WatchOS:
+// @mulle-objc@ compiler: ugliness add ObjCRuntime::Mulle to other runtime code >
+  case ObjCRuntime::Mulle:
     llvm_unreachable("these runtimes are not GNU runtimes");
+// @mulle-objc@ compiler: ugliness add ObjCRuntime::Mulle to other runtime code <
   }
   llvm_unreachable("bad runtime");
 }

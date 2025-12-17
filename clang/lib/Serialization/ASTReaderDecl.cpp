@@ -1490,6 +1490,10 @@ void ASTDeclReader::VisitObjCPropertyDecl(ObjCPropertyDecl *D) {
   D->setSetterName(SetterName.getObjCSelector(), SetterLoc);
   D->setGetterMethodDecl(readDeclAs<ObjCMethodDecl>());
   D->setSetterMethodDecl(readDeclAs<ObjCMethodDecl>());
+  // @mulle-objc@ Container methods >
+  D->setAdderMethodDecl(readDeclAs<ObjCMethodDecl>());
+  D->setRemoverMethodDecl(readDeclAs<ObjCMethodDecl>());
+  // @mulle-objc@ Container methods <
   D->setPropertyIvarDecl(readDeclAs<ObjCIvarDecl>());
 }
 
@@ -1524,6 +1528,10 @@ void ASTDeclReader::VisitObjCPropertyImplDecl(ObjCPropertyImplDecl *D) {
   D->IvarLoc = readSourceLocation();
   D->setGetterMethodDecl(readDeclAs<ObjCMethodDecl>());
   D->setSetterMethodDecl(readDeclAs<ObjCMethodDecl>());
+  // @mulle-objc@ Container methods >
+  D->setAdderMethodDecl(readDeclAs<ObjCMethodDecl>());
+  D->setRemoverMethodDecl(readDeclAs<ObjCMethodDecl>());
+  // @mulle-objc@ Container methods <
   D->setGetterCXXConstructor(Record.readExpr());
   D->setSetterCXXAssignment(Record.readExpr());
 }

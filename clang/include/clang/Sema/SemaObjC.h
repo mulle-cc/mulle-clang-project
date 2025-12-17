@@ -355,6 +355,32 @@ public:
                                           int ParamIndex,
                                           bool MethodDefinition);
 
+  // @mulle-objc@ >> specific methods for parameters
+  int   CheckSelectorForAAM( Selector Sel,
+                             ObjCMethodDecl *Method,
+                             QualType ReceiverType,
+                             SourceLocation SelLoc,
+                             SourceRange RecRange);
+  bool CheckMulleObjCFunctionDefined( Scope *S, SourceLocation Loc, StringRef Name);
+
+  void   SetMulleObjCParam( ObjCMethodDecl *ObjCMethod,
+                            Selector Sel,
+                            SmallVector<ParmVarDecl*, 16> *Params,
+                            QualType resultType,
+                            unsigned int abiDesc,
+                            SourceLocation   Loc);
+                                          
+  enum MetaABIDescription
+  {
+    MetaABIVoidPtrRval   = 0x0,
+    MetaABIVoidPtrParam  = 0x1,
+    MetaABIRvalAsStruct  = 0x2,
+    MetaABIParamAsStruct = 0x4
+  }; 
+  unsigned int   metaABIDescription( SmallVector<ParmVarDecl*, 16> &Params,
+                                     QualType resultType);
+  // @mulle-objc@ << specific methods for parameters
+
   Decl *ActOnMethodDeclaration(
       Scope *S,
       SourceLocation BeginLoc, // location of the + or -.
@@ -943,9 +969,24 @@ public:
   /// \param property The property declaration being processed
   void ProcessPropertyDecl(ObjCPropertyDecl *property);
 
+// @mulle-objc >> adder + remover
+  void  VerifyPropertyNonGetterMethod( ObjCPropertyDecl *property,
+                                       ObjCMethodDecl *method,
+                                       std::string name);
+
+  ObjCMethodDecl  *CreatePropertyNonGetterMethod( ObjCContainerDecl *CD,
+                                                  ObjCPropertyDecl *property,
+                                                  Selector Selector,
+                                                  bool isSetter);
+// @mulle-objc << adder + remover
+
   Decl *ActOnProperty(Scope *S, SourceLocation AtLoc, SourceLocation LParenLoc,
                       FieldDeclarator &FD, ObjCDeclSpec &ODS,
                       Selector GetterSel, Selector SetterSel,
+// @mulle-objc >> adder + remover
+                      Selector AdderSel, 
+                      Selector RemoverSel, 
+// @mulle-objc << adder + remover
                       tok::ObjCKeywordKind MethodImplKind,
                       DeclContext *lexicalDC = nullptr);
 
@@ -961,7 +1002,12 @@ public:
   ObjCPropertyDecl *HandlePropertyInClassExtension(
       Scope *S, SourceLocation AtLoc, SourceLocation LParenLoc,
       FieldDeclarator &FD, Selector GetterSel, SourceLocation GetterNameLoc,
-      Selector SetterSel, SourceLocation SetterNameLoc, const bool isReadWrite,
+      Selector SetterSel, SourceLocation SetterNameLoc, 
+// @mulle-objc >> adder + remover
+      Selector AdderSel, SourceLocation AdderNameLoc,
+      Selector RemoverSel, SourceLocation RemoverNameLoc,
+// @mulle-objc << adder + remover
+      const bool isReadWrite,
       unsigned &Attributes, const unsigned AttributesAsWritten, QualType T,
       TypeSourceInfo *TSI, tok::ObjCKeywordKind MethodImplKind);
 
@@ -972,6 +1018,10 @@ public:
                      SourceLocation LParenLoc, FieldDeclarator &FD,
                      Selector GetterSel, SourceLocation GetterNameLoc,
                      Selector SetterSel, SourceLocation SetterNameLoc,
+// @mulle-objc >> adder + remover
+                     Selector AdderSel, SourceLocation AdderNameLoc,
+                     Selector RemoverSel, SourceLocation RemoverNameLoc,
+// @mulle-objc << adder + remover
                      const bool isReadWrite, const unsigned Attributes,
                      const unsigned AttributesAsWritten, QualType T,
                      TypeSourceInfo *TSI, tok::ObjCKeywordKind MethodImplKind,

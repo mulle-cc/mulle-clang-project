@@ -4035,8 +4035,11 @@ public:
 
   /// ActOnParamDeclarator - Called from Parser::ParseFunctionDeclarator()
   /// to introduce parameters into function prototype scope.
+  // @mulle-objc@ added isHidden to ActOnParamDeclarator >
   Decl *ActOnParamDeclarator(Scope *S, Declarator &D,
-                             SourceLocation ExplicitThisLoc = {});
+                             SourceLocation ExplicitThisLoc = {},
+                             bool isHidden = false);
+  // @mulle-objc@ added isHidden to ActOnParamDeclarator <
 
   /// Synthesizes a variable for a parameter arising from a
   /// typedef.
@@ -4109,6 +4112,13 @@ public:
   /// documentation comments.
   void ActOnDocumentableDecl(Decl *D);
   void ActOnDocumentableDecls(ArrayRef<Decl *> Group);
+
+  // @mulle-objc@ >> specific methods for parameters
+  ExprResult GetMulle_paramExpr(Scope *S, SourceLocation Loc, StringRef Name);
+  ExprResult GetMulle_paramExprAsType( QualType type, Scope *S, SourceLocation Loc, StringRef Name);
+
+  ExprResult GetMulle_paramFieldExpr(FieldDecl *FD, Scope *S, SourceLocation NameLoc);
+  // @mulle-objc@ << specific methods for parameters
 
   enum class FnBodyKind {
     /// C++26 [dcl.fct.def.general]p1
