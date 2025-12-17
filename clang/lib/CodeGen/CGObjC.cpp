@@ -957,7 +957,6 @@ void   CodeGenFunction::EmitMetaABIWriteScalarReturnValue( const Decl *FuncDecl,
 //   llvm::Type             *llvmPointerType;
    llvm::Value            *paramAddr;
    //unsigned               alignment ;
-   QualType               longType;
 
    MD = dyn_cast<ObjCMethodDecl>( FuncDecl);
          // return value: wrap scalar in aggregate, return pointer if in method
@@ -972,8 +971,8 @@ void   CodeGenFunction::EmitMetaABIWriteScalarReturnValue( const Decl *FuncDecl,
    {
       if( exprType->isIntegralOrEnumerationType())
       {
-         longType   = CGM.getContext().LongTy;
-         exprResult = Builder.CreateSExtOrBitCast( exprResult, getTypes().ConvertTypeForMem( longType));
+         QualType intptrType = CGM.getContext().getIntPtrType();
+         exprResult = Builder.CreateSExtOrBitCast( exprResult, getTypes().ConvertTypeForMem( intptrType));
       }
       exprResult = Builder.CreateBitOrPointerCast( exprResult, getTypes().ConvertTypeForMem( getContext().VoidPtrTy));
       Builder.CreateStore( exprResult, ReturnValue);

@@ -245,7 +245,6 @@ namespace {
    public:
       llvm::Type *ShortTy, *IntTy, *LongTy, *LongLongTy;
       llvm::Type *Int8PtrTy, *Int8PtrPtrTy;
-      llvm::Type *IvarOffsetVarTy;
 
       /// ObjectPtrTy - LLVM type for object handles (typeof(id))
       llvm::Type *ObjectPtrTy;
@@ -487,7 +486,7 @@ namespace {
          SmallVector<CanQualType,5> Params;
          Params.push_back(Ctx.VoidPtrTy);
          Params.push_back(Ctx.VoidPtrTy);
-         Params.push_back(Ctx.LongTy);
+         Params.push_back(Ctx.getSizeType());
          Params.push_back(Ctx.BoolTy);
          Params.push_back(Ctx.BoolTy);
          llvm::FunctionType *FTy =
@@ -585,7 +584,8 @@ namespace {
       /// GcMemmoveCollectableFn -- LLVM objc_memmove_collectable function.
       llvm::FunctionCallee GcMemmoveCollectableFn() {
          // void *objc_memmove_collectable(void *dst, const void *src, size_t size)
-         llvm::Type *args[] = { Int8PtrTy, Int8PtrTy, LongTy };
+         llvm::Type *SizeTy = CGM.getTypes().ConvertType(CGM.getContext().getSizeType());
+         llvm::Type *args[] = { Int8PtrTy, Int8PtrTy, SizeTy };
          llvm::FunctionType *FTy = llvm::FunctionType::get(Int8PtrTy, args, false);
          return CGM.CreateRuntimeFunction(FTy, "mulle_objc_memmove_collectable");
       }
@@ -2356,8 +2356,8 @@ llvm::StructType *CGObjCCommonMulleRuntime::CreateNSConstantStringType( void)
       FieldTypes[n++] = Context.VoidPtrTy;
    }
 
-   // const unsigned long  retainCount;
-   FieldTypes[n++] = Context.UnsignedLongTy;
+   // const uintptr_t  retainCount;
+   FieldTypes[n++] = Context.getUIntPtrType();
    // const void *isa;
    FieldTypes[n++] = Context.VoidPtrTy;
 
@@ -2432,7 +2432,7 @@ llvm::ConstantStruct *CGObjCMulleRuntime::CreateNSConstantStringStruct( StringRe
 
    j = 0;
    // drop LONG_MAX
-   llvm::Type *Ty = CGM.getTypes().ConvertType(CGM.getContext().LongTy);
+   llvm::Type *Ty = CGM.getTypes().ConvertType(CGM.getContext().getIntPtrType());
 
    // #define MULLE_OBJC_NEVER_RELEASE  (INTPTR_MAX-1)
    Fields6[i] = llvm::ConstantInt::get(Ty, INTPTR_MAX-1);
@@ -6912,7 +6912,7 @@ llvm::Value *CGObjCMulleRuntime::EmitIvarOffset(CodeGen::CodeGenFunction &CGF,
                                        const ObjCIvarDecl *Ivar) {
   uint64_t Offset = ComputeIvarBaseOffset(CGM, Interface, Ivar);
   return llvm::ConstantInt::get(
-    CGM.getTypes().ConvertType(CGM.getContext().LongTy),
+    CGM.getTypes().ConvertType(CGM.getContext().IntTy),
     Offset);
 }
 
@@ -7302,11 +7302,6 @@ ObjCCommonTypesHelper::ObjCCommonTypesHelper(CodeGen::CodeGenModule &cgm)
 
    // arm64 targets use "int" ivar offset variables. All others,
    // including OS X x86_64 and Windows x86_64, use "long" ivar offsets.
-   if (CGM.getTarget().getTriple().getArch() == llvm::Triple::aarch64)
-      IvarOffsetVarTy = IntTy;
-   else
-      IvarOffsetVarTy = LongTy;
-
    ObjectPtrTy    = Types.ConvertType(Ctx.getObjCIdType());
    PtrObjectPtrTy = llvm::PointerType::get(CGM.getLLVMContext(), 0);
    ParamsPtrTy    = llvm::PointerType::get(CGM.getLLVMContext(), 0);
