@@ -693,6 +693,8 @@ namespace {
       /// ExceptionDataTy - LLVM type for struct _objc_exception_data.
       private:  // @mulle-objc@ need to keep this lazy
       llvm::Type *ExceptionDataTy;
+      CharUnits ExceptionDataAlign;
+      unsigned ExceptionDataJmpBufIndex;
 
       public:
       /// ExceptionTryEnterFn - LLVM objc_exception_try_enter function.
@@ -747,6 +749,8 @@ namespace {
       ~ObjCTypesHelper() {}
 
       llvm::Type  *getExceptionDataTy( CodeGen::CodeGenModule &cgm);
+      CharUnits getExceptionDataAlign() const { return ExceptionDataAlign; }
+      unsigned getExceptionDataJmpBufFieldIndex() const { return ExceptionDataJmpBufIndex; }
    };
 
 
@@ -6448,8 +6452,13 @@ void CGObjCMulleRuntime::EmitTryOrSynchronizedStmt(CodeGen::CodeGenFunction &CGF
 
    // Allocate memory for the setjmp buffer.  This needs to be kept
    // live throughout the try and catch blocks.
+   // Use jmp_buf alignment to ensure proper alignment for AVX on Windows
+   ObjCTypes.getExceptionDataTy(CGM);  // Ensure type is initialized
+   CharUnits required_align = std::max(ObjCTypes.getExceptionDataAlign(), 
+                                       CGF.getPointerAlign());
+   
    Address ExceptionData = CGF.CreateTempAlloca( ObjCTypes.getExceptionDataTy( CGM),
-                                                 CGF.getPointerAlign(),
+                                                 required_align,
                                                 "exceptiondata.ptr");
 
    // Create the fragile hazards.  Note that this will not capture any
@@ -6492,11 +6501,12 @@ void CGObjCMulleRuntime::EmitTryOrSynchronizedStmt(CodeGen::CodeGenFunction &CGF
 
    //  - Call setjmp on the exception data buffer.
    llvm::Constant *Zero = llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 0);
-   llvm::Constant *One = llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 1);
+   llvm::Constant *JmpBufFieldIdx = llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 
+                                                            ObjCTypes.getExceptionDataJmpBufFieldIndex());
 
-   // the Exception data buffer is a struct of { int, jmpbuf }
-   // the setjmp buffer *follows* the pointers in MulleObjC ??
-   llvm::Value *GEPIndexes[] = { Zero, One, Zero};
+   // the Exception data buffer is a struct of { stack_ptrs[4], [padding,] jmpbuf }
+   // the setjmp buffer follows the pointers (and optional padding) in MulleObjC
+   llvm::Value *GEPIndexes[] = { Zero, JmpBufFieldIdx, Zero};
    llvm::Value *SetJmpBuffer = CGF.Builder.CreateGEP(
       ObjCTypes.getExceptionDataTy( CGM), ExceptionData.getBasePointer(), GEPIndexes,
       "setjmp_buffer");
@@ -7637,6 +7647,8 @@ ObjCTypesHelper::ObjCTypesHelper(CodeGen::CodeGenModule &cgm)
                             llvm::PointerType::get(CGM.getLLVMContext(), 0));
 
    ExceptionDataTy = nullptr; // later on demand
+   ExceptionDataAlign = CharUnits::One(); // will be set when type is created
+   ExceptionDataJmpBufIndex = 1; // will be updated if padding is added
 }
 
 
@@ -7668,14 +7680,40 @@ ObjCTypesHelper::ObjCTypesHelper(CodeGen::CodeGenModule &cgm)
    // Exceptions (4 void *) ???
    llvm::Type *StackPtrTy = llvm::ArrayType::get(CGM.Int8PtrTy, 4);
 
+   // The fix: Calculate padding needed after the 4 pointers to align jmp_buf.
+   // This ensures jmp_buf is properly aligned even when alignment requirement
+   // exceeds 4*sizeof(void*) (e.g., 64-byte alignment for AVX-512).
+   // Get jmp_buf alignment requirement
+   CharUnits jmpbuf_align = cgm.getContext().getTypeAlignInChars(jmpbuf_type);
+   
+   // Calculate padding needed after the 4 pointers to align jmp_buf
+   uint64_t stack_ptr_size = 4 * cgm.getContext().getTypeSize(cgm.getContext().VoidPtrTy) / 8;
+   uint64_t jmpbuf_align_bytes = jmpbuf_align.getQuantity();
+   uint64_t padding_needed = (jmpbuf_align_bytes - (stack_ptr_size % jmpbuf_align_bytes)) % jmpbuf_align_bytes;
+
    //
    // this is different in MulleObjC, to fix alignment problems
-   // the setjmp buffer *follows* the pointers
+   // the setjmp buffer *follows* the pointers (with padding for alignment)
    //
-   ExceptionDataTy =
-   llvm::StructType::create("struct._mulle_objc_exception_data",
-                            StackPtrTy,
-                            llvm::ArrayType::get(CGM.Int32Ty,SetJmpBufferInts));
+   if (padding_needed > 0) {
+      llvm::Type *PaddingTy = llvm::ArrayType::get(CGM.Int8Ty, padding_needed);
+      ExceptionDataTy =
+      llvm::StructType::create("struct._mulle_objc_exception_data",
+                               StackPtrTy,
+                               PaddingTy,
+                               llvm::ArrayType::get(CGM.Int32Ty,SetJmpBufferInts));
+      ExceptionDataJmpBufIndex = 2; // jmp_buf is at field index 2 (after padding)
+   } else {
+      ExceptionDataTy =
+      llvm::StructType::create("struct._mulle_objc_exception_data",
+                               StackPtrTy,
+                               llvm::ArrayType::get(CGM.Int32Ty,SetJmpBufferInts));
+      ExceptionDataJmpBufIndex = 1; // jmp_buf is at field index 1 (no padding)
+   }
+   
+   // Store the jmp_buf alignment for later use during allocation
+   ExceptionDataAlign = jmpbuf_align;
+   
    return( ExceptionDataTy);
 }
 
