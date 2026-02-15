@@ -8216,6 +8216,24 @@ def err_mulle_dynamic_property_synthesize  : Error<
 
 // @mulle-objc@ compiler: error message definitions end <
 
+// @mulle-objc@ mulle_confined_loop diagnostics >
+def err_mulle_confined_loop_has_return : Error<
+  "return statement not allowed in mulle_confined_loop">;
+def err_mulle_confined_loop_has_goto_outside : Error<
+  "goto to label outside of mulle_confined_loop is not allowed">;
+def warn_mulle_confined_loop_has_indirect_goto : Warning<
+  "indirect goto in mulle_confined_loop may exit the block">,
+  InGroup<MulleConfinedLoop>;
+def warn_mulle_confined_loop_has_longjmp : Warning<
+  "longjmp in mulle_confined_loop may exit the block">,
+  InGroup<MulleConfinedLoop>;
+def warn_mulle_confined_loop_has_throw : Warning<
+  "@throw in mulle_confined_loop may exit the block">,
+  InGroup<MulleConfinedLoop>;
+// @mulle-objc@ mulle_confined_loop diagnostics <
+
+// @mulle-objc@ compiler: error message definitions end2 <
+
 def warn_setter_getter_impl_required : Warning<
   "property %0 requires method %1 to be defined - "
   "use @synthesize, @dynamic or provide a method implementation "

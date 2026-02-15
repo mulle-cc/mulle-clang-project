@@ -661,6 +661,9 @@ def MethodAccess : DiagGroup<"objc-method-access">;
 // @mulle-objc@ AAMRenaming >
 def AAMRenaming  : DiagGroup<"objc-aam-renaming">;
 // @mulle-objc@ AAMRenaming <
+// @mulle-objc@ mulle_confined_loop >
+def MulleConfinedLoop : DiagGroup<"mulle-confined-loop">;
+// @mulle-objc@ mulle_confined_loop <
 def ObjCReceiver : DiagGroup<"receiver-expr">;
 def OperatorNewReturnsNull : DiagGroup<"new-returns-null">;
 def OverlengthStrings : DiagGroup<"overlength-strings">;
