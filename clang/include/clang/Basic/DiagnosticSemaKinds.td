@@ -8232,6 +8232,11 @@ def warn_mulle_confined_loop_has_throw : Warning<
   InGroup<MulleConfinedLoop>;
 // @mulle-objc@ mulle_confined_loop diagnostics <
 
+// @mulle-objc@ mulle_confined_return diagnostics >
+def err_mulle_confined_return_in_nested_loop : Error<
+  "mulle_confined_return only allowed in non-nested loops within mulle_confined_loop">;
+// @mulle-objc@ mulle_confined_return diagnostics <
+
 // @mulle-objc@ compiler: error message definitions end2 <
 
 def warn_setter_getter_impl_required : Warning<

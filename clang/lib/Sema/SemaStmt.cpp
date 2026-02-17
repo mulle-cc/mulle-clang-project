@@ -675,20 +675,47 @@ StmtResult Sema::BuildAttributedStmt(SourceLocation AttrsLoc,
         CollectLabels(Body);
 
         // Walk body checking for escaping statements
-        std::function<void(const Stmt *)> CheckStmt = [&](const Stmt *S) {
+        std::function<void(const Stmt *, int)> CheckStmt = [&](const Stmt *S, int nestedLoopDepth) {
           if (!S) return;
           
-          // Stop recursing if we hit a nested attributed statement with mulle_confined_loop
-          // (it will check its own body)
-          if (const auto *AS = dyn_cast<AttributedStmt>(S)) {
-            for (const auto *Attr : AS->getAttrs()) {
-              if (Attr->getKind() == attr::MulleConfinedLoop)
-                return; // Don't recurse into nested confined loops
-            }
+          // Track nested loops
+          int nextDepth = nestedLoopDepth;
+          if (isa<DoStmt>(S) || isa<WhileStmt>(S) || isa<ForStmt>(S)) {
+            nextDepth++;
           }
-          
+
+          if (const auto *AS = dyn_cast<AttributedStmt>(S)) {
+            // If nested mulle_confined_loop, recurse into its body with incremented
+            // depth to catch mulle_confined_return nesting violations, but skip
+            // bare return errors (the inner loop's own check handles those)
+            for (const auto *Attr : AS->getAttrs()) {
+              if (Attr->getKind() == attr::MulleConfinedLoop) {
+                for (const Stmt *Child : S->children())
+                  CheckStmt(Child, nestedLoopDepth + 1);
+                return;
+              }
+            }
+            // Check if this is a mulle_confined_return wrapping a return stmt
+            for (const auto *Attr : AS->getAttrs()) {
+              if (Attr->getKind() == attr::MulleConfinedReturn &&
+                  isa<ReturnStmt>(AS->getSubStmt())) {
+                if (nestedLoopDepth > 0)
+                  Diag(AS->getBeginLoc(), diag::err_mulle_confined_return_in_nested_loop);
+                // else: OK at top level
+                return;
+              }
+            }
+            // Other attributed stmt - recurse normally
+            for (const Stmt *Child : S->children())
+              CheckStmt(Child, nextDepth);
+            return;
+          }
+
           if (const auto *RS = dyn_cast<ReturnStmt>(S)) {
-            Diag(RS->getReturnLoc(), diag::err_mulle_confined_loop_has_return);
+            // Only error on bare return at depth 0 - inner confined loops
+            // report their own bare return errors
+            if (nestedLoopDepth == 0)
+              Diag(RS->getReturnLoc(), diag::err_mulle_confined_loop_has_return);
           } else if (const auto *GS = dyn_cast<GotoStmt>(S)) {
             if (!InternalLabels.count(GS->getLabel()))
               Diag(GS->getGotoLoc(), diag::err_mulle_confined_loop_has_goto_outside);
@@ -705,9 +732,9 @@ StmtResult Sema::BuildAttributedStmt(SourceLocation AttrsLoc,
             }
           }
           for (const Stmt *Child : S->children())
-            CheckStmt(Child);
+            CheckStmt(Child, nextDepth);
         };
-        CheckStmt(Body);
+        CheckStmt(Body, 0);
       }
     }
     // @mulle-objc@ Check mulle_confined_loop constraints <

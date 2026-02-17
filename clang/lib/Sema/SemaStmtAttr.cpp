@@ -667,6 +667,14 @@ static Attr *handleMulleConfinedLoopAttr(Sema &S, Stmt *St,
 }
 // @mulle-objc@ mulle_confined_loop handler <
 
+// @mulle-objc@ mulle_confined_return handler >
+static Attr *handleMulleConfinedReturnAttr(Sema &S, Stmt *St,
+                                            const ParsedAttr &A,
+                                            SourceRange Range) {
+  return ::new (S.Context) MulleConfinedReturnAttr(S.Context, A);
+}
+// @mulle-objc@ mulle_confined_return handler <
+
 static Attr *ProcessStmtAttribute(Sema &S, Stmt *St, const ParsedAttr &A,
                                   SourceRange Range) {
   if (A.isInvalid() || A.getKind() == ParsedAttr::IgnoredAttribute)
@@ -735,6 +743,10 @@ static Attr *ProcessStmtAttribute(Sema &S, Stmt *St, const ParsedAttr &A,
   case ParsedAttr::AT_MulleConfinedLoop:
     return handleMulleConfinedLoopAttr(S, St, A, Range);
   // @mulle-objc@ mulle_confined_loop dispatch <
+  // @mulle-objc@ mulle_confined_return dispatch >
+  case ParsedAttr::AT_MulleConfinedReturn:
+    return handleMulleConfinedReturnAttr(S, St, A, Range);
+  // @mulle-objc@ mulle_confined_return dispatch <
   default:
     if (Attr *AT = nullptr; A.getInfo().handleStmtAttribute(S, St, A, AT) !=
                             ParsedAttrInfo::NotHandled) {
