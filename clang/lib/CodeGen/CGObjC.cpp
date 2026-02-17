@@ -2658,10 +2658,12 @@ void CodeGenFunction::EmitObjCForCollectionStmt(const ObjCForCollectionStmt &S){
   llvm::Value *StateMutationsPtr
     = Builder.CreateLoad(StateMutationsPtrPtr, "mutationsptr");
 
-  llvm::Type *UnsignedLongTy = ConvertType(getContext().UnsignedLongTy);
+  // @mulle-objc@ Use NSUInteger instead of UnsignedLong for mutations
+  llvm::Type *NSUIntegerLLVMTy = ConvertType(getContext().getNSUIntegerType());
+  CharUnits NSUIntegerAlign = getContext().getTypeAlignInChars(getContext().getNSUIntegerType());
   llvm::Value *initialMutations =
-    Builder.CreateAlignedLoad(UnsignedLongTy, StateMutationsPtr,
-                              getPointerAlign(), "forcoll.initial-mutations");
+    Builder.CreateAlignedLoad(NSUIntegerLLVMTy, StateMutationsPtr,
+                              NSUIntegerAlign, "forcoll.initial-mutations");
 
   // Start looping.  This is the point we return to whenever we have a
   // fresh, non-empty batch of objects.
@@ -2682,9 +2684,10 @@ void CodeGenFunction::EmitObjCForCollectionStmt(const ObjCForCollectionStmt &S){
   // at start.  StateMutationsPtr should actually be invariant between
   // refreshes.
   StateMutationsPtr = Builder.CreateLoad(StateMutationsPtrPtr, "mutationsptr");
+  // @mulle-objc@ Use NSUInteger instead of UnsignedLong for mutations
   llvm::Value *currentMutations
-    = Builder.CreateAlignedLoad(UnsignedLongTy, StateMutationsPtr,
-                                getPointerAlign(), "statemutations");
+    = Builder.CreateAlignedLoad(NSUIntegerLLVMTy, StateMutationsPtr,
+                                NSUIntegerAlign, "statemutations");
 
   llvm::BasicBlock *WasMutatedBB = createBasicBlock("forcoll.mutated");
   llvm::BasicBlock *WasNotMutatedBB = createBasicBlock("forcoll.notmutated");
