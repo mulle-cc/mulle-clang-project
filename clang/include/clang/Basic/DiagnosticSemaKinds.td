@@ -8234,7 +8234,7 @@ def warn_mulle_confined_loop_has_throw : Warning<
 
 // @mulle-objc@ mulle_confined_return diagnostics >
 def err_mulle_confined_return_in_nested_loop : Error<
-  "mulle_confined_return only allowed in non-nested loops within mulle_confined_loop">;
+  "mulle_confined_return only allowed in the outermost mulle_confined_loop, not inside a nested mulle_confined_loop">;
 // @mulle-objc@ mulle_confined_return diagnostics <
 
 // @mulle-objc@ compiler: error message definitions end2 <

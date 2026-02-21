@@ -677,12 +677,6 @@ StmtResult Sema::BuildAttributedStmt(SourceLocation AttrsLoc,
         // Walk body checking for escaping statements
         std::function<void(const Stmt *, int)> CheckStmt = [&](const Stmt *S, int nestedLoopDepth) {
           if (!S) return;
-          
-          // Track nested loops
-          int nextDepth = nestedLoopDepth;
-          if (isa<DoStmt>(S) || isa<WhileStmt>(S) || isa<ForStmt>(S)) {
-            nextDepth++;
-          }
 
           if (const auto *AS = dyn_cast<AttributedStmt>(S)) {
             // If nested mulle_confined_loop, recurse into its body with incremented
@@ -707,7 +701,7 @@ StmtResult Sema::BuildAttributedStmt(SourceLocation AttrsLoc,
             }
             // Other attributed stmt - recurse normally
             for (const Stmt *Child : S->children())
-              CheckStmt(Child, nextDepth);
+              CheckStmt(Child, nestedLoopDepth);
             return;
           }
 
@@ -732,7 +726,7 @@ StmtResult Sema::BuildAttributedStmt(SourceLocation AttrsLoc,
             }
           }
           for (const Stmt *Child : S->children())
-            CheckStmt(Child, nextDepth);
+            CheckStmt(Child, nestedLoopDepth);
         };
         CheckStmt(Body, 0);
       }
