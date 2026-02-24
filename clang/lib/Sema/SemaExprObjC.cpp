@@ -2450,16 +2450,68 @@ ExprResult SemaObjC::ActOnSuperMessage(Scope *S, SourceLocation SuperLoc,
     // Since we are in an instance method, this is an instance
     // message to the superclass instance.
     SuperTy = Context.getObjCObjectPointerType(SuperTy);
+
+    // @mulle-objc@ protocolclass super lookup >
+    // Check protocolclasses that Class directly conforms to before
+    // falling back to the superclass lookup. This suppresses false
+    // "method not found" warnings when the method is provided by a
+    // protocolclass default implementation.
+    ObjCMethodDecl *ProtoClassMethod = nullptr;
+    for (auto *Proto : Class->protocols()) {
+      NamedDecl *PD = SemaRef.LookupSingleName(
+          SemaRef.TUScope, Proto->getIdentifier(),
+          SuperLoc, Sema::LookupOrdinaryName);
+      if (auto *IDecl = dyn_cast_or_null<ObjCInterfaceDecl>(PD)) {
+        if (IDecl->isProtocolClass()) {
+          if (ObjCMethodDecl *M = IDecl->lookupInstanceMethod(Sel)) {
+            ProtoClassMethod = M;
+            break;
+          }
+          if (ObjCImplementationDecl *Impl = IDecl->getImplementation()) {
+            if (ObjCMethodDecl *M = Impl->getInstanceMethod(Sel)) {
+              ProtoClassMethod = M;
+              break;
+            }
+          }
+        }
+      }
+    }
+    // @mulle-objc@ protocolclass super lookup <
+
     return BuildInstanceMessage(nullptr, SuperTy, SuperLoc,
-                                Sel, /*Method=*/nullptr,
+                                Sel, ProtoClassMethod,
                                 LBracLoc, SelectorLocs, RBracLoc, Args);
   }
 
   // Since we are in a class method, this is a class message to
   // the superclass.
+
+  // @mulle-objc@ protocolclass super lookup class >
+  ObjCMethodDecl *ProtoClassMethod = nullptr;
+  for (auto *Proto : Class->protocols()) {
+    NamedDecl *PD = SemaRef.LookupSingleName(
+        SemaRef.TUScope, Proto->getIdentifier(),
+        SuperLoc, Sema::LookupOrdinaryName);
+    if (auto *IDecl = dyn_cast_or_null<ObjCInterfaceDecl>(PD)) {
+      if (IDecl->isProtocolClass()) {
+        if (ObjCMethodDecl *M = IDecl->lookupClassMethod(Sel)) {
+          ProtoClassMethod = M;
+          break;
+        }
+        if (ObjCImplementationDecl *Impl = IDecl->getImplementation()) {
+          if (ObjCMethodDecl *M = Impl->getClassMethod(Sel)) {
+            ProtoClassMethod = M;
+            break;
+          }
+        }
+      }
+    }
+  }
+  // @mulle-objc@ protocolclass super lookup class <
+
   return BuildClassMessage(/*ReceiverTypeInfo=*/nullptr,
                            SuperTy,
-                           SuperLoc, Sel, /*Method=*/nullptr,
+                           SuperLoc, Sel, ProtoClassMethod,
                            LBracLoc, SelectorLocs, RBracLoc, Args);
 }
 

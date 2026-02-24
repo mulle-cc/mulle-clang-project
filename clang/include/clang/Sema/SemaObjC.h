@@ -280,7 +280,11 @@ public:
       SourceLocation ProtocolLoc, Decl *const *ProtoRefNames,
       unsigned NumProtoRefs, const SourceLocation *ProtoLocs,
       SourceLocation EndProtoLoc, const ParsedAttributesView &AttrList,
-      SkipBodyInfo *SkipBody);
+      SkipBodyInfo *SkipBody,
+      // @mulle-objc@ protocolclass param >
+      bool IsProtocolClass = false
+      // @mulle-objc@ protocolclass param <
+      );
 
   ObjCCategoryDecl *ActOnStartCategoryInterface(
       SourceLocation AtInterfaceLoc, const IdentifierInfo *ClassName,
@@ -309,6 +313,17 @@ public:
   ActOnForwardProtocolDeclaration(SourceLocation AtProtoclLoc,
                                   ArrayRef<IdentifierLoc> IdentList,
                                   const ParsedAttributesView &attrList);
+
+  // @mulle-objc@ protocolclass sema declarations >
+  DeclGroupPtrTy
+  ActOnProtocolClassForwardDeclaration(SourceLocation AtLoc,
+                                       ArrayRef<IdentifierLoc> IdentList,
+                                       const ParsedAttributesView &AttrList);
+
+  ObjCImplementationDecl *ActOnStartProtocolImplementation(
+      SourceLocation AtLoc, const IdentifierInfo *ClassName,
+      SourceLocation ClassLoc, const ParsedAttributesView &Attrs);
+  // @mulle-objc@ protocolclass sema declarations <
 
   void FindProtocolDeclaration(bool WarnOnDeclarations, bool ForObjCContainer,
                                ArrayRef<IdentifierLoc> ProtocolId,

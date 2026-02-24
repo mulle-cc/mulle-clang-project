@@ -857,6 +857,11 @@ OBJC_AT_KEYWORD(dynamic)
 OBJC_AT_KEYWORD(import)
 OBJC_AT_KEYWORD(available)
 
+// @mulle-objc@ protocolclass keywords >
+OBJC_AT_KEYWORD(protocolclass)
+OBJC_AT_KEYWORD(protocolimplementation)
+// @mulle-objc@ protocolclass keywords <
+
 //===----------------------------------------------------------------------===//
 // Notable identifiers.
 //===----------------------------------------------------------------------===//

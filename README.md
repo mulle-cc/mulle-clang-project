@@ -27,6 +27,45 @@ for all Objective-C method calls. C function calls use the platform convention.
 The resultant `.o` files are linkable like any other compiled C code.
 
 
+### `@protocolclass` and `@protocolimplementation`
+
+Add two new ObjC language constructs for mulle-objc protocolclasses:
+
+1. **`@protocolclass`** — Declares a protocolclass. Works like `@protocol`:
+   - `@protocolclass Foo;` — forward declaration
+   - `@protocolclass Foo, Bar;` — multiple forward declarations
+   - `@protocolclass Foo <NSObject> @optional ... @end` — full definition
+
+2. **`@protocolimplementation Foo`** — Provides default method implementations.
+   Ends with `@end`.
+
+
+This was already available through macros in previous versions, but the
+syntax is now nicer and the compiler can issue better warnings and error
+messages.
+
+
+## User-Facing Syntax
+
+```objc
+// Forward declaration (in headers that use the type)
+@protocolclass Foo;
+
+// Full declaration (in the defining header)
+@protocolclass Foo < NSObject>
+- (void) doSomething;
+@end
+
+// Default implementations (in .m file)
+@protocolimplementation Foo
+- (void) doSomething
+{
+    // default impl
+}
+@end
+```
+
+
 ### AAM - Always Autorelease Mode
 
 The compiler has a special mode called AAM. This changes the Objective-C

@@ -1256,11 +1256,27 @@ ObjCProtocolDecl *SemaObjC::ActOnStartProtocolInterface(
     SourceLocation AtProtoInterfaceLoc, IdentifierInfo *ProtocolName,
     SourceLocation ProtocolLoc, Decl *const *ProtoRefs, unsigned NumProtoRefs,
     const SourceLocation *ProtoLocs, SourceLocation EndProtoLoc,
-    const ParsedAttributesView &AttrList, SkipBodyInfo *SkipBody) {
+    const ParsedAttributesView &AttrList, SkipBodyInfo *SkipBody,
+    bool IsProtocolClass) {
   ASTContext &Context = getASTContext();
   bool err = false;
   // FIXME: Deal with AttrList.
   assert(ProtocolName && "Missing protocol identifier");
+
+  // @mulle-objc@ protocolclass protocol def conflict >
+  if (!IsProtocolClass) {
+    NamedDecl *ClassDecl = SemaRef.LookupSingleName(
+        SemaRef.TUScope, ProtocolName, ProtocolLoc, Sema::LookupOrdinaryName);
+    if (auto *IDecl = dyn_cast_or_null<ObjCInterfaceDecl>(ClassDecl)) {
+      if (IDecl->isProtocolClass()) {
+        Diag(ProtocolLoc, diag::err_mulle_protocol_def_conflicts_protocolclass)
+          << ProtocolName;
+        Diag(IDecl->getLocation(), diag::note_previous_definition);
+      }
+    }
+  }
+  // @mulle-objc@ protocolclass protocol def conflict <
+
   ObjCProtocolDecl *PrevDecl = LookupProtocol(
       ProtocolName, ProtocolLoc, SemaRef.forRedeclarationInCurContext());
   ObjCProtocolDecl *PDecl = nullptr;
@@ -1832,6 +1848,19 @@ SemaObjC::DeclGroupPtrTy SemaObjC::ActOnForwardProtocolDeclaration(
   SmallVector<Decl *, 8> DeclsInGroup;
   for (const IdentifierLoc &IdentPair : IdentList) {
     IdentifierInfo *Ident = IdentPair.getIdentifierInfo();
+
+    // @mulle-objc@ protocolclass protocol fwd conflict >
+    NamedDecl *ClassDecl = SemaRef.LookupSingleName(
+        SemaRef.TUScope, Ident, IdentPair.getLoc(), Sema::LookupOrdinaryName);
+    if (auto *IDecl = dyn_cast_or_null<ObjCInterfaceDecl>(ClassDecl)) {
+      if (IDecl->isProtocolClass()) {
+        Diag(IdentPair.getLoc(),
+             diag::warn_mulle_protocol_fwd_after_protocolclass) << Ident;
+        Diag(IDecl->getLocation(), diag::note_previous_definition);
+      }
+    }
+    // @mulle-objc@ protocolclass protocol fwd conflict <
+
     ObjCProtocolDecl *PrevDecl = LookupProtocol(
         Ident, IdentPair.getLoc(), SemaRef.forRedeclarationInCurContext());
     ObjCProtocolDecl *PDecl =
@@ -1852,6 +1881,67 @@ SemaObjC::DeclGroupPtrTy SemaObjC::ActOnForwardProtocolDeclaration(
 
   return SemaRef.BuildDeclaratorGroup(DeclsInGroup);
 }
+
+// @mulle-objc@ protocolclass forward decl sema >
+SemaObjC::DeclGroupPtrTy SemaObjC::ActOnProtocolClassForwardDeclaration(
+    SourceLocation AtLoc, ArrayRef<IdentifierLoc> IdentList,
+    const ParsedAttributesView &AttrList) {
+  ASTContext &Context = getASTContext();
+  SmallVector<Decl *, 8> DeclsInGroup;
+
+  for (const IdentifierLoc &IL : IdentList) {
+    IdentifierInfo *Name = IL.getIdentifierInfo();
+    SourceLocation Loc = IL.getLoc();
+
+    // Check for existing @class (non-protocolclass)
+    NamedDecl *PrevDecl = SemaRef.LookupSingleName(
+        SemaRef.TUScope, Name, Loc, Sema::LookupOrdinaryName,
+        SemaRef.forRedeclarationInCurContext());
+    if (auto *PrevIDecl = dyn_cast_or_null<ObjCInterfaceDecl>(PrevDecl)) {
+      if (PrevIDecl->isProtocolClass()) {
+        // Duplicate @protocolclass forward decl — OK
+        DeclsInGroup.push_back(PrevIDecl);
+        continue;
+      }
+      Diag(Loc, diag::err_mulle_protocolclass_conflict_class) << Name;
+      Diag(PrevDecl->getLocation(), diag::note_previous_definition);
+      continue;
+    } else if (PrevDecl) {
+      Diag(Loc, diag::err_redefinition_different_kind) << Name;
+      Diag(PrevDecl->getLocation(), diag::note_previous_definition);
+      continue;
+    }
+
+    // Check for existing standalone @protocol
+    ObjCProtocolDecl *PrevProto = LookupProtocol(
+        Name, Loc, SemaRef.forRedeclarationInCurContext());
+    if (PrevProto) {
+      Diag(Loc, diag::err_mulle_protocolclass_conflict_protocol) << Name;
+      Diag(PrevProto->getLocation(), diag::note_previous_definition);
+      continue;
+    }
+
+    // Create ObjCInterfaceDecl (forward class), marked as protocolclass
+    ObjCInterfaceDecl *IDecl = ObjCInterfaceDecl::Create(
+        Context, SemaRef.CurContext, AtLoc, Name,
+        /*typeParamList=*/nullptr, /*PrevDecl=*/nullptr, Loc);
+    IDecl->setAtEndRange(Loc);
+    IDecl->setProtocolClass(true);
+    SemaRef.PushOnScopeChains(IDecl, SemaRef.TUScope);
+    CheckObjCDeclScope(IDecl);
+    DeclsInGroup.push_back(IDecl);
+
+    // Create ObjCProtocolDecl (forward protocol)
+    ObjCProtocolDecl *PDecl = ObjCProtocolDecl::Create(
+        Context, SemaRef.CurContext, Name, Loc, AtLoc, /*PrevDecl=*/nullptr);
+    SemaRef.PushOnScopeChains(PDecl, SemaRef.TUScope);
+    CheckObjCDeclScope(PDecl);
+    DeclsInGroup.push_back(PDecl);
+  }
+
+  return SemaRef.BuildDeclaratorGroup(DeclsInGroup);
+}
+// @mulle-objc@ protocolclass forward decl sema <
 
 ObjCCategoryDecl *SemaObjC::ActOnStartCategoryInterface(
     SourceLocation AtInterfaceLoc, const IdentifierInfo *ClassName,
@@ -1948,6 +2038,48 @@ ObjCCategoryDecl *SemaObjC::ActOnStartCategoryInterface(
   ActOnObjCContainerStartDefinition(CDecl);
   return CDecl;
 }
+
+// @mulle-objc@ protocolimplementation sema >
+ObjCImplementationDecl *SemaObjC::ActOnStartProtocolImplementation(
+    SourceLocation AtLoc, const IdentifierInfo *ClassName,
+    SourceLocation ClassLoc, const ParsedAttributesView &Attrs) {
+  // Look up protocol — warn if not found
+  ObjCProtocolDecl *Proto = LookupProtocol(
+      const_cast<IdentifierInfo *>(ClassName), ClassLoc);
+  if (!Proto)
+    Diag(ClassLoc, diag::warn_mulle_protocolimpl_missing_protocol) << ClassName;
+
+  // Synthesize @interface Foo <Foo> @end (root class conforming to own protocol)
+  SmallVector<Decl *, 1> ProtoRefs;
+  SmallVector<SourceLocation, 1> ProtoLocs;
+  if (Proto) {
+    ProtoRefs.push_back(Proto);
+    ProtoLocs.push_back(ClassLoc);
+  }
+
+  ObjCInterfaceDecl *IDecl = ActOnStartClassInterface(
+      SemaRef.TUScope, AtLoc,
+      const_cast<IdentifierInfo *>(ClassName), ClassLoc,
+      /*typeParamList=*/nullptr,
+      /*SuperName=*/nullptr, SourceLocation(),
+      /*SuperTypeArgs=*/{}, SourceRange(),
+      ProtoRefs.data(), ProtoRefs.size(),
+      ProtoLocs.data(), ClassLoc,
+      ParsedAttributesView{}, /*SkipBody=*/nullptr);
+
+  if (IDecl) {
+    IDecl->addAttr(ObjCRootClassAttr::CreateImplicit(getASTContext()));
+    IDecl->setProtocolClass(true);
+  }
+
+  ActOnObjCContainerFinishDefinition();
+
+  // Start @implementation Foo (no superclass)
+  return ActOnStartClassImplementation(
+      AtLoc, const_cast<IdentifierInfo *>(ClassName), ClassLoc,
+      /*SuperClassname=*/nullptr, SourceLocation(), Attrs);
+}
+// @mulle-objc@ protocolimplementation sema <
 
 /// ActOnStartCategoryImplementation - Perform semantic checks on the
 /// category implementation declaration and build an ObjCCategoryImplDecl
@@ -3199,6 +3331,15 @@ SemaObjC::DeclGroupPtrTy SemaObjC::ActOnForwardClassDeclaration(
     // Create a declaration to describe this forward declaration.
     ObjCInterfaceDecl *PrevIDecl
       = dyn_cast_or_null<ObjCInterfaceDecl>(PrevDecl);
+
+    // @mulle-objc@ protocolclass class conflict check >
+    if (PrevIDecl && PrevIDecl->isProtocolClass()) {
+      Diag(IdentLocs[i], diag::err_mulle_class_conflicts_protocolclass)
+        << IdentList[i];
+      Diag(PrevIDecl->getLocation(), diag::note_previous_definition);
+      continue;
+    }
+    // @mulle-objc@ protocolclass class conflict check <
 
     IdentifierInfo *ClassName = IdentList[i];
     if (PrevIDecl && PrevIDecl->getIdentifier() != ClassName) {

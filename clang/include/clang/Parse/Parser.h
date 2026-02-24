@@ -5585,7 +5585,11 @@ private:
   ///     @optional
   /// \endverbatim
   ///
-  void ParseObjCInterfaceDeclList(tok::ObjCKeywordKind contextKey, Decl *CDecl);
+  void ParseObjCInterfaceDeclList(tok::ObjCKeywordKind contextKey, Decl *CDecl,
+      // @mulle-objc@ protocolclass default optional >
+      tok::ObjCKeywordKind DefaultMethodImplKind = tok::objc_not_keyword
+      // @mulle-objc@ protocolclass default optional <
+      );
 
   /// \verbatim
   ///   objc-protocol-declaration:
@@ -5648,6 +5652,12 @@ private:
   /// \endverbatim
   DeclGroupPtrTy ParseObjCAtImplementationDeclaration(SourceLocation AtLoc,
                                                       ParsedAttributes &Attrs);
+  // @mulle-objc@ protocolclass declarations >
+  DeclGroupPtrTy ParseObjCAtProtocolClassDeclaration(SourceLocation AtLoc,
+                                                     ParsedAttributes &Attrs);
+  DeclGroupPtrTy ParseObjCAtProtocolImplementation(SourceLocation AtLoc,
+                                                   ParsedAttributes &Attrs);
+  // @mulle-objc@ protocolclass declarations <
   DeclGroupPtrTy ParseObjCAtEndDeclaration(SourceRange atEnd);
 
   /// \verbatim

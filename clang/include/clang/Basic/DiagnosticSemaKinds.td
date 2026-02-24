@@ -8237,6 +8237,23 @@ def err_mulle_confined_return_in_nested_loop : Error<
   "mulle_confined_return only allowed in the outermost mulle_confined_loop, not inside a nested mulle_confined_loop">;
 // @mulle-objc@ mulle_confined_return diagnostics <
 
+// @mulle-objc@ protocolclass diagnostics >
+def err_mulle_protocolclass_conflict_class : Error<
+  "%0 was already forward-declared as a class; cannot redeclare as protocolclass">;
+def err_mulle_protocolclass_conflict_protocol : Error<
+  "%0 was already forward-declared as a protocol; cannot redeclare as protocolclass">;
+def err_mulle_class_conflicts_protocolclass : Error<
+  "%0 is a protocolclass; use @protocolclass for forward declaration">;
+def err_mulle_protocol_def_conflicts_protocolclass : Error<
+  "%0 is a protocolclass; use @protocolclass for protocol definition">;
+def warn_mulle_protocol_fwd_after_protocolclass : Warning<
+  "%0 is a protocolclass; @protocol forward declaration is redundant">,
+  InGroup<DiagGroup<"mulle-protocolclass">>;
+def warn_mulle_protocolimpl_missing_protocol : Warning<
+  "protocol %0 not found for @protocolimplementation">,
+  InGroup<DiagGroup<"mulle-protocolclass">>;
+// @mulle-objc@ protocolclass diagnostics <
+
 // @mulle-objc@ compiler: error message definitions end2 <
 
 def warn_setter_getter_impl_required : Warning<

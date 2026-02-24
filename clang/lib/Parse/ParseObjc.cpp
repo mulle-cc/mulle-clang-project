@@ -57,6 +57,10 @@ Parser::ParseObjCAtDirectives(ParsedAttributes &DeclAttrs,
   case tok::objc_interface:
   case tok::objc_protocol:
   case tok::objc_implementation:
+  // @mulle-objc@ protocolclass dispatch >
+  case tok::objc_protocolclass:
+  case tok::objc_protocolimplementation:
+  // @mulle-objc@ protocolclass dispatch <
     break;
   default:
     for (const auto &Attr : DeclAttrs) {
@@ -76,6 +80,12 @@ Parser::ParseObjCAtDirectives(ParsedAttributes &DeclAttrs,
     return ParseObjCAtProtocolDeclaration(AtLoc, DeclAttrs);
   case tok::objc_implementation:
     return ParseObjCAtImplementationDeclaration(AtLoc, DeclAttrs);
+  // @mulle-objc@ protocolclass dispatch >
+  case tok::objc_protocolclass:
+    return ParseObjCAtProtocolClassDeclaration(AtLoc, DeclAttrs);
+  case tok::objc_protocolimplementation:
+    return ParseObjCAtProtocolImplementation(AtLoc, DeclAttrs);
+  // @mulle-objc@ protocolclass dispatch <
   case tok::objc_end:
     return ParseObjCAtEndDeclaration(AtLoc);
   case tok::objc_compatibility_alias:
@@ -572,10 +582,13 @@ static bool isTopLevelObjCKeyword(tok::ObjCKeywordKind DirectiveKind) {
 }
 
 void Parser::ParseObjCInterfaceDeclList(tok::ObjCKeywordKind contextKey,
-                                        Decl *CDecl) {
+                                        Decl *CDecl,
+                                        tok::ObjCKeywordKind DefaultMethodImplKind) {
   SmallVector<Decl *, 32> allMethods;
   SmallVector<DeclGroupPtrTy, 8> allTUVariables;
-  tok::ObjCKeywordKind MethodImplKind = tok::objc_not_keyword;
+  // @mulle-objc@ protocolclass default optional >
+  tok::ObjCKeywordKind MethodImplKind = DefaultMethodImplKind;
+  // @mulle-objc@ protocolclass default optional <
 
   SourceRange AtEnd;
 
@@ -1913,6 +1926,133 @@ void Parser::ParseObjCClassInstanceVariables(ObjCContainerDecl *interfaceDecl,
   HelperActionsForIvarDeclarations(interfaceDecl, atLoc,
                                    T, AllIvarDecls, false);
 }
+
+// @mulle-objc@ protocolclass parser >
+Parser::DeclGroupPtrTy
+Parser::ParseObjCAtProtocolClassDeclaration(SourceLocation AtLoc,
+                                            ParsedAttributes &attrs) {
+  assert(Tok.isObjCAtKeyword(tok::objc_protocolclass));
+  ConsumeToken(); // "protocolclass"
+
+  MaybeSkipAttributes(tok::objc_protocolclass);
+
+  if (expectIdentifier())
+    return nullptr;
+
+  IdentifierInfo *name = Tok.getIdentifierInfo();
+  SourceLocation nameLoc = ConsumeToken();
+
+  // Case 1: @protocolclass Foo;
+  if (TryConsumeToken(tok::semi)) {
+    IdentifierLoc Info(nameLoc, name);
+    return Actions.ObjC().ActOnProtocolClassForwardDeclaration(
+        AtLoc, Info, attrs);
+  }
+
+  CheckNestedObjCContexts(AtLoc);
+
+  // Case 2: @protocolclass Foo, Bar;
+  if (Tok.is(tok::comma)) {
+    SmallVector<IdentifierLoc, 8> IdentList;
+    IdentList.emplace_back(nameLoc, name);
+    while (true) {
+      ConsumeToken(); // ','
+      if (expectIdentifier()) {
+        SkipUntil(tok::semi);
+        return nullptr;
+      }
+      IdentList.emplace_back(Tok.getLocation(), Tok.getIdentifierInfo());
+      ConsumeToken();
+      if (Tok.isNot(tok::comma))
+        break;
+    }
+    if (ExpectAndConsume(tok::semi, diag::err_expected_after, "@protocolclass"))
+      return nullptr;
+    return Actions.ObjC().ActOnProtocolClassForwardDeclaration(
+        AtLoc, IdentList, attrs);
+  }
+
+  // Case 3: @protocolclass Foo <NSObject> ... @end — full definition
+  // First create the class+protocol forward decls (marks as protocolclass)
+  {
+    IdentifierLoc Info(nameLoc, name);
+    Actions.ObjC().ActOnProtocolClassForwardDeclaration(AtLoc, Info, attrs);
+  }
+
+  // Then parse protocol references and create the protocol definition
+  SourceLocation LAngleLoc, EndProtoLoc;
+  SmallVector<Decl *, 8> ProtocolRefs;
+  SmallVector<SourceLocation, 8> ProtocolLocs;
+  if (Tok.is(tok::less) &&
+      ParseObjCProtocolReferences(ProtocolRefs, ProtocolLocs, false, true,
+                                  LAngleLoc, EndProtoLoc,
+                                  /*consumeLastToken=*/true))
+    return nullptr;
+
+  SkipBodyInfo SkipBody;
+  ObjCProtocolDecl *ProtoType = Actions.ObjC().ActOnStartProtocolInterface(
+      AtLoc, name, nameLoc, ProtocolRefs.data(), ProtocolRefs.size(),
+      ProtocolLocs.data(), EndProtoLoc, attrs, &SkipBody,
+      /*IsProtocolClass=*/true);
+
+  ParseObjCInterfaceDeclList(tok::objc_protocol, ProtoType,
+                             // @mulle-objc@ protocolclass default optional >
+                             tok::objc_optional
+                             // @mulle-objc@ protocolclass default optional <
+                             );
+
+  if (SkipBody.CheckSameAsPrevious) {
+    auto *PreviousDef = cast<ObjCProtocolDecl>(SkipBody.Previous);
+    if (Actions.ActOnDuplicateODRHashDefinition(ProtoType, PreviousDef)) {
+      ProtoType->mergeDuplicateDefinitionWithCommon(
+          PreviousDef->getDefinition());
+    } else {
+      ODRDiagsEmitter DiagsEmitter(Diags, Actions.getASTContext(),
+                                   getPreprocessor().getLangOpts());
+      DiagsEmitter.diagnoseMismatch(PreviousDef, ProtoType);
+    }
+  }
+  return Actions.ConvertDeclToDeclGroup(ProtoType);
+}
+
+Parser::DeclGroupPtrTy
+Parser::ParseObjCAtProtocolImplementation(SourceLocation AtLoc,
+                                          ParsedAttributes &Attrs) {
+  assert(Tok.isObjCAtKeyword(tok::objc_protocolimplementation));
+  CheckNestedObjCContexts(AtLoc);
+  ConsumeToken(); // "protocolimplementation"
+
+  if (expectIdentifier())
+    return nullptr;
+
+  IdentifierInfo *nameId = Tok.getIdentifierInfo();
+  SourceLocation nameLoc = ConsumeToken();
+
+  ObjCImplDecl *ObjCImpDecl =
+      Actions.ObjC().ActOnStartProtocolImplementation(
+          AtLoc, nameId, nameLoc, Attrs);
+  if (!ObjCImpDecl)
+    return nullptr;
+
+  SmallVector<Decl *, 8> DeclsInGroup;
+  {
+    ObjCImplParsingDataRAII ObjCImplParsing(*this, ObjCImpDecl);
+    while (!ObjCImplParsing.isFinished() && !isEofOrEom()) {
+      ParsedAttributes DeclAttrs(AttrFactory);
+      MaybeParseCXX11Attributes(DeclAttrs);
+      ParsedAttributes EmptyDeclSpecAttrs(AttrFactory);
+      if (DeclGroupPtrTy DGP =
+              ParseExternalDeclaration(DeclAttrs, EmptyDeclSpecAttrs)) {
+        DeclGroupRef DG = DGP.get();
+        DeclsInGroup.append(DG.begin(), DG.end());
+      }
+    }
+  }
+
+  return Actions.ObjC().ActOnFinishObjCImplementation(ObjCImpDecl,
+                                                      DeclsInGroup);
+}
+// @mulle-objc@ protocolclass parser <
 
 Parser::DeclGroupPtrTy
 Parser::ParseObjCAtProtocolDeclaration(SourceLocation AtLoc,
