@@ -228,12 +228,11 @@ shared coded is used for cache misses.
 ## Build
 
 You can use the original [llvm project instructions](#Getting-the-Source-Code-and-Building-LLVM)
-to build the project. But do checkout [cmake-ninja](clang/bin/cmake-ninja) for
+to build the project. But do checkout [cmake-ninja](clang/bin/cmake-ninja.linux) for
 a small build script, that sets important build values.
 
 If you are building inside a fresh system, try [install-prerequisites](clang/bin/install-prerequisites)
 that can install all prerequisites for a macos or debian based system.
-
 
 Afterwards head on over to [mulle-objc](//github.com/mulle-objc) to get the
 runtime libraries.
