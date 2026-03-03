@@ -325,6 +325,20 @@ public:
       SourceLocation ClassLoc, const ParsedAttributesView &Attrs);
   // @mulle-objc@ protocolclass sema declarations <
 
+  // @mulle-objc@ method_implementation sema declaration >
+  Decl *ActOnMethodImplementationAlias(
+      SourceLocation AtLoc,
+      bool NewIsInstance,
+      Selector NewSel,
+      SourceLocation NewSelLoc,
+      bool RHSIsMethod,
+      bool RHSIsInstance,
+      Selector RHSSel,
+      IdentifierInfo *RHSFunc,
+      SourceLocation RHSLoc,
+      Decl *ClassDecl);
+  // @mulle-objc@ method_implementation sema declaration <
+
   void FindProtocolDeclaration(bool WarnOnDeclarations, bool ForObjCContainer,
                                ArrayRef<IdentifierLoc> ProtocolId,
                                SmallVectorImpl<Decl *> &Protocols);

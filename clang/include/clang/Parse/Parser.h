@@ -5658,6 +5658,9 @@ private:
   DeclGroupPtrTy ParseObjCAtProtocolImplementation(SourceLocation AtLoc,
                                                    ParsedAttributes &Attrs);
   // @mulle-objc@ protocolclass declarations <
+  // @mulle-objc@ method_implementation declaration >
+  Decl *ParseObjCMethodImplementation(SourceLocation AtLoc, Decl *ClassDecl);
+  // @mulle-objc@ method_implementation declaration <
   DeclGroupPtrTy ParseObjCAtEndDeclaration(SourceRange atEnd);
 
   /// \verbatim

@@ -1006,6 +1006,10 @@ namespace {
 
       llvm::Function *GetMethodDefinition(const ObjCMethodDecl *MD);
 
+      // @mulle-objc@ method_implementation: resolve alias IMPs >
+      void ResolveMethodAliases(const ObjCImplDecl *ID);
+      // @mulle-objc@ method_implementation: resolve alias IMPs <
+
       // dup from CodeGenModule, but easier here
       llvm::StructType *NSConstantStringType;
       llvm::StringMap<llvm::GlobalAlias *> NSConstantStringMap;
@@ -5070,6 +5074,9 @@ void CGObjCMulleRuntime::GenerateCategory(const ObjCCategoryImplDecl *OCD) {
    << OCD->getName();
 
    SmallVector<llvm::Constant *, 16> InstanceMethods, ClassMethods;
+   // @mulle-objc@ method_implementation: resolve aliases >
+   ResolveMethodAliases(OCD);
+   // @mulle-objc@ method_implementation: resolve aliases <
    for (const auto *I : OCD->instance_methods())
       // Instance methods should always be defined.
       InstanceMethods.push_back(GetMethodConstant(I));
@@ -5213,6 +5220,10 @@ void CGObjCMulleRuntime::GenerateClass(const ObjCImplementationDecl *ID) {
   }
    llvm::array_pod_sort( InstanceVariables.begin(), InstanceVariables.end(),
                          uniqueid_comparator);
+
+   // @mulle-objc@ method_implementation: resolve aliases >
+   ResolveMethodAliases(ID);
+   // @mulle-objc@ method_implementation: resolve aliases <
 
    for (const auto *I : ID->class_methods())
       // Class methods should always be defined.
@@ -7129,6 +7140,35 @@ llvm::Function *CGObjCCommonMulleRuntime::GetMethodDefinition(const ObjCMethodDe
       return I->second;
    return nullptr;
 }
+
+// @mulle-objc@ method_implementation: resolve alias IMPs >
+void CGObjCCommonMulleRuntime::ResolveMethodAliases(const ObjCImplDecl *ID) {
+   auto Resolve = [&](const ObjCMethodDecl *MD) {
+      if (!MD->isAlias()) return;
+      llvm::Function *Fn = nullptr;
+      if (auto *Target = MD->getAliasMethod()) {
+         const ObjCMethodDecl *ImplTarget = Target->isInstanceMethod()
+            ? ID->getInstanceMethod(Target->getSelector())
+            : ID->getClassMethod(Target->getSelector());
+         if (ImplTarget)
+            Fn = GetMethodDefinition(ImplTarget);
+         if (!Fn) {
+            CGM.getDiags().Report(MD->getLocation(),
+               clang::diag::err_mulle_method_impl_rhs_not_found)
+               << (int)(!Target->isInstanceMethod()) << Target->getSelector()
+               << ID->getDeclName();
+            return;
+         }
+      }
+      else if (auto *FD = MD->getAliasFunction())
+         Fn = dyn_cast_or_null<llvm::Function>(CGM.GetAddrOfFunction(FD));
+      if (Fn)
+         MethodDefinitions.insert({MD, Fn});
+   };
+   for (const auto *I : ID->class_methods())    Resolve(I);
+   for (const auto *I : ID->instance_methods()) Resolve(I);
+}
+// @mulle-objc@ method_implementation: resolve alias IMPs <
 
 
 # pragma mark - Block code

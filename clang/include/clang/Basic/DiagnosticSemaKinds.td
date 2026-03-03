@@ -8248,11 +8248,34 @@ def err_mulle_protocol_def_conflicts_protocolclass : Error<
   "%0 is a protocolclass; use @protocolclass for protocol definition">;
 def warn_mulle_protocol_fwd_after_protocolclass : Warning<
   "%0 is a protocolclass; @protocol forward declaration is redundant">,
-  InGroup<DiagGroup<"mulle-protocolclass">>;
+  InGroup<MulleProtocolClass>;
 def warn_mulle_protocolimpl_missing_protocol : Warning<
   "protocol %0 not found for @protocolimplementation">,
-  InGroup<DiagGroup<"mulle-protocolclass">>;
+  InGroup<MulleProtocolClass>;
 // @mulle-objc@ protocolclass diagnostics <
+
+// @mulle-objc@ method_implementation diagnostics >
+def err_mulle_method_impl_not_in_implementation : Error<
+  "@method_implementation is only allowed inside @implementation">;
+def err_mulle_method_impl_missing_minus_plus : Error<
+  "expected '-' or '+' before selector in @method_implementation">;
+def err_mulle_method_impl_rhs_not_found : Error<
+  "%select{instance|class}0 method %1 not found in %2">;
+def err_mulle_method_impl_cfunc_not_found : Error<
+  "C function %0 not found for @method_implementation">;
+def err_mulle_method_impl_arity_mismatch : Error<
+  "selector arity mismatch in @method_implementation: %0 vs %1">;
+def err_mulle_method_impl_return_type_mismatch : Error<
+  "return type mismatch in @method_implementation: %0 vs %1">;
+def err_mulle_method_impl_param_type_mismatch : Error<
+  "parameter %0 type mismatch in @method_implementation: %1 vs %2">;
+def warn_mulle_method_impl_instance_class_mismatch : Warning<
+  "@method_implementation mixes instance and class method">,
+  InGroup<MulleMethodImplementation>;
+def warn_mulle_method_impl_lhs_not_in_interface : Warning<
+  "@method_implementation '%0' not declared in @interface">,
+  InGroup<MulleMethodImplementation>;
+// @mulle-objc@ method_implementation diagnostics <
 
 // @mulle-objc@ compiler: error message definitions end2 <
 

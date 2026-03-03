@@ -97,6 +97,14 @@ Parser::ParseObjCAtDirectives(ParsedAttributes &DeclAttrs,
   case tok::objc_dynamic:
     SingleDecl = ParseObjCPropertyDynamic(AtLoc);
     break;
+  // @mulle-objc@ method_implementation dispatch >
+  case tok::objc_method_implementation:
+    // Only valid inside @implementation — Sema will error if not
+    ConsumeToken(); // consume "method_implementation"
+    SingleDecl = ParseObjCMethodImplementation(AtLoc,
+        CurParsedObjCImpl ? CurParsedObjCImpl->Dcl : nullptr);
+    break;
+  // @mulle-objc@ method_implementation dispatch <
   case tok::objc_import:
     if (getLangOpts().Modules || getLangOpts().DebuggerSupport) {
       Sema::ModuleImportState IS = Sema::ModuleImportState::NotACXX20Module;
@@ -714,6 +722,13 @@ void Parser::ParseObjCInterfaceDeclList(tok::ObjCKeywordKind contextKey,
       else
         MethodImplKind = DirectiveKind;
       break;
+
+    // @mulle-objc@ method_implementation dispatch >
+    case tok::objc_method_implementation:
+      if (Decl *D = ParseObjCMethodImplementation(AtLoc, CDecl))
+        allMethods.push_back(D);
+      break;
+    // @mulle-objc@ method_implementation dispatch <
 
     case tok::objc_property:
       ObjCDeclSpec OCDS;
@@ -1926,6 +1941,93 @@ void Parser::ParseObjCClassInstanceVariables(ObjCContainerDecl *interfaceDecl,
   HelperActionsForIvarDeclarations(interfaceDecl, atLoc,
                                    T, AllIvarDecls, false);
 }
+
+// @mulle-objc@ method_implementation parser >
+Decl *Parser::ParseObjCMethodImplementation(SourceLocation AtLoc,
+                                             Decl *ClassDecl) {
+  // Note: "@" and "method_implementation" tokens already consumed by caller
+
+  // Helper lambda: parse bare selector with leading -/+
+  auto ParseBareSelector = [&](bool &IsInstance, SourceLocation &SelLoc,
+                                bool RequireMethodType) -> Selector {
+    if (RequireMethodType) {
+      if (!Tok.isOneOf(tok::minus, tok::plus)) {
+        Diag(Tok, diag::err_mulle_method_impl_missing_minus_plus);
+        return Selector();
+      }
+      IsInstance = Tok.is(tok::minus);
+      ConsumeToken();
+    }
+
+    SmallVector<const IdentifierInfo *, 8> KeyIdents;
+    SelLoc = Tok.getLocation();
+
+    IdentifierInfo *SelIdent = ParseObjCSelectorPiece(SelLoc);
+    if (!SelIdent && Tok.isNot(tok::colon))
+      return Selector();
+
+    KeyIdents.push_back(SelIdent);
+    unsigned nColons = 0;
+
+    while (Tok.is(tok::colon)) {
+      ConsumeToken(); // ':'
+      ++nColons;
+      SourceLocation Loc;
+      SelIdent = ParseObjCSelectorPiece(Loc);
+      KeyIdents.push_back(SelIdent);
+      if (!SelIdent && Tok.isNot(tok::colon))
+        break;
+    }
+
+    return PP.getSelectorTable().getSelector(nColons, &KeyIdents[0]);
+  };
+
+  // Parse left side: -/+ selector
+  bool NewIsInstance = true;
+  SourceLocation NewSelLoc;
+  Selector NewSel = ParseBareSelector(NewIsInstance, NewSelLoc, true);
+  if (NewSel.isNull()) {
+    SkipUntil(tok::semi, StopAtSemi);
+    return nullptr;
+  }
+
+  // Expect '='
+  if (ExpectAndConsume(tok::equal)) {
+    SkipUntil(tok::semi, StopAtSemi);
+    return nullptr;
+  }
+
+  // Parse right side: either -/+ selector or C function identifier
+  bool RHSIsMethod = Tok.isOneOf(tok::minus, tok::plus);
+  bool RHSIsInstance = true;
+  Selector RHSSel;
+  IdentifierInfo *RHSFunc = nullptr;
+  SourceLocation RHSLoc = Tok.getLocation();
+
+  if (RHSIsMethod) {
+    RHSSel = ParseBareSelector(RHSIsInstance, RHSLoc, true);
+    if (RHSSel.isNull()) {
+      SkipUntil(tok::semi, StopAtSemi);
+      return nullptr;
+    }
+  } else {
+    if (Tok.isNot(tok::identifier)) {
+      Diag(Tok, diag::err_expected) << tok::identifier;
+      SkipUntil(tok::semi, StopAtSemi);
+      return nullptr;
+    }
+    RHSFunc = Tok.getIdentifierInfo();
+    ConsumeToken();
+  }
+
+  ExpectAndConsumeSemi(diag::err_expected_semi_after_method_proto);
+
+  return Actions.ObjC().ActOnMethodImplementationAlias(
+      AtLoc, NewIsInstance, NewSel, NewSelLoc,
+      RHSIsMethod, RHSIsInstance, RHSSel, RHSFunc, RHSLoc,
+      ClassDecl);
+}
+// @mulle-objc@ method_implementation parser <
 
 // @mulle-objc@ protocolclass parser >
 Parser::DeclGroupPtrTy

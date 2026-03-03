@@ -862,6 +862,10 @@ OBJC_AT_KEYWORD(protocolclass)
 OBJC_AT_KEYWORD(protocolimplementation)
 // @mulle-objc@ protocolclass keywords <
 
+// @mulle-objc@ method_implementation keyword >
+OBJC_AT_KEYWORD(method_implementation)
+// @mulle-objc@ method_implementation keyword <
+
 //===----------------------------------------------------------------------===//
 // Notable identifiers.
 //===----------------------------------------------------------------------===//

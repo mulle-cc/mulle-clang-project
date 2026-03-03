@@ -180,6 +180,9 @@ class ObjCMethodDecl : public NamedDecl, public DeclContext {
   bool              _isMetaABIVoidPointerParam;
    /// @mulle-objc@ MetaABI: ParamDecl storage of declaration <<<
 
+  // @mulle-objc@ method_implementation: alias target >
+  llvm::PointerUnion<ObjCMethodDecl *, FunctionDecl *> AliasTarget;
+  // @mulle-objc@ method_implementation: alias target <
   ObjCMethodDecl(
       SourceLocation beginLoc, SourceLocation endLoc, Selector SelInfo,
       QualType T, TypeSourceInfo *ReturnTInfo, DeclContext *contextDecl,
@@ -484,6 +487,20 @@ public:
 
   bool isDefined() const { return ObjCMethodDeclBits.IsDefined; }
   void setDefined(bool isDefined) { ObjCMethodDeclBits.IsDefined = isDefined; }
+
+  // @mulle-objc@ method_implementation: alias accessors >
+  bool isAlias() const { return !AliasTarget.isNull(); }
+  bool isMethodAlias() const { return AliasTarget.is<ObjCMethodDecl *>(); }
+  bool isFunctionAlias() const { return AliasTarget.is<FunctionDecl *>(); }
+  ObjCMethodDecl *getAliasMethod() const {
+    return AliasTarget.dyn_cast<ObjCMethodDecl *>();
+  }
+  FunctionDecl *getAliasFunction() const {
+    return AliasTarget.dyn_cast<FunctionDecl *>();
+  }
+  void setAliasTarget(ObjCMethodDecl *M) { AliasTarget = M; }
+  void setAliasTarget(FunctionDecl *F) { AliasTarget = F; }
+  // @mulle-objc@ method_implementation: alias accessors <
 
   /// Whether this method overrides any other in the class hierarchy.
   ///

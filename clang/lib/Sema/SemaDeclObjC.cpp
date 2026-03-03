@@ -2081,6 +2081,202 @@ ObjCImplementationDecl *SemaObjC::ActOnStartProtocolImplementation(
 }
 // @mulle-objc@ protocolimplementation sema <
 
+// @mulle-objc@ method_implementation sema >
+Decl *SemaObjC::ActOnMethodImplementationAlias(
+    SourceLocation AtLoc,
+    bool NewIsInstance,
+    Selector NewSel,
+    SourceLocation NewSelLoc,
+    bool RHSIsMethod,
+    bool RHSIsInstance,
+    Selector RHSSel,
+    IdentifierInfo *RHSFunc,
+    SourceLocation RHSLoc,
+    Decl *ClassDecl) {
+
+  ASTContext &Context = getASTContext();
+
+  // Must be inside an @implementation
+  ObjCImplDecl *ImpDecl = dyn_cast_or_null<ObjCImplDecl>(ClassDecl);
+  if (!ImpDecl) {
+    Diag(AtLoc, diag::err_mulle_method_impl_not_in_implementation);
+    return nullptr;
+  }
+
+  ObjCInterfaceDecl *IFace = nullptr;
+  if (auto *CImpl = dyn_cast<ObjCImplementationDecl>(ImpDecl))
+    IFace = CImpl->getClassInterface();
+  else if (auto *CatImpl = dyn_cast<ObjCCategoryImplDecl>(ImpDecl))
+    IFace = CatImpl->getClassInterface();
+
+  // Warn on instance/class mismatch
+  if (RHSIsMethod && NewIsInstance != RHSIsInstance)
+    Diag(AtLoc, diag::warn_mulle_method_impl_instance_class_mismatch);
+
+  // Look up RHS method
+  ObjCMethodDecl *RHSMethod = nullptr;
+  FunctionDecl *RHSFuncDecl = nullptr;
+  if (RHSIsMethod) {
+    if (IFace) {
+      RHSMethod = RHSIsInstance ? IFace->lookupInstanceMethod(RHSSel)
+                                : IFace->lookupClassMethod(RHSSel);
+    }
+    if (!RHSMethod) {
+      // Also check the implementation itself (methods defined before this line)
+      RHSMethod = RHSIsInstance ? ImpDecl->getInstanceMethod(RHSSel)
+                                : ImpDecl->getClassMethod(RHSSel);
+    }
+    if (!RHSMethod) {
+      Diag(RHSLoc, diag::err_mulle_method_impl_rhs_not_found)
+        << (int)(!RHSIsInstance) << RHSSel
+        << (IFace ? IFace->getDeclName() : DeclarationName());
+      return nullptr;
+    }
+
+    // Type check: arity
+    if (NewSel.getNumArgs() != RHSSel.getNumArgs()) {
+      Diag(AtLoc, diag::err_mulle_method_impl_arity_mismatch)
+        << NewSel << RHSSel;
+      return nullptr;
+    }
+
+    // Type check: return type and parameter types against LHS declaration
+    ObjCMethodDecl *LHSMethod = nullptr;
+    if (IFace)
+      LHSMethod = NewIsInstance ? IFace->lookupInstanceMethod(NewSel)
+                                : IFace->lookupClassMethod(NewSel);
+    if (!LHSMethod)
+      LHSMethod = NewIsInstance ? ImpDecl->getInstanceMethod(NewSel)
+                                : ImpDecl->getClassMethod(NewSel);
+    if (!LHSMethod)
+      Diag(NewSelLoc, diag::warn_mulle_method_impl_lhs_not_in_interface) << NewSel;
+    if (LHSMethod) {
+      ASTContext &Ctx = getASTContext();
+      if (!Ctx.hasSameType(LHSMethod->getReturnType(), RHSMethod->getReturnType())) {
+        Diag(AtLoc, diag::err_mulle_method_impl_return_type_mismatch)
+          << LHSMethod->getReturnType() << RHSMethod->getReturnType();
+        return nullptr;
+      }
+      for (unsigned i = 0, n = LHSMethod->param_size(); i < n; ++i) {
+        QualType LT = LHSMethod->param_begin()[i]->getType();
+        QualType RT = RHSMethod->param_begin()[i]->getType();
+        if (!Ctx.hasSameType(LT, RT)) {
+          Diag(AtLoc, diag::err_mulle_method_impl_param_type_mismatch)
+            << i << LT << RT;
+          return nullptr;
+        }
+      }
+    }
+  } else {
+    // C function — look up in translation unit scope
+    LookupResult R(SemaRef, RHSFunc, RHSLoc, Sema::LookupOrdinaryName);
+    SemaRef.LookupName(R, SemaRef.TUScope);
+    RHSFuncDecl = R.getAsSingle<FunctionDecl>();
+    if (!RHSFuncDecl) {
+      Diag(RHSLoc, diag::err_mulle_method_impl_cfunc_not_found) << RHSFunc;
+      return nullptr;
+    }
+
+    // Type check C function against mulle metaabi:
+    // (id, SEL [, void *_param]) -> void * | void
+    // Look up LHS method for return type check
+    ObjCMethodDecl *LHSMethod = nullptr;
+    if (IFace)
+      LHSMethod = NewIsInstance ? IFace->lookupInstanceMethod(NewSel)
+                                : IFace->lookupClassMethod(NewSel);
+    if (!LHSMethod)
+      LHSMethod = NewIsInstance ? ImpDecl->getInstanceMethod(NewSel)
+                                : ImpDecl->getClassMethod(NewSel);
+
+    const auto *FT = RHSFuncDecl->getType()->getAs<FunctionProtoType>();
+    if (FT && LHSMethod) {
+      ASTContext &Ctx = getASTContext();
+      unsigned nMethodArgs = NewSel.getNumArgs();
+      unsigned expectedParams = 2 + (nMethodArgs > 0 ? 1 : 0); // id, SEL [, void*]
+
+      if (FT->getNumParams() != expectedParams) {
+        Diag(RHSLoc, diag::err_mulle_method_impl_arity_mismatch)
+          << NewSel << RHSFunc;
+        return nullptr;
+      }
+      // param 0: id, param 1: SEL — accept any pointer or builtin (SEL is a builtin in ObjC)
+      for (unsigned p = 0; p < 2; ++p) {
+        QualType PT = FT->getParamType(p);
+        if (!PT->isAnyPointerType() && !PT->isBuiltinType()) {
+          Diag(RHSLoc, diag::err_mulle_method_impl_param_type_mismatch)
+            << (int)p << PT << (p == 0 ? Ctx.getObjCIdType() : Ctx.getObjCSelType());
+          return nullptr;
+        }
+      }
+      // param 2 (if present): void *
+      if (nMethodArgs > 0 &&
+          !Ctx.hasSameType(FT->getParamType(2), Ctx.VoidPtrTy)) {
+        Diag(RHSLoc, diag::err_mulle_method_impl_param_type_mismatch)
+          << 2 << FT->getParamType(2) << Ctx.VoidPtrTy;
+        return nullptr;
+      }
+      // return: void * or void (matching method)
+      QualType FnRet = FT->getReturnType();
+      bool retOK = Ctx.hasSameType(FnRet, Ctx.VoidPtrTy) ||
+                   Ctx.hasSameType(FnRet, Ctx.VoidTy);
+      if (!retOK) {
+        Diag(RHSLoc, diag::err_mulle_method_impl_return_type_mismatch)
+          << FnRet << Ctx.VoidPtrTy;
+        return nullptr;
+      }
+    }
+  }
+
+  QualType ReturnType = RHSMethod ? RHSMethod->getReturnType()
+                                  : Context.getObjCIdType();
+  TypeSourceInfo *ReturnTInfo = RHSMethod ? RHSMethod->getReturnTypeSourceInfo()
+                                          : nullptr;
+
+  ObjCMethodDecl *NewMethod = ObjCMethodDecl::Create(
+      Context, AtLoc, AtLoc, NewSel, ReturnType, ReturnTInfo,
+      SemaRef.CurContext, NewIsInstance, /*isVariadic=*/false,
+      /*isPropertyAccessor=*/false, /*isSynthesizedAccessorStub=*/false,
+      /*isImplicitlyDeclared=*/false, /*isDefined=*/true,
+      ObjCImplementationControl::Required,
+      /*HasRelatedResultType=*/false);
+
+  // Copy parameters from LHS interface or RHS method
+  ObjCMethodDecl *ParamSource = RHSMethod;
+  if (!ParamSource) {
+    // C function alias: get params from LHS interface declaration
+    if (IFace)
+      ParamSource = NewIsInstance ? IFace->lookupInstanceMethod(NewSel)
+                                  : IFace->lookupClassMethod(NewSel);
+    if (!ParamSource)
+      ParamSource = NewIsInstance ? ImpDecl->getInstanceMethod(NewSel)
+                                  : ImpDecl->getClassMethod(NewSel);
+  }
+  if (ParamSource && ParamSource->param_size() > 0) {
+    SmallVector<ParmVarDecl *, 8> Params;
+    SmallVector<SourceLocation, 8> SelLocs;
+    SelLocs.push_back(NewSelLoc);
+    for (auto *P : ParamSource->parameters()) {
+      ParmVarDecl *NewP = ParmVarDecl::Create(
+          Context, NewMethod, P->getBeginLoc(), P->getLocation(),
+          P->getIdentifier(), P->getType(), P->getTypeSourceInfo(),
+          P->getStorageClass(), /*DefArg=*/nullptr);
+      Params.push_back(NewP);
+    }
+    NewMethod->setMethodParams(Context, Params, SelLocs);
+  }
+
+  // Store alias target for codegen
+  if (RHSIsMethod)
+    NewMethod->setAliasTarget(RHSMethod);
+  else
+    NewMethod->setAliasTarget(RHSFuncDecl);
+
+  NewMethod->createImplicitParams(Context, IFace);
+  ImpDecl->addDecl(NewMethod);
+  return NewMethod;
+}
+// @mulle-objc@ method_implementation sema <
+
 /// ActOnStartCategoryImplementation - Perform semantic checks on the
 /// category implementation declaration and build an ObjCCategoryImplDecl
 /// object.
