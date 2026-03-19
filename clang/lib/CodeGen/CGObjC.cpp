@@ -2224,6 +2224,19 @@ CodeGenFunction::generateObjCSetterBody(const ObjCImplementationDecl *classImpl,
 
   if( getLangOpts().ObjCRuntime.hasMulleMetaABI() && setterMethod->getParamDecl())
   {
+      // @mulle-objc@ MetaABI shadow: use shadow VarDecl if available >
+      IdentifierInfo *argII = argDecl->getIdentifier();
+      for (auto *D : setterMethod->decls()) {
+         VarDecl *VD = dyn_cast<VarDecl>(D);
+         if (VD && VD->isImplicit() && VD->getIdentifier() == argII) {
+            QualType shadowType = VD->getType().getNonReferenceType();
+            DeclRefExpr shadowRef(getContext(), VD, false, shadowType,
+                                  VK_LValue, SourceLocation());
+            emitObjCSetterBodyStatement(ivarRef, shadowType, &shadowRef);
+            return;
+         }
+      }
+      // @mulle-objc@ MetaABI shadow: fallback to _param->field <
       ValueDecl *paramDecl = setterMethod->getParamDecl();
       DeclRefExpr param( getContext(), paramDecl, false, paramDecl->getType(),
                         VK_LValue, SourceLocation());

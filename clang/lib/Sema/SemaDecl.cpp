@@ -912,14 +912,7 @@ Sema::NameClassification Sema::ClassifyName(Scope *S, CXXScopeSpec &SS,
   // unqualified lookup mechanism.
   if (SS.isEmpty() && CurMethod && !isResultTypeOrTemplate(Result, NextToken)) {
    // @mulle-objc@ MetaABI: Lookup _param-><name> >
-   if( getLangOpts().ObjCRuntime.hasMulleMetaABI())
-   {
-      FieldDecl   *FD;
-
-      FD = CurMethod->FindParamRecordField( Name);
-      if( FD) //
-        return( NameClassification::NonType(cast<NamedDecl>( FD)));
-   }
+   // (intercept removed: shadow VarDecls now handle this via normal lookup)
    // @mulle-objc@ MetaABI: Lookup _param-><name> <
 
     DeclResult Ivar = ObjC().LookupIvarInObjCMethod(Result, S, Name);
@@ -1309,16 +1302,9 @@ ExprResult Sema::ActOnNameClassifiedAsNonType(Scope *S, const CXXScopeSpec &SS,
                                               const Token &NextToken) {
   if (getCurMethodDecl() && SS.isEmpty())
   // @mulle-objc@ MetaABI: Lookup _param-><name> >
-  {
-    if( getLangOpts().ObjCRuntime.hasMulleMetaABI())
-    {
-      FieldDecl   *FD;
-
-      FD = getCurMethodDecl()->FindParamRecordField( Found->getDeclName().getAsIdentifierInfo());
-      if( FD) //
-        return( GetMulle_paramFieldExpr( FD, S, NameLoc));
-  }
+  // (intercept removed: shadow VarDecls now handle this via normal lookup)
   // @mulle-objc@ MetaABI: Lookup _param-><name> <
+  {
 
   if (auto *Ivar = dyn_cast<ObjCIvarDecl>(Found->getUnderlyingDecl()))
       return ObjC().BuildIvarRefExpr(S, NameLoc, Ivar);
@@ -16619,6 +16605,27 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
              "Function parsing confused");
     } else if (ObjCMethodDecl *MD = dyn_cast_or_null<ObjCMethodDecl>(dcl)) {
       assert(MD == getCurMethodDecl() && "Method parsing confused");
+      // @mulle-objc@ MetaABI shadow: prepend shadow DeclStmts to body >
+      if (getLangOpts().ObjCRuntime.hasMulleMetaABI() &&
+          MD->getParamRecord() && Body) {
+        if (auto *CS = dyn_cast<CompoundStmt>(Body)) {
+          SmallVector<Stmt *, 8> Stmts;
+          for (auto *D : MD->decls()) {
+            auto *VD = dyn_cast<VarDecl>(D);
+            if (VD && VD->isImplicit() && VD->hasInit() &&
+                VD != MD->getParamDecl())
+              Stmts.push_back(new (Context) DeclStmt(
+                  DeclGroupRef(VD), SourceLocation(), SourceLocation()));
+          }
+          if (!Stmts.empty()) {
+            Stmts.append(CS->body_begin(), CS->body_end());
+            Body = CompoundStmt::Create(Context, Stmts,
+                                        CS->getStoredFPFeaturesOrDefault(),
+                                        CS->getLBracLoc(), CS->getRBracLoc());
+          }
+        }
+      }
+      // @mulle-objc@ MetaABI shadow: prepend shadow DeclStmts to body <
       MD->setBody(Body);
       if (!MD->isInvalidDecl()) {
         DiagnoseSizeOfParametersAndReturnValue(MD->parameters(),

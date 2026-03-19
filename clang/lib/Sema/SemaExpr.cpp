@@ -2796,14 +2796,7 @@ Sema::ActOnIdExpression(Scope *S, CXXScopeSpec &SS,
                      /*AllowBuiltinCreation=*/!IvarLookupFollowUp);
 
     // @mulle-objc@ MetaABI: Lookup _param-><n> >
-    if (II && !SS.isSet() && getCurMethodDecl()) {
-      if (getLangOpts().ObjCRuntime.hasMulleMetaABI()) {
-        FieldDecl *FD = getCurMethodDecl()->FindParamRecordField(II);
-        if (FD) {
-          return GetMulle_paramFieldExpr(FD, S, NameLoc);
-        }
-      }
-    }
+    // (intercept removed: shadow VarDecls now handle this via normal lookup)
     // @mulle-objc@ MetaABI: Lookup _param-><n> <
 
     // If the result might be in a dependent base class, this is a dependent

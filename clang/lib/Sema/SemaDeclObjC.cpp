@@ -402,7 +402,29 @@ void SemaObjC::ActOnStartOfObjCMethodDef(Scope *FnBodyScope, Decl *D) {
 
    hasMetaABIParam = getLangOpts().ObjCRuntime.hasMulleMetaABI() && MDecl->getParamDecl();
    if( hasMetaABIParam)
+   {
       SemaRef.PushOnScopeChains(MDecl->getParamDecl(), FnBodyScope);
+      // @mulle-objc@ MetaABI shadow: create local shadow VarDecls for debugger >
+      // Emit  <type> a = _param->a;  for each field so debugger can 'print a'
+      if( RecordDecl *RD = MDecl->getParamRecord())
+      {
+         for( auto *FD : RD->fields())
+         {
+            if( !FD->getIdentifier()) continue;
+            VarDecl *Shadow = VarDecl::Create( Context, MDecl,
+                                               SourceLocation(), SourceLocation(),
+                                               FD->getIdentifier(), FD->getType(),
+                                               Context.getTrivialTypeSourceInfo( FD->getType()),
+                                               SC_None);
+            ExprResult Init = SemaRef.GetMulle_paramFieldExpr( FD, FnBodyScope, SourceLocation());
+            if( !Init.isInvalid())
+               Shadow->setInit( Init.get());
+            Shadow->setImplicit( true);
+            SemaRef.PushOnScopeChains( Shadow, FnBodyScope);
+         }
+      }
+      // @mulle-objc@ MetaABI shadow: create local shadow VarDecls for debugger <
+   }
    // @mulle-objc@ MetaABI: save scope for later retrieval in ActonMethod <
 
   // The ObjC parser requires parameter names so there's no need to check.

@@ -5028,11 +5028,7 @@ DeclResult SemaObjC::LookupIvarInObjCMethod(LookupResult &Lookup, Scope *S,
     return DeclResult(true);
     
   // @mulle-objc@ MetaABI: Lookup _param-><n> >
-  if (SemaRef.getLangOpts().ObjCRuntime.hasMulleMetaABI()) {
-    FieldDecl *FD = CurMethod->FindParamRecordField(II);
-    if (FD)
-      return DeclResult(FD);
-  }
+  // (intercept removed: shadow VarDecls now handle this via normal lookup)
   // @mulle-objc@ MetaABI: Lookup _param-><n> <
 
   // There are two cases to handle here.  1) scoped lookup could have failed,
