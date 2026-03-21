@@ -41,6 +41,7 @@ class RewriteMulleObjC : public ASTConsumer {
   unsigned                    NSStringCount = 0;
   std::string                 NSStringDefs;
   std::vector<std::string>    NSStringPtrs;
+  std::vector<ObjCImplementationDecl *> LoadClasses;
 
 public:
   RewriteMulleObjC(const std::string &InFile,
@@ -90,6 +91,10 @@ public:
     std::string Load;
     llvm::raw_string_ostream LOS(Load);
 
+    std::string ClassListStr = EmitLoadClassList();
+    if (!ClassListStr.empty())
+      LOS << ClassListStr;
+
     if (!NSStringPtrs.empty()) {
       LOS << "static struct {\n"
           << "  unsigned int n_loadstrings;\n"
@@ -106,7 +111,9 @@ public:
     LOS << "static struct _mulle_objc_loadinfo OBJC_LOAD_INFO"
         << " __attribute__((used, section(\".data.objc.objc_load_info\"))) = {\n"
         << "  { MULLE_OBJC_RUNTIME_LOAD_VERSION, 0, 0, 0, 0 },\n"
-        << "  0, 0, 0, 0,\n"  // universe, classes, categories, supers
+        << "  0,\n"  // loaduniverse
+        << "  " << (LoadClasses.empty() ? "0" : "(struct _mulle_objc_loadclasslist *)&OBJC_CLASS_LOADS") << ",\n"
+        << "  0, 0,\n"  // categories, supers
         << "  " << (NSStringPtrs.empty() ? "0" : "(struct _mulle_objc_loadstringlist *)&OBJC_STATICSTRING_LOADS") << ",\n"
         << "  0\n"  // hashedstrings
         << "};\n";
@@ -141,6 +148,7 @@ private:
   // ObjC expression/statement handlers
   void RewriteReturnStmt(ReturnStmt *S);
   void RewriteMessageExpr(ObjCMessageExpr *E);
+  std::string EmitLoadClassList();
   void RewriteStringLiteral(ObjCStringLiteral *E);
   void RewriteSelectorExpr(ObjCSelectorExpr *E);
 
@@ -179,6 +187,7 @@ void RewriteMulleObjC::HandleTopLevelSingleDecl(Decl *D) {
   }
   case Decl::ObjCImplementation:
     RewriteImplementationDecl(cast<ObjCImplementationDecl>(D));
+    LoadClasses.push_back(cast<ObjCImplementationDecl>(D));
     break;
   case Decl::ObjCCategory:
     RewriteCategoryDecl(cast<ObjCCategoryDecl>(D));
@@ -386,12 +395,16 @@ void RewriteMulleObjC::RewriteMethodDecl(ObjCMethodDecl *M,
   InMethod = false;
   std::string BodyText = Rewrite.getRewrittenText(M->getBody()->getSourceRange());
 
-  // Inject unpack locals after opening brace
+  // Inject unpack locals after opening brace, and ensure void methods return 0
   std::string FuncBody;
+  bool isVoidReturn = M->getReturnType()->isVoidType();
   if (!Unpack.empty() && !BodyText.empty() && BodyText[0] == '{')
     FuncBody = "{\n" + Unpack + BodyText.substr(1);
   else
     FuncBody = BodyText;
+  // void ObjC methods need explicit return 0 since C function returns void*
+  if (isVoidReturn && !FuncBody.empty() && FuncBody.back() == '}')
+    FuncBody.insert(FuncBody.size() - 1, " return 0;");
 
   std::string Full = ParamStructDef + Sig + FuncBody;
 
@@ -549,8 +562,126 @@ void RewriteMulleObjC::RewriteStringLiteral(ObjCStringLiteral *E) {
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
-// Factory
+// Emit OBJC_CLASS_LOADS data structures
 // ---------------------------------------------------------------------------
+std::string RewriteMulleObjC::EmitLoadClassList() {
+  if (LoadClasses.empty()) return "";
+
+  std::string Out;
+  llvm::raw_string_ostream OS(Out);
+
+  std::vector<std::string> ClassVarNames;
+
+  for (auto *D : LoadClasses) {
+    ObjCInterfaceDecl *ID = D->getClassInterface();
+    std::string ClassName = ID->getNameAsString();
+    std::string VarBase = "OBJC_CLASS_$_" + ClassName;
+    ClassVarNames.push_back(VarBase);
+
+    uint32_t classId    = MulleObjCUniqueIdHashForString(ClassName);
+    uint32_t classIvarHash = MulleObjCUniqueIdHashForString(
+        ID->getIvarHashString(*Context));
+
+    ObjCInterfaceDecl *Super = ID->getSuperClass();
+    std::string superName   = Super ? Super->getNameAsString() : "";
+    uint32_t superId        = Super ? MulleObjCUniqueIdHashForString(superName) : 0;
+    uint32_t superIvarHash  = Super ? MulleObjCUniqueIdHashForString(
+        Super->getIvarHashString(*Context)) : 0;
+
+    // --- instance variables ---
+    std::vector<ObjCIvarDecl *> OwnIvars(ID->ivar_begin(), ID->ivar_end());
+    std::string IvarListVar = "OBJC_INSTANCE_VARIABLES_" + ClassName;
+    if (!OwnIvars.empty()) {
+      OS << "static struct {\n"
+         << "  unsigned int n_ivars;\n"
+         << "  struct _mulle_objc_ivar ivars[" << OwnIvars.size() << "];\n"
+         << "} " << IvarListVar
+         << " __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n"
+         << "  " << OwnIvars.size() << ",\n  {\n";
+      for (auto *IV : OwnIvars) {
+        std::string ivarName = IV->getNameAsString();
+        // ivarid = hash of "name:typeencoding"
+        std::string ivarSig = ivarName + ":" + PrintType(IV->getType());
+        uint32_t ivarId = MulleObjCUniqueIdHashForString(ivarSig);
+        // offset: use offsetof via __builtin_offsetof — emit as expression
+        OS << "    { { (mulle_objc_ivarid_t) 0x";
+        OS.write_hex(ivarId);
+        OS << "U, \"" << ivarName << "\", \"" << PrintType(IV->getType()) << "\" },"
+           << " (int) __builtin_offsetof(" << ClassName << ", " << ivarName << ") },\n";
+      }
+      OS << "  }\n};\n";
+    }
+
+    // --- instance methods ---
+    std::vector<ObjCMethodDecl *> IMethods, CMethods;
+    for (auto *M : D->methods())
+      (M->isInstanceMethod() ? IMethods : CMethods).push_back(M);
+
+    auto EmitMethodList = [&](const std::string &VarName,
+                               const std::vector<ObjCMethodDecl *> &Methods) {
+      if (Methods.empty()) return;
+      OS << "static struct {\n"
+         << "  unsigned int n_methods;\n"
+         << "  struct _mulle_objc_loadcategory *loadcategory;\n"
+         << "  struct _mulle_objc_method methods[" << Methods.size() << "];\n"
+         << "} " << VarName
+         << " __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n"
+         << "  " << Methods.size() << ", 0,\n  {\n";
+      for (auto *M : Methods) {
+        std::string sel = M->getSelector().getAsString();
+        uint32_t selId = MulleObjCUniqueIdHashForString(sel);
+        std::string cname = MethodCName(M, D->getClassInterface());
+        // bits: 0x200000 = preload flag (standard for instance methods)
+        OS << "    { { (mulle_objc_methodid_t) 0x";
+        OS.write_hex(selId);
+        OS << "U, \"\", \"" << sel << "\", 0x200000 }, (mulle_objc_implementation_t) " << cname << " },\n";
+      }
+      OS << "  }\n};\n";
+    };
+
+    std::string IMethodListVar = "OBJC_INSTANCE_METHODS_" + ClassName;
+    std::string CMethodListVar = "OBJC_CLASS_METHODS_" + ClassName;
+    EmitMethodList(IMethodListVar, IMethods);
+    EmitMethodList(CMethodListVar, CMethods);
+
+    // --- loadclass struct ---
+    // instancesize = sizeof(ClassName) — emit as expression
+    OS << "static struct _mulle_objc_loadclass " << VarBase
+       << " __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n"
+       << "  (mulle_objc_classid_t) 0x"; OS.write_hex(classId);
+    OS << "U,\n  \"" << ClassName << "\",\n"
+       << "  (mulle_objc_hash_t) 0x"; OS.write_hex(classIvarHash);
+    OS << "U,\n"
+       << "  (mulle_objc_classid_t) 0x"; OS.write_hex(superId);
+    OS << "U,\n  " << (superName.empty() ? "0" : "\"" + superName + "\"") << ",\n"
+       << "  (mulle_objc_hash_t) 0x"; OS.write_hex(superIvarHash);
+    OS << "U,\n"
+       << "  -1,\n"  // fastclassindex
+       << "  (int) sizeof(" << ClassName << "),\n"
+       << "  " << (OwnIvars.empty() ? "0" : "(struct _mulle_objc_ivarlist *)&" + IvarListVar) << ",\n"
+       << "  " << (CMethods.empty() ? "0" : "(struct _mulle_objc_methodlist *)&" + CMethodListVar) << ",\n"
+       << "  " << (IMethods.empty() ? "0" : "(struct _mulle_objc_methodlist *)&" + IMethodListVar) << ",\n"
+       << "  0, 0, 0, 0\n"  // properties, protocols, protocolclassids, origin
+       << "};\n";
+  }
+
+  // --- class list ---
+  OS << "static struct {\n"
+     << "  unsigned int n_loadclasses;\n"
+     << "  struct _mulle_objc_loadclass *loadclasses[" << ClassVarNames.size() << "];\n"
+     << "} OBJC_CLASS_LOADS"
+     << " __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n"
+     << "  " << ClassVarNames.size() << ",\n  {";
+  for (unsigned i = 0; i < ClassVarNames.size(); ++i) {
+    if (i) OS << ",";
+    OS << "\n    &" << ClassVarNames[i];
+  }
+  OS << "\n  }\n};\n";
+
+  return Out;
+}
+
+
 
 std::unique_ptr<ASTConsumer>
 clang::CreateMulleObjCRewriter(const std::string &InFile,
