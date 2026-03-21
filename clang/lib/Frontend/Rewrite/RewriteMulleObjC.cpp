@@ -742,7 +742,7 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
     CastClose = ")";
   }
 
-  std::string CallFn = isSuper ? "mulle_objc_object_supercall" : "mulle_objc_object_call";
+  std::string CallFn = isSuper ? "mulle_objc_object_call_super" : "mulle_objc_object_call";
   unsigned NumArgs = E->getNumArgs();
 
   auto buildCall = [&](const std::string &param) {
