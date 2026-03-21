@@ -37,7 +37,8 @@ class RewriteMulleObjC : public ASTConsumer {
   SourceManager              *SM      = nullptr;
   std::unique_ptr<raw_ostream> OutFile;
   std::string                 InFileName;
-  bool                        InMethod = false; // for return-cast gating
+  bool                        InMethod = false;
+  ObjCInterfaceDecl          *CurrentClass = nullptr; // for return-cast gating
   unsigned                    NSStringCount = 0;
   std::string                 NSStringDefs;
   std::vector<std::string>    NSStringPtrs;
@@ -286,6 +287,7 @@ void RewriteMulleObjC::RewriteInterfaceDecl(ObjCInterfaceDecl *D) {
 }
 
 void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
+  CurrentClass = D->getClassInterface();
   // First rewrite all method bodies in-place
   for (auto *M : D->methods())
     if (M->hasBody())
@@ -477,9 +479,22 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
   std::string S;
   llvm::raw_string_ostream OS(S);
 
-  // Receiver
+  ObjCMessageExpr::ReceiverKind Kind = E->getReceiverKind();
+  bool isSuper = (Kind == ObjCMessageExpr::SuperInstance ||
+                  Kind == ObjCMessageExpr::SuperClass);
+
+  // Receiver text
   std::string Receiver;
-  if (E->getReceiverKind() == ObjCMessageExpr::Instance) {
+  std::string SuperId;
+  if (isSuper) {
+    Receiver = "self";
+    // superid = hash of the superclass name
+    ObjCInterfaceDecl *Super = CurrentClass ? CurrentClass->getSuperClass() : nullptr;
+    std::string SuperName = Super ? Super->getNameAsString() : "";
+    uint32_t SHash = MulleObjCUniqueIdHashForString(SuperName);
+    llvm::raw_string_ostream SOS(SuperId);
+    SOS << "(mulle_objc_superid_t) 0x"; SOS.write_hex(SHash); SOS << "UL";
+  } else if (Kind == ObjCMessageExpr::Instance) {
     Receiver = Rewrite.getRewrittenText(E->getInstanceReceiver()->getSourceRange());
   } else {
     // class message
@@ -491,39 +506,48 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
   uint32_t Hash = MulleObjCUniqueIdHashForString(SelStr);
   std::string HashStr;
   llvm::raw_string_ostream HOS(HashStr);
-  HOS << "0x"; HOS.write_hex(Hash); HOS << "UL";
+  HOS << "(mulle_objc_methodid_t) 0x"; HOS.write_hex(Hash); HOS << "UL";
 
+  // Return cast: message returns void*, cast to actual return type if needed
+  QualType RetTy = E->getType();
+  bool needCast = !RetTy->isVoidType() &&
+                  !RetTy->isObjCObjectPointerType() &&
+                  !RetTy->isPointerType();
+  std::string CastOpen, CastClose;
+  if (needCast) {
+    CastOpen  = "(" + PrintType(RetTy) + ")(intptr_t)(";
+    CastClose = ")";
+  }
+
+  std::string CallFn = isSuper ? "mulle_objc_object_supercall" : "mulle_objc_object_call";
   unsigned NumArgs = E->getNumArgs();
 
+  auto buildCall = [&](const std::string &param) {
+    OS << CastOpen << CallFn << "(" << Receiver << ", " << HashStr << ", " << param;
+    if (isSuper) OS << ", " << SuperId;
+    OS << ")" << CastClose;
+  };
+
   if (NumArgs == 0) {
-    // mulle_objc_object_call(obj, hash, NULL)
-    OS << "mulle_objc_object_call(" << Receiver << ", "
-       << "(mulle_objc_methodid_t) " << HashStr << ", NULL)";
+    buildCall("NULL");
   } else if (NumArgs == 1) {
-    // single arg: pass pointer to the arg value
-    // mulle_objc_object_call(obj, hash, &(type){ arg })
     QualType ArgTy = E->getArg(0)->getType();
     std::string ArgText = Rewrite.getRewrittenText(E->getArg(0)->getSourceRange());
-    OS << "mulle_objc_object_call(" << Receiver << ", "
-       << "(mulle_objc_methodid_t) " << HashStr << ", "
-       << "&(" << PrintType(ArgTy) << "){ " << ArgText << " })";
+    buildCall("&(" + PrintType(ArgTy) + "){ " + ArgText + " }");
   } else {
-    // multi-arg: compound literal struct
-    // mulle_objc_object_call(obj, hash, &(struct { t0 a0; t1 a1; }){ a0, a1 })
-    OS << "mulle_objc_object_call(" << Receiver << ", "
-       << "(mulle_objc_methodid_t) " << HashStr << ", "
-       << "&(struct { ";
+    std::string param;
+    llvm::raw_string_ostream PS(param);
+    PS << "&(struct { ";
     Selector Sel = E->getSelector();
+    for (unsigned i = 0; i < NumArgs; ++i)
+      PS << PrintType(E->getArg(i)->getType()) << " " << Sel.getNameForSlot(i).str() << "_; ";
+    PS << "}){ ";
     for (unsigned i = 0; i < NumArgs; ++i) {
-      OS << PrintType(E->getArg(i)->getType()) << " "
-         << Sel.getNameForSlot(i).str() << "_; ";
+      if (i) PS << ", ";
+      PS << Rewrite.getRewrittenText(E->getArg(i)->getSourceRange());
     }
-    OS << "}){ ";
-    for (unsigned i = 0; i < NumArgs; ++i) {
-      if (i) OS << ", ";
-      OS << Rewrite.getRewrittenText(E->getArg(i)->getSourceRange());
-    }
-    OS << " })";
+    PS << " }";
+    buildCall(param);
   }
 
   ReplaceText(E->getSourceRange(), OS.str());
