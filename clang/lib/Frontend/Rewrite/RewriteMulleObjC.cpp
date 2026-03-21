@@ -90,6 +90,17 @@ public:
         Result = NSStringDefs + Result;
       }
     }
+    // Insert fastenumeration header if needed (for mulle_objc_enumeration_mutation)
+    if (Result.find("mulle_objc_enumeration_mutation") != std::string::npos) {
+      size_t pos = Result.rfind("\n#include");
+      if (pos != std::string::npos)
+        pos = Result.find('\n', pos + 1) + 1;
+      else if (Result.substr(0, 8) == "#include")
+        pos = Result.find('\n') + 1;
+      else
+        pos = 0;
+      Result.insert(pos, "#include <mulle-objc-runtime/mulle-objc-fastenumeration.h>\n");
+    }
     *OutFile << Result;
 
     // Emit load info and constructor
@@ -148,6 +159,7 @@ private:
   void RewriteDeclStmt(DeclStmt *S);
   void RewriteTryStmt(ObjCAtTryStmt *S);
   void RewriteThrowStmt(ObjCAtThrowStmt *S);
+  void RewriteForCollectionStmt(ObjCForCollectionStmt *S);
 
   // ObjC declaration handlers
   void RewriteInterfaceDecl(ObjCInterfaceDecl *D);
@@ -223,8 +235,23 @@ void RewriteMulleObjC::HandleTopLevelSingleDecl(Decl *D) {
       if (FD->isThisDeclarationADefinition() && FD->getBody())
         RewriteStmt(FD->getBody());
     break;
+  case Decl::ObjCCompatibleAlias: {
+    // @compatibility_alias Foo Bar  ->  typedef Bar Foo;
+    auto *AD = cast<ObjCCompatibleAliasDecl>(D);
+    std::string S = "typedef " + AD->getClassInterface()->getNameAsString()
+                  + " " + AD->getNameAsString() + ";";
+    // getBeginLoc() points to the alias name, not '@' — scan back
+    const char *p = SM->getCharacterData(D->getBeginLoc());
+    while (*p != '@') --p;
+    const char *q = SM->getCharacterData(D->getBeginLoc());
+    // scan forward past the original class name to ';'
+    while (*q && *q != ';') ++q;
+    if (*q == ';') ++q;
+    SourceLocation AtLoc = D->getBeginLoc().getLocWithOffset(p - SM->getCharacterData(D->getBeginLoc()));
+    Rewrite.ReplaceText(AtLoc, q - p, S);
+    break;
+  }
   case Decl::Record: {
-    // Handle @defs(ClassName) inside struct definitions
     auto *RD = cast<RecordDecl>(D);
     if (!RD->isThisDeclarationADefinition()) break;
     for (auto *Field : RD->fields()) {
@@ -297,6 +324,8 @@ void RewriteMulleObjC::RewriteStmt(Stmt *S) {
     RewriteTryStmt(TS);
   else if (auto *TS = dyn_cast<ObjCAtThrowStmt>(S))
     RewriteThrowStmt(TS);
+  else if (auto *FE = dyn_cast<ObjCForCollectionStmt>(S))
+    RewriteForCollectionStmt(FE);
   else if (auto *IV = dyn_cast<ObjCIvarRefExpr>(S)) {
     // bare ivar access -> self->ivar
     std::string R = "self->" + IV->getDecl()->getNameAsString();
@@ -448,7 +477,13 @@ std::string RewriteMulleObjC::PrintType(QualType T) {
   if (T->isObjCObjectPointerType() || T->isObjCIdType())
     return "void *";
   if (T->isObjCClassType())
-    return "void *";  // Class
+    return "void *";
+  // id * -> void ** (pointer to ObjC object pointer)
+  if (auto *PT = T->getAs<PointerType>()) {
+    QualType Pointee = PT->getPointeeType();
+    if (Pointee->isObjCObjectPointerType() || Pointee->isObjCIdType())
+      return "void **";
+  }
   // Everything else: use clang's printer
   std::string S;
   llvm::raw_string_ostream OS(S);
@@ -654,6 +689,80 @@ void RewriteMulleObjC::RewriteThrowStmt(ObjCAtThrowStmt *S) {
         Rewrite.getRangeSize(S->getSourceRange()),
         "mulle_objc_exception_throw(_rethrow, 0)");
   }
+}
+
+void RewriteMulleObjC::RewriteForCollectionStmt(ObjCForCollectionStmt *S) {
+  // for (Type var in collection) body
+  // ->
+  // { NSFastEnumerationState _fe_state = {0};
+  //   id _fe_buf[16];
+  //   NSUInteger _fe_count, _fe_idx, _fe_mutations;
+  //   Type var;
+  //   _fe_count = (NSUInteger)(intptr_t)mulle_objc_object_call(collection, hash,
+  //       &(struct{NSFastEnumerationState *rover_; id *objects_; NSUInteger count_;}){&_fe_state, _fe_buf, 16});
+  //   if (_fe_count) { _fe_mutations = *_fe_state.mutationsPtr; _fe_idx = 0;
+  //     for (;;) {
+  //       if (_fe_idx >= _fe_count) {
+  //         _fe_count = ...; if (!_fe_count) break; _fe_idx = 0; }
+  //       if (*_fe_state.mutationsPtr != _fe_mutations) mulle_objc_enumeration_mutation(collection);
+  //       var = _fe_state.itemsPtr[_fe_idx++];
+  //       body
+  //     }
+  //   }
+  // }
+
+  static unsigned FeCount = 0;
+  std::string idx = std::to_string(FeCount++);
+  std::string state   = "_fe_state"   + idx;
+  std::string buf     = "_fe_buf"     + idx;
+  std::string count   = "_fe_count"   + idx;
+  std::string fidx    = "_fe_idx"     + idx;
+  std::string muts    = "_fe_muts"    + idx;
+
+  // selector hash for countByEnumeratingWithState:objects:count:
+  uint32_t selHash = MulleObjCUniqueIdHashForString("countByEnumeratingWithState:objects:count:");
+  std::string hashStr;
+  llvm::raw_string_ostream HS(hashStr);
+  HS << "(mulle_objc_methodid_t) 0x"; HS.write_hex(selHash); HS << "UL";
+
+  // collection expression (already rewritten by bottom-up recursion)
+  std::string collText = Rewrite.getRewrittenText(S->getCollection()->getSourceRange());
+
+  // loop variable — may be a DeclStmt (new var) or an existing expr
+  std::string varDecl, varName;
+  if (auto *DS = dyn_cast<DeclStmt>(S->getElement())) {
+    auto *VD = cast<VarDecl>(DS->getSingleDecl());
+    varName = VD->getNameAsString();
+    varDecl = PrintType(VD->getType()) + " " + varName + ";\n  ";
+  } else {
+    varName = Rewrite.getRewrittenText(S->getElement()->getSourceRange());
+  }
+
+  // body (already rewritten)
+  std::string bodyText = Rewrite.getRewrittenText(S->getBody()->getSourceRange());
+
+  // call helper macro
+  std::string callExpr =
+    "(NSUInteger)(intptr_t)mulle_objc_object_call(" + collText + ", " + hashStr +
+    ", &(struct { NSFastEnumerationState *rover_; void **objects_; NSUInteger count_; })"
+    "{ &" + state + ", (void **)" + buf + ", 16 })";
+
+  std::string R;
+  R += "{ NSFastEnumerationState " + state + " = { 0 };\n";
+  R += "  void *" + buf + "[16];\n";
+  R += "  NSUInteger " + count + ", " + fidx + ", " + muts + ";\n";
+  R += "  " + varDecl;
+  R += "  " + count + " = " + callExpr + ";\n";
+  R += "  if (" + count + ") { " + muts + " = *" + state + ".mutationsPtr; " + fidx + " = 0;\n";
+  R += "    for (;;) {\n";
+  R += "      if (" + fidx + " >= " + count + ") {\n";
+  R += "        " + count + " = " + callExpr + "; if (!" + count + ") break; " + fidx + " = 0; }\n";
+  R += "      if (*" + state + ".mutationsPtr != " + muts + ") mulle_objc_enumeration_mutation(" + collText + ");\n";
+  R += "      " + varName + " = " + state + ".itemsPtr[" + fidx + "++];\n";
+  R += "      " + bodyText + "\n";
+  R += "    }\n  }\n}";
+
+  ReplaceText(S->getSourceRange(), R);
 }
 
 void RewriteMulleObjC::RewriteTryStmt(ObjCAtTryStmt *S) {
