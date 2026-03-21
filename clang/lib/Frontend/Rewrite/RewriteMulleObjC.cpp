@@ -105,7 +105,7 @@ public:
 
     LOS << "static struct _mulle_objc_loadinfo OBJC_LOAD_INFO"
         << " __attribute__((used, section(\".data.objc.objc_load_info\"))) = {\n"
-        << "  { MULLE_OBJC_RUNTIME_LOAD_VERSION, 0, 0, 0 },\n"
+        << "  { MULLE_OBJC_RUNTIME_LOAD_VERSION, 0, 0, 0, 0 },\n"
         << "  0, 0, 0, 0,\n"  // universe, classes, categories, supers
         << "  " << (NSStringPtrs.empty() ? "0" : "(struct _mulle_objc_loadstringlist *)&OBJC_STATICSTRING_LOADS") << ",\n"
         << "  0\n"  // hashedstrings
