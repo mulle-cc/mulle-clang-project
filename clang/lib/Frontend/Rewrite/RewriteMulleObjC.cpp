@@ -308,9 +308,16 @@ void RewriteMulleObjC::RewriteInterfaceDecl(ObjCInterfaceDecl *D) {
   }
 
   // The macro value inlines the superclass macro (expands at use-time)
+  // Only include super macro if super has ivars (not a protocolclass).
   std::string MacroVal;
-  if (ObjCInterfaceDecl *Super = D->getSuperClass())
-    MacroVal += "OBJC_CLASS_" + Super->getNameAsString() + "_IVARS ";
+  if (ObjCInterfaceDecl *Super = D->getSuperClass()) {
+    // Check if super has any ivars anywhere in its hierarchy
+    bool superHasIvars = false;
+    for (ObjCInterfaceDecl *C = Super; C; C = C->getSuperClass())
+      if (C->ivar_begin() != C->ivar_end()) { superHasIvars = true; break; }
+    if (superHasIvars)
+      MacroVal += "OBJC_CLASS_" + Super->getNameAsString() + "_IVARS ";
+  }
   MacroVal += OwnIvars;
 
   std::string S;
@@ -328,20 +335,12 @@ void RewriteMulleObjC::RewriteInterfaceDecl(ObjCInterfaceDecl *D) {
 void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
   CurrentClass = D->getClassInterface();
 
-  // If the @interface/@protocolclass definition had invalid sloc (e.g. @protocolclass
-  // with no explicit @interface), emit the ivar struct now before the methods.
+  // If the @interface/@protocolclass definition had invalid sloc (e.g. @protocolclass),
+  // emit a bare typedef before the methods so the type is known.
   if (CurrentClass && EmittedIvarStructs.find(CurrentClass->getNameAsString()) == EmittedIvarStructs.end()) {
-    // Synthesize and insert before @implementation
-    std::string tmp;
-    llvm::raw_string_ostream OS(tmp);
     std::string Name = CurrentClass->getNameAsString();
-    std::string Guard = "OBJC_CLASS_" + Name + "_IVARS";
-    std::string MacroVal;
-    if (ObjCInterfaceDecl *Super = CurrentClass->getSuperClass())
-      MacroVal += "OBJC_CLASS_" + Super->getNameAsString() + "_IVARS ";
-    OS << "#ifndef " << Guard << "\n#define " << Guard << " " << MacroVal << "\n#endif\n"
-       << "typedef struct " << Name << " { " << Guard << " } " << Name << ";\n";
-    Rewrite.InsertTextBefore(D->getAtStartLoc(), OS.str());
+    Rewrite.InsertTextBefore(D->getAtStartLoc(),
+        "typedef struct " + Name + " " + Name + ";\n");
     EmittedIvarStructs.insert(Name);
   }
 
