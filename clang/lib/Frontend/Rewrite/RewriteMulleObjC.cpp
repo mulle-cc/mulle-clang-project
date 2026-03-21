@@ -32,6 +32,7 @@ class RewriteMulleObjC : public ASTConsumer {
   SourceManager              *SM      = nullptr;
   std::unique_ptr<raw_ostream> OutFile;
   std::string                 InFileName;
+  bool                        InMethod = false; // for return-cast gating
 
 public:
   RewriteMulleObjC(const std::string &InFile,
@@ -87,6 +88,7 @@ private:
   std::string PrintType(QualType T);
 
   // ObjC expression/statement handlers
+  void RewriteReturnStmt(ReturnStmt *S);
   void RewriteMessageExpr(ObjCMessageExpr *E);
   void RewriteStringLiteral(ObjCStringLiteral *E);
   void RewriteSelectorExpr(ObjCSelectorExpr *E);
@@ -164,6 +166,8 @@ void RewriteMulleObjC::RewriteStmt(Stmt *S) {
     RewriteStringLiteral(E);
   else if (auto *E = dyn_cast<ObjCSelectorExpr>(S))
     RewriteSelectorExpr(E);
+  else if (auto *RS = dyn_cast<ReturnStmt>(S))
+    RewriteReturnStmt(RS);
 }
 
 // ---------------------------------------------------------------------------
@@ -186,7 +190,17 @@ void RewriteMulleObjC::RewriteForwardClassDecl(ObjCInterfaceDecl *D) {
 }
 
 void RewriteMulleObjC::RewriteInterfaceDecl(ObjCInterfaceDecl *D) {
-  TodoComment(D->getSourceRange(), "ObjCInterfaceDecl");
+  // @interface Foo ... @end  ->  typedef struct Foo Foo;
+  // (ivars are not exposed in the C output — opaque struct)
+  std::string Name = D->getNameAsString();
+  std::string S = "typedef struct " + Name + " " + Name + ";";
+  // Replace the entire @interface...@end block
+  SourceLocation End = Lexer::findLocationAfterToken(
+      D->getEndLoc(), tok::at, *SM, LangOpts, false);
+  // D->getEndLoc() is '@' of @end; @end is 4 chars
+  SourceRange R(D->getAtStartLoc(),
+                D->getEndLoc().getLocWithOffset(3));
+  ReplaceText(R, S);
 }
 
 void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
@@ -300,7 +314,9 @@ void RewriteMulleObjC::RewriteMethodDecl(ObjCMethodDecl *M,
         << "(void *self, mulle_objc_methodid_t _cmd, void *_param)\n";
 
   // Rewrite inner ObjC expressions in the body first
+  InMethod = true;
   RewriteStmt(M->getBody());
+  InMethod = false;
   std::string BodyText = Rewrite.getRewrittenText(M->getBody()->getSourceRange());
 
   // Inject unpack locals after opening brace
@@ -347,8 +363,75 @@ void RewriteMulleObjC::RewriteSelectorExpr(ObjCSelectorExpr *E) {
   ReplaceText(E->getSourceRange(), OS.str());
 }
 
+void RewriteMulleObjC::RewriteReturnStmt(ReturnStmt *S) {
+  if (!InMethod) return;
+  Expr *RV = S->getRetValue();
+  if (!RV) return;
+  QualType T = RV->getType();
+  // void* and ObjC pointer returns are already compatible with void*
+  if (T->isPointerType() || T->isObjCObjectPointerType() || T->isVoidType())
+    return;
+  // Wrap scalar: return (void*)(intptr_t)(expr)
+  std::string ValText = Rewrite.getRewrittenText(RV->getSourceRange());
+  std::string Wrapped = "(void *)(intptr_t)(" + ValText + ")";
+  Rewrite.ReplaceText(RV->getBeginLoc(),
+                      Rewrite.getRangeSize(RV->getSourceRange()), Wrapped);
+}
+
 void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
-  TodoComment(E->getSourceRange(), "ObjCMessageExpr");
+  std::string S;
+  llvm::raw_string_ostream OS(S);
+
+  // Receiver
+  std::string Receiver;
+  if (E->getReceiverKind() == ObjCMessageExpr::Instance) {
+    Receiver = Rewrite.getRewrittenText(E->getInstanceReceiver()->getSourceRange());
+  } else {
+    // class message
+    Receiver = E->getClassReceiver()->castAs<ObjCObjectType>()->getInterface()->getNameAsString();
+  }
+
+  // Selector hash
+  std::string SelStr = E->getSelector().getAsString();
+  uint32_t Hash = MulleObjCUniqueIdHashForString(SelStr);
+  std::string HashStr;
+  llvm::raw_string_ostream HOS(HashStr);
+  HOS << "0x"; HOS.write_hex(Hash); HOS << "UL";
+
+  unsigned NumArgs = E->getNumArgs();
+
+  if (NumArgs == 0) {
+    // mulle_objc_object_call(obj, hash, NULL)
+    OS << "mulle_objc_object_call(" << Receiver << ", "
+       << "(mulle_objc_methodid_t) " << HashStr << ", NULL)";
+  } else if (NumArgs == 1) {
+    // single arg: pass pointer to the arg value
+    // mulle_objc_object_call(obj, hash, &(type){ arg })
+    QualType ArgTy = E->getArg(0)->getType();
+    std::string ArgText = Rewrite.getRewrittenText(E->getArg(0)->getSourceRange());
+    OS << "mulle_objc_object_call(" << Receiver << ", "
+       << "(mulle_objc_methodid_t) " << HashStr << ", "
+       << "&(" << PrintType(ArgTy) << "){ " << ArgText << " })";
+  } else {
+    // multi-arg: compound literal struct
+    // mulle_objc_object_call(obj, hash, &(struct { t0 a0; t1 a1; }){ a0, a1 })
+    OS << "mulle_objc_object_call(" << Receiver << ", "
+       << "(mulle_objc_methodid_t) " << HashStr << ", "
+       << "&(struct { ";
+    Selector Sel = E->getSelector();
+    for (unsigned i = 0; i < NumArgs; ++i) {
+      OS << PrintType(E->getArg(i)->getType()) << " "
+         << Sel.getNameForSlot(i).str() << "_; ";
+    }
+    OS << "}){ ";
+    for (unsigned i = 0; i < NumArgs; ++i) {
+      if (i) OS << ", ";
+      OS << Rewrite.getRewrittenText(E->getArg(i)->getSourceRange());
+    }
+    OS << " })";
+  }
+
+  ReplaceText(E->getSourceRange(), OS.str());
 }
 
 void RewriteMulleObjC::RewriteStringLiteral(ObjCStringLiteral *E) {
