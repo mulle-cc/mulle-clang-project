@@ -95,6 +95,10 @@ public:
     if (!ClassListStr.empty())
       LOS << ClassListStr;
 
+    std::string HashNameStr = EmitHashNameList();
+    if (!HashNameStr.empty())
+      LOS << HashNameStr;
+
     if (!NSStringPtrs.empty()) {
       LOS << "static struct {\n"
           << "  unsigned int n_loadstrings;\n"
@@ -115,7 +119,7 @@ public:
         << "  " << (LoadClasses.empty() ? "0" : "(struct _mulle_objc_loadclasslist *)&OBJC_CLASS_LOADS") << ",\n"
         << "  0, 0,\n"  // categories, supers
         << "  " << (NSStringPtrs.empty() ? "0" : "(struct _mulle_objc_loadstringlist *)&OBJC_STATICSTRING_LOADS") << ",\n"
-        << "  0\n"  // hashedstrings
+        << "  " << (LoadClasses.empty() ? "0" : "(struct _mulle_objc_loadhashedstringlist *)&OBJC_HASHNAME_LOADS") << "\n"
         << "};\n";
 
     LOS << "\nstatic void __attribute__((constructor))\n"
@@ -144,11 +148,13 @@ private:
   // Helpers
   std::string MethodCName(const ObjCMethodDecl *M, const ObjCContainerDecl *CD);
   std::string PrintType(QualType T);
+  std::string ObjCEncodeType(QualType T);
 
   // ObjC expression/statement handlers
   void RewriteReturnStmt(ReturnStmt *S);
   void RewriteMessageExpr(ObjCMessageExpr *E);
   std::string EmitLoadClassList();
+  std::string EmitHashNameList();
   void RewriteStringLiteral(ObjCStringLiteral *E);
   void RewriteSelectorExpr(ObjCSelectorExpr *E);
 
@@ -316,6 +322,15 @@ std::string RewriteMulleObjC::MethodCName(const ObjCMethodDecl *M,
     if (c == ':') c = '_';
   S += sel;
   return S;
+}
+
+// ---------------------------------------------------------------------------
+// ObjC type encoding for a QualType (used in ivar signatures/hashes)
+// ---------------------------------------------------------------------------
+std::string RewriteMulleObjC::ObjCEncodeType(QualType T) {
+  std::string enc;
+  Context->getObjCEncodingForType(T, enc);
+  return enc;
 }
 
 // ---------------------------------------------------------------------------
@@ -600,13 +615,11 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
          << "  " << OwnIvars.size() << ",\n  {\n";
       for (auto *IV : OwnIvars) {
         std::string ivarName = IV->getNameAsString();
-        // ivarid = hash of "name:typeencoding"
-        std::string ivarSig = ivarName + ":" + PrintType(IV->getType());
-        uint32_t ivarId = MulleObjCUniqueIdHashForString(ivarSig);
-        // offset: use offsetof via __builtin_offsetof — emit as expression
+        std::string ivarEnc = ObjCEncodeType(IV->getType());
+        uint32_t ivarId = MulleObjCUniqueIdHashForString(ivarName + ":" + ivarEnc);
         OS << "    { { (mulle_objc_ivarid_t) 0x";
         OS.write_hex(ivarId);
-        OS << "U, \"" << ivarName << "\", \"" << PrintType(IV->getType()) << "\" },"
+        OS << "U, \"" << ivarName << "\", \"" << ivarEnc << "\" },"
            << " (int) __builtin_offsetof(" << ClassName << ", " << ivarName << ") },\n";
       }
       OS << "  }\n};\n";
@@ -681,6 +694,46 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
   return Out;
 }
 
+
+
+// ---------------------------------------------------------------------------
+// Emit OBJC_HASHNAME_LOADS (hashed string list for debugging)
+// ---------------------------------------------------------------------------
+std::string RewriteMulleObjC::EmitHashNameList() {
+  if (LoadClasses.empty()) return "";
+
+  std::map<uint32_t, std::string> entries;
+  auto add = [&](const std::string &s) {
+    entries[MulleObjCUniqueIdHashForString(s)] = s;
+  };
+
+  for (auto *D : LoadClasses) {
+    ObjCInterfaceDecl *ID = D->getClassInterface();
+    add(ID->getNameAsString());
+    if (auto *Super = ID->getSuperClass())
+      add(Super->getNameAsString());
+    for (auto *IV : ID->ivars())
+      add(IV->getNameAsString() + ":" + ObjCEncodeType(IV->getType()));
+    for (auto *M : D->methods())
+      add(M->getSelector().getAsString());
+  }
+
+  std::string Out;
+  llvm::raw_string_ostream OS(Out);
+  OS << "static struct {\n"
+     << "  unsigned int n_loadentries;\n"
+     << "  struct _mulle_objc_loadhashedstring loadentries[" << entries.size() << "];\n"
+     << "} OBJC_HASHNAME_LOADS"
+     << " __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n"
+     << "  " << entries.size() << ",\n  {\n";
+  for (auto &[h, s] : entries) {
+    OS << "    { (mulle_objc_uniqueid_t) 0x";
+    OS.write_hex(h);
+    OS << "U, \"" << s << "\" },\n";
+  }
+  OS << "  }\n};\n";
+  return Out;
+}
 
 
 std::unique_ptr<ASTConsumer>
