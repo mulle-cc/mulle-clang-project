@@ -15,6 +15,7 @@
 #include "clang/Rewrite/Frontend/ASTConsumers.h"
 #include "llvm/Support/raw_ostream.h"
 #include <memory>
+#include <vector>
 
 using namespace clang;
 using llvm::RewriteBuffer;
@@ -38,7 +39,8 @@ class RewriteMulleObjC : public ASTConsumer {
   std::string                 InFileName;
   bool                        InMethod = false; // for return-cast gating
   unsigned                    NSStringCount = 0;
-  std::string                 NSStringDefs; // static NSConstantString globals
+  std::string                 NSStringDefs;
+  std::vector<std::string>    NSStringPtrs;
 
 public:
   RewriteMulleObjC(const std::string &InFile,
@@ -83,10 +85,39 @@ public:
       }
     }
     *OutFile << Result;
-    *OutFile << "\nstatic void __attribute__((constructor))\n"
-                "__load_mulle_objc(void)\n"
-                "{\n"
-                "}\n";
+
+    // Emit load info and constructor
+    std::string Load;
+    llvm::raw_string_ostream LOS(Load);
+
+    if (!NSStringPtrs.empty()) {
+      LOS << "static struct {\n"
+          << "  unsigned int n_loadstrings;\n"
+          << "  struct _mulle_objc_object *loadstrings[" << NSStringPtrs.size() << "];\n"
+          << "} OBJC_STATICSTRING_LOADS __attribute__((used, section(\".data.objc.objc_load_info\"))) = {\n"
+          << "  " << NSStringPtrs.size() << ",\n  {";
+      for (unsigned i = 0; i < NSStringPtrs.size(); ++i) {
+        if (i) LOS << ",";
+        LOS << "\n    " << NSStringPtrs[i];
+      }
+      LOS << "\n  }\n};\n";
+    }
+
+    LOS << "static struct _mulle_objc_loadinfo OBJC_LOAD_INFO"
+        << " __attribute__((used, section(\".data.objc.objc_load_info\"))) = {\n"
+        << "  { MULLE_OBJC_RUNTIME_LOAD_VERSION, 0, 0, 0 },\n"
+        << "  0, 0, 0, 0,\n"  // universe, classes, categories, supers
+        << "  " << (NSStringPtrs.empty() ? "0" : "(struct _mulle_objc_loadstringlist *)&OBJC_STATICSTRING_LOADS") << ",\n"
+        << "  0\n"  // hashedstrings
+        << "};\n";
+
+    LOS << "\nstatic void __attribute__((constructor))\n"
+           "__load_mulle_objc(void)\n"
+           "{\n"
+           "  mulle_objc_loadinfo_enqueue_nofail(&OBJC_LOAD_INFO);\n"
+           "}\n";
+
+    *OutFile << Load;
     OutFile->flush();
   }
 
@@ -505,10 +536,8 @@ void RewriteMulleObjC::RewriteStringLiteral(ObjCStringLiteral *E) {
     for (char c : Str) { if (c == '"' || c == '\\') DS << '\\'; DS << c; }
     DS << "\", " << Len << " };\n";
     // Register with runtime load info so _isa gets patched at startup.
-    // Layout matches OBJC_STATICSTRING_LOADS: { int32_t count; void *strings[]; }
-    DS << "static struct { int _n; void *_s; } __nsstr_reg_" << (NSStringCount-1)
-       << " __attribute__((used, section(\".data.objc.objc_load_info\"))) = "
-       << "{ 1, (void*)&" << VarName << "._str };\n";
+    // Collected into OBJC_STATICSTRING_LOADS at end of TU — no per-string section needed.
+    NSStringPtrs.push_back("(struct _mulle_objc_object *)&" + VarName + "._str");
     NSStringDefs += Def;
 
     OS << "((id) &" << VarName << "._str) /* @\"" << Str << "\" */";
