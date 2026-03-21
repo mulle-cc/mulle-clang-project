@@ -288,74 +288,33 @@ void RewriteMulleObjC::RewriteInterfaceDecl(ObjCInterfaceDecl *D) {
 
 void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
   CurrentClass = D->getClassInterface();
-  // First rewrite all method bodies in-place
+
   for (auto *M : D->methods())
     if (M->hasBody())
       RewriteMethodDecl(M, D);
 
-  // Emit synthesized property accessors as C functions before @implementation
-  std::string SynthFuncs;
+  // @synthesize / @dynamic are no-ops in mulle-objc — replace with comment
   for (auto *PI : D->property_impls()) {
-    if (PI->getPropertyImplementation() != ObjCPropertyImplDecl::Synthesize)
-      continue;
-    ObjCIvarDecl *IV = PI->getPropertyIvarDecl();
-    if (!IV) continue;
-    ObjCPropertyDecl *PD = PI->getPropertyDecl();
-    if (!PD) continue;
-
-    std::string ClassName = D->getNameAsString();
-    std::string IvarName  = IV->getNameAsString();
-    QualType PropTy       = PD->getType();
-    std::string CType     = PrintType(PropTy);
-    std::string PropName  = PD->getNameAsString();
-
-    // getter
-    std::string GetterSel = PD->getGetterName().getAsString();
-    std::string GetterCName = ClassName + "_im_" + GetterSel;
-    std::string GetterObjC  = "-[" + ClassName + " " + GetterSel + "]";
-    SynthFuncs += "static void *" + GetterCName +
-        "("+ClassName+" *self, mulle_objc_methodid_t _cmd, void *_param)"
-        " __asm__(\"" + GetterObjC + "\");\n";
-    SynthFuncs += "static void *" + GetterCName +
-        "("+ClassName+" *self, mulle_objc_methodid_t _cmd, void *_param)\n"
-        "{ return (void *)(intptr_t)(self->" + IvarName + "); }\n";
-
-    // setter (only if not readonly)
-    if (!PD->isReadOnly()) {
-      std::string SetterSel = PD->getSetterName().getAsString();
-      std::string SetterCName = ClassName + "_im_" + SetterSel;
-      // setterSel has trailing ':' — replace with '_'
-      std::string SetterCNameSafe = SetterCName;
-      for (char &c : SetterCNameSafe) if (c == ':') c = '_';
-      std::string SetterObjC = "-[" + ClassName + " " + SetterSel + "]";
-      SynthFuncs += "static void *" + SetterCNameSafe +
-          "("+ClassName+" *self, mulle_objc_methodid_t _cmd, void *_param)"
-          " __asm__(\"" + SetterObjC + "\");\n";
-      SynthFuncs += "static void *" + SetterCNameSafe +
-          "("+ClassName+" *self, mulle_objc_methodid_t _cmd, void *_param)\n"
-          "{ self->" + IvarName + " = *(" + CType + " *)_param; return 0; }\n";
-    }
-
-    // Erase the @synthesize line — skip, handled by @implementation block erase below
+    std::string kind = (PI->getPropertyImplementation() == ObjCPropertyImplDecl::Synthesize)
+        ? "@synthesize" : "@dynamic";
+    // Include the trailing semicolon
+    SourceLocation End = Lexer::findLocationAfterToken(
+        PI->getSourceRange().getEnd(), tok::semi, *SM, LangOpts, false);
+    if (End.isInvalid())
+      End = PI->getSourceRange().getEnd();
+    unsigned Len = SM->getFileOffset(End) - SM->getFileOffset(PI->getBeginLoc());
+    Rewrite.ReplaceText(PI->getBeginLoc(), Len,
+        "/* " + kind + " is a no-op in mulle-objc */");
   }
 
-  // Insert synthesized functions before the @implementation block
-  if (!SynthFuncs.empty())
-    Rewrite.InsertTextBefore(D->getAtStartLoc(), SynthFuncs);
-
-  // Erase @implementation header up to first explicit method (or @end)
-  SourceLocation EraseEnd;
-  for (auto *M : D->methods())
-    if (M->hasBody()) { EraseEnd = M->getBeginLoc(); break; }
-
-  if (EraseEnd.isValid()) {
-    unsigned Len = SM->getFileOffset(EraseEnd) - SM->getFileOffset(D->getAtStartLoc());
-    Rewrite.ReplaceText(D->getAtStartLoc(), Len, "");
-  } else {
-    // No explicit methods — erase everything from @implementation to @end
-    unsigned Len = SM->getFileOffset(D->getEndLoc()) - SM->getFileOffset(D->getAtStartLoc());
-    Rewrite.ReplaceText(D->getAtStartLoc(), Len, "");
-  }
+  // Erase "@implementation ClassName" header line — find end of that line
+  // D->getAtStartLoc() = '@', D->getLocation() = class name identifier
+  // Advance past the class name to end of line
+  SourceLocation ImplEnd = D->getLocation();
+  // Move past the class name token
+  ImplEnd = Lexer::getLocForEndOfToken(ImplEnd, 0, *SM, LangOpts);
+  unsigned Len = SM->getFileOffset(ImplEnd) - SM->getFileOffset(D->getAtStartLoc());
+  Rewrite.ReplaceText(D->getAtStartLoc(), Len, "");
 
   // Erase @end (4 chars)
   Rewrite.ReplaceText(D->getEndLoc(), 4, "");
@@ -705,7 +664,8 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
     // --- instance methods ---
     std::vector<ObjCMethodDecl *> IMethods, CMethods;
     for (auto *M : D->methods())
-      (M->isInstanceMethod() ? IMethods : CMethods).push_back(M);
+      if (!M->isSynthesizedAccessorStub())
+        (M->isInstanceMethod() ? IMethods : CMethods).push_back(M);
 
     auto EmitMethodList = [&](const std::string &VarName,
                                const std::vector<ObjCMethodDecl *> &Methods) {
