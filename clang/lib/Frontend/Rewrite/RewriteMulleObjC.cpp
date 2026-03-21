@@ -43,6 +43,7 @@ class RewriteMulleObjC : public ASTConsumer {
   std::string                 NSStringDefs;
   std::vector<std::string>    NSStringPtrs;
   std::vector<ObjCImplementationDecl *> LoadClasses;
+  std::vector<ObjCCategoryImplDecl *>   LoadCategories;
 
 public:
   RewriteMulleObjC(const std::string &InFile,
@@ -96,6 +97,10 @@ public:
     if (!ClassListStr.empty())
       LOS << ClassListStr;
 
+    std::string CatListStr = EmitLoadCategoryList();
+    if (!CatListStr.empty())
+      LOS << CatListStr;
+
     std::string HashNameStr = EmitHashNameList();
     if (!HashNameStr.empty())
       LOS << HashNameStr;
@@ -118,7 +123,8 @@ public:
         << "  { MULLE_OBJC_RUNTIME_LOAD_VERSION, 0, 0, 0, 0 },\n"
         << "  0,\n"  // loaduniverse
         << "  " << (LoadClasses.empty() ? "0" : "(struct _mulle_objc_loadclasslist *)&OBJC_CLASS_LOADS") << ",\n"
-        << "  0, 0,\n"  // categories, supers
+        << "  " << (LoadCategories.empty() ? "0" : "(struct _mulle_objc_loadcategorylist *)&OBJC_CATEGORY_LOADS") << ",\n"
+        << "  0,\n"  // supers
         << "  " << (NSStringPtrs.empty() ? "0" : "(struct _mulle_objc_loadstringlist *)&OBJC_STATICSTRING_LOADS") << ",\n"
         << "  " << (LoadClasses.empty() ? "0" : "(struct _mulle_objc_loadhashedstringlist *)&OBJC_HASHNAME_LOADS") << "\n"
         << "};\n";
@@ -155,6 +161,7 @@ private:
   void RewriteReturnStmt(ReturnStmt *S);
   void RewriteMessageExpr(ObjCMessageExpr *E);
   std::string EmitLoadClassList();
+  std::string EmitLoadCategoryList();
   std::string EmitHashNameList();
   void RewriteStringLiteral(ObjCStringLiteral *E);
   void RewriteSelectorExpr(ObjCSelectorExpr *E);
@@ -442,18 +449,42 @@ void RewriteMulleObjC::RewriteMethodDecl(ObjCMethodDecl *M,
 }
 
 void RewriteMulleObjC::RewriteCategoryDecl(ObjCCategoryDecl *D) {
-  TodoComment(D->getSourceRange(), "ObjCCategoryDecl");
+  // @interface Foo (Cat) — just erase it, no C output needed
+  ReplaceText(D->getSourceRange(), "");
 }
 
 void RewriteMulleObjC::RewriteCategoryImplDecl(ObjCCategoryImplDecl *D) {
+  CurrentClass = D->getClassInterface();
+  LoadCategories.push_back(D);
+
   for (auto *M : D->methods())
     if (M->hasBody())
-      RewriteStmt(M->getBody());
-  TodoComment(D->getSourceRange(), "ObjCCategoryImplDecl");
+      RewriteMethodDecl(M, D->getClassInterface());
+
+  // Erase @implementation Foo (Cat) header up to first method
+  SourceLocation EraseEnd;
+  for (auto *M : D->methods())
+    if (M->hasBody()) { EraseEnd = M->getBeginLoc(); break; }
+
+  if (EraseEnd.isValid()) {
+    unsigned Len = SM->getFileOffset(EraseEnd) - SM->getFileOffset(D->getAtStartLoc());
+    Rewrite.ReplaceText(D->getAtStartLoc(), Len, "");
+  } else {
+    SourceLocation ImplEnd = Lexer::getLocForEndOfToken(D->getLocation(), 0, *SM, LangOpts);
+    // skip past ')' of category name
+    ImplEnd = Lexer::findLocationAfterToken(ImplEnd, tok::r_paren, *SM, LangOpts, true);
+    if (ImplEnd.isValid()) {
+      unsigned Len = SM->getFileOffset(ImplEnd) - SM->getFileOffset(D->getAtStartLoc());
+      Rewrite.ReplaceText(D->getAtStartLoc(), Len, "");
+    }
+  }
+  // Erase @end
+  Rewrite.ReplaceText(D->getEndLoc(), 4, "");
 }
 
 void RewriteMulleObjC::RewriteProtocolDecl(ObjCProtocolDecl *D) {
-  TodoComment(D->getSourceRange(), "ObjCProtocolDecl");
+  // @protocol — no C output needed, just erase
+  ReplaceText(D->getSourceRange(), "");
 }
 
 // ---------------------------------------------------------------------------
@@ -734,8 +765,87 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
 
 
 // ---------------------------------------------------------------------------
-// Emit OBJC_HASHNAME_LOADS (hashed string list for debugging)
+// Emit OBJC_CATEGORY_LOADS data structures
 // ---------------------------------------------------------------------------
+std::string RewriteMulleObjC::EmitLoadCategoryList() {
+  if (LoadCategories.empty()) return "";
+
+  std::string Out;
+  llvm::raw_string_ostream OS(Out);
+  std::vector<std::string> CatVarNames;
+
+  for (auto *D : LoadCategories) {
+    ObjCInterfaceDecl *ID  = D->getClassInterface();
+    std::string ClassName  = ID->getNameAsString();
+    std::string CatName    = D->getName().str();
+    std::string VarBase    = "OBJC_CATEGORY_$_" + ClassName + "_" + CatName;
+    CatVarNames.push_back(VarBase);
+
+    uint32_t catId   = MulleObjCUniqueIdHashForString(CatName);
+    uint32_t classId = MulleObjCUniqueIdHashForString(ClassName);
+    uint32_t classIvarHash = MulleObjCUniqueIdHashForString(
+        ID->getIvarHashString(*Context));
+
+    std::vector<ObjCMethodDecl *> IMethods, CMethods;
+    for (auto *M : D->methods())
+      if (!M->isSynthesizedAccessorStub())
+        (M->isInstanceMethod() ? IMethods : CMethods).push_back(M);
+
+    auto EmitMethodList = [&](const std::string &VarName,
+                               const std::vector<ObjCMethodDecl *> &Methods) {
+      if (Methods.empty()) return;
+      OS << "static struct {\n"
+         << "  unsigned int n_methods;\n"
+         << "  struct _mulle_objc_loadcategory *loadcategory;\n"
+         << "  struct _mulle_objc_method methods[" << Methods.size() << "];\n"
+         << "} " << VarName
+         << " __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n"
+         << "  " << Methods.size() << ", 0,\n  {\n";
+      for (auto *M : Methods) {
+        std::string sel = M->getSelector().getAsString();
+        uint32_t selId = MulleObjCUniqueIdHashForString(sel);
+        std::string cname = MethodCName(M, D->getClassInterface());
+        OS << "    { { (mulle_objc_methodid_t) 0x";
+        OS.write_hex(selId);
+        OS << "U, \"\", \"" << sel << "\", 0x200000 }, (mulle_objc_implementation_t) " << cname << " },\n";
+      }
+      OS << "  }\n};\n";
+    };
+
+    std::string IMethodListVar = "OBJC_CAT_INSTANCE_METHODS_" + ClassName + "_" + CatName;
+    std::string CMethodListVar = "OBJC_CAT_CLASS_METHODS_"    + ClassName + "_" + CatName;
+    EmitMethodList(IMethodListVar, IMethods);
+    EmitMethodList(CMethodListVar, CMethods);
+
+    OS << "static struct _mulle_objc_loadcategory " << VarBase
+       << " __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n"
+       << "  (mulle_objc_categoryid_t) 0x"; OS.write_hex(catId);
+    OS << "U,\n  \"" << CatName << "\",\n"
+       << "  (mulle_objc_classid_t) 0x"; OS.write_hex(classId);
+    OS << "U,\n  \"" << ClassName << "\",\n"
+       << "  (mulle_objc_hash_t) 0x"; OS.write_hex(classIvarHash);
+    OS << "U,\n"
+       << "  " << (CMethods.empty() ? "0" : "(struct _mulle_objc_methodlist *)&" + CMethodListVar) << ",\n"
+       << "  " << (IMethods.empty() ? "0" : "(struct _mulle_objc_methodlist *)&" + IMethodListVar) << ",\n"
+       << "  0, 0, 0, 0\n"  // properties, protocols, protocolclassids, origin
+       << "};\n";
+  }
+
+  OS << "static struct {\n"
+     << "  unsigned int n_loadcategories;\n"
+     << "  struct _mulle_objc_loadcategory *loadcategories[" << CatVarNames.size() << "];\n"
+     << "} OBJC_CATEGORY_LOADS"
+     << " __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n"
+     << "  " << CatVarNames.size() << ",\n  {";
+  for (unsigned i = 0; i < CatVarNames.size(); ++i) {
+    if (i) OS << ",";
+    OS << "\n    &" << CatVarNames[i];
+  }
+  OS << "\n  }\n};\n";
+  return Out;
+}
+
+
 std::string RewriteMulleObjC::EmitHashNameList() {
   if (LoadClasses.empty()) return "";
 
@@ -743,6 +853,12 @@ std::string RewriteMulleObjC::EmitHashNameList() {
   auto add = [&](const std::string &s) {
     entries[MulleObjCUniqueIdHashForString(s)] = s;
   };
+
+  for (auto *D : LoadCategories) {
+    add(D->getName().str());
+    for (auto *M : D->methods())
+      add(M->getSelector().getAsString());
+  }
 
   for (auto *D : LoadClasses) {
     ObjCInterfaceDecl *ID = D->getClassInterface();
