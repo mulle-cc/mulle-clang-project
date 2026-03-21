@@ -344,9 +344,25 @@ void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
     EmittedIvarStructs.insert(Name);
   }
 
-  for (auto *M : D->methods())
-    if (M->hasBody())
+  for (auto *M : D->methods()) {
+    if (M->isAlias()) {
+      // Erase the @method_implementation line.
+      // M->getBeginLoc() points to the '-' of the LHS selector.
+      // Scan backward to '@', forward to ';'.
+      const char *Start = SM->getCharacterData(M->getBeginLoc());
+      const char *p = Start;
+      // backward to '@'
+      while (p > SM->getCharacterData(SM->getLocForStartOfFile(SM->getFileID(M->getBeginLoc()))) && *p != '@')
+        --p;
+      // forward to ';'
+      const char *q = Start;
+      while (*q && *q != ';') ++q;
+      if (*q == ';') ++q;
+      SourceLocation AtLoc = M->getBeginLoc().getLocWithOffset(p - Start);
+      Rewrite.ReplaceText(AtLoc, q - p, "");
+    } else if (M->hasBody())
       RewriteMethodDecl(M, D);
+  }
 
   // @synthesize / @dynamic are no-ops in mulle-objc — replace with comment
   for (auto *PI : D->property_impls()) {
@@ -518,9 +534,19 @@ void RewriteMulleObjC::RewriteCategoryImplDecl(ObjCCategoryImplDecl *D) {
   CurrentClass = D->getClassInterface();
   LoadCategories.push_back(D);
 
-  for (auto *M : D->methods())
-    if (M->hasBody())
+  for (auto *M : D->methods()) {
+    if (M->isAlias()) {
+      const char *Start = SM->getCharacterData(M->getBeginLoc());
+      const char *p = Start;
+      while (p > SM->getCharacterData(SM->getLocForStartOfFile(SM->getFileID(M->getBeginLoc()))) && *p != '@')
+        --p;
+      const char *q = Start;
+      while (*q && *q != ';') ++q;
+      if (*q == ';') ++q;
+      Rewrite.ReplaceText(M->getBeginLoc().getLocWithOffset(p - Start), q - p, "");
+    } else if (M->hasBody())
       RewriteMethodDecl(M, D->getClassInterface());
+  }
 
   // Erase @implementation Foo (Cat) header up to first method
   SourceLocation EraseEnd;
@@ -929,8 +955,16 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
       for (auto *M : Methods) {
         std::string sel = M->getSelector().getAsString();
         uint32_t selId = MulleObjCUniqueIdHashForString(sel);
-        std::string cname = MethodCName(M, D->getClassInterface());
-        // bits: 0x200000 = preload flag (standard for instance methods)
+        // For alias methods, point to the target's C function
+        std::string cname;
+        if (M->isAlias()) {
+          if (auto *TM = M->getAliasMethod())
+            cname = MethodCName(TM, D->getClassInterface());
+          else if (auto *FD = M->getAliasFunction())
+            cname = FD->getNameAsString();
+        }
+        if (cname.empty())
+          cname = MethodCName(M, D->getClassInterface());
         OS << "    { { (mulle_objc_methodid_t) 0x";
         OS.write_hex(selId);
         OS << "U, \"\", \"" << sel << "\", 0x200000 }, (mulle_objc_implementation_t) " << cname << " },\n";
@@ -1044,7 +1078,15 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
       for (auto *M : Methods) {
         std::string sel = M->getSelector().getAsString();
         uint32_t selId = MulleObjCUniqueIdHashForString(sel);
-        std::string cname = MethodCName(M, D->getClassInterface());
+        std::string cname;
+        if (M->isAlias()) {
+          if (auto *TM = M->getAliasMethod())
+            cname = MethodCName(TM, D->getClassInterface());
+          else if (auto *FD = M->getAliasFunction())
+            cname = FD->getNameAsString();
+        }
+        if (cname.empty())
+          cname = MethodCName(M, D->getClassInterface());
         OS << "    { { (mulle_objc_methodid_t) 0x";
         OS.write_hex(selId);
         OS << "U, \"\", \"" << sel << "\", 0x200000 }, (mulle_objc_implementation_t) " << cname << " },\n";
