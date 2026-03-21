@@ -39,6 +39,7 @@ class RewriteMulleObjC : public ASTConsumer {
   std::string                 InFileName;
   bool                        InMethod = false;
   ObjCInterfaceDecl          *CurrentClass = nullptr; // for return-cast gating
+  unsigned                    TryCount = 0;
   unsigned                    NSStringCount = 0;
   std::string                 NSStringDefs;
   std::vector<std::string>    NSStringPtrs;
@@ -142,6 +143,8 @@ public:
 private:
   void HandleTopLevelSingleDecl(Decl *D);
   void RewriteStmt(Stmt *S);
+  void RewriteTryStmt(ObjCAtTryStmt *S);
+  void RewriteThrowStmt(ObjCAtThrowStmt *S);
 
   // ObjC declaration handlers
   void RewriteInterfaceDecl(ObjCInterfaceDecl *D);
@@ -242,6 +245,10 @@ void RewriteMulleObjC::RewriteStmt(Stmt *S) {
     RewriteSelectorExpr(E);
   else if (auto *RS = dyn_cast<ReturnStmt>(S))
     RewriteReturnStmt(RS);
+  else if (auto *TS = dyn_cast<ObjCAtTryStmt>(S))
+    RewriteTryStmt(TS);
+  else if (auto *TS = dyn_cast<ObjCAtThrowStmt>(S))
+    RewriteThrowStmt(TS);
 }
 
 // ---------------------------------------------------------------------------
@@ -501,6 +508,130 @@ void RewriteMulleObjC::RewriteSelectorExpr(ObjCSelectorExpr *E) {
   OS.write_hex(hash);
   OS << "UL) /* @selector(" << selStr << ") */";
   ReplaceText(E->getSourceRange(), OS.str());
+}
+
+void RewriteMulleObjC::RewriteThrowStmt(ObjCAtThrowStmt *S) {
+  // @throw expr;  ->  mulle_objc_exception_throw(expr, 0);
+  // @throw;       ->  mulle_objc_exception_throw(_rethrow, 0);  (rethrow in catch)
+  std::string R;
+  if (Expr *E = S->getThrowExpr()) {
+    std::string ExprText = Rewrite.getRewrittenText(E->getSourceRange());
+    R = "mulle_objc_exception_throw(" + ExprText + ", 0)";
+  } else {
+    R = "mulle_objc_exception_throw(_rethrow, 0)";
+  }
+  // Replace from '@' through ';'
+  SourceLocation End = Lexer::findLocationAfterToken(
+      S->getEndLoc(), tok::semi, *SM, LangOpts, false);
+  unsigned Len = End.isValid()
+      ? SM->getFileOffset(End) - SM->getFileOffset(S->getBeginLoc())
+      : Rewrite.getRangeSize(S->getSourceRange());
+  Rewrite.ReplaceText(S->getBeginLoc(), Len, R + ";");
+}
+
+void RewriteMulleObjC::RewriteTryStmt(ObjCAtTryStmt *S) {
+  std::string excVar = "_exc_" + std::to_string(TryCount++);
+
+  // Build the full replacement as a string, then do targeted replacements.
+  // Strategy: replace @try -> opening of our block, rewrite @catch clauses,
+  // rewrite @finally, and wrap everything.
+
+  ObjCAtFinallyStmt *Finally = S->getFinallyStmt();
+  unsigned NumCatch = S->getNumCatchStmts();
+
+  // --- Replace "@try" (4 chars) with setup + if ---
+  std::string TryOpen;
+  TryOpen  = "{ struct { void *_s; jmp_buf _j; } " + excVar + ";\n";
+  TryOpen += "  mulle_objc_exception_tryenter(&" + excVar + ", 0);\n";
+  TryOpen += "  if (!_setjmp(" + excVar + "._j))";
+  // @try is 4 chars
+  Rewrite.ReplaceText(S->getAtTryLoc(), 4, TryOpen);
+
+  // After the try body's closing brace, insert tryexit + else
+  Stmt *TryBody = S->getTryBody();
+  SourceLocation TryEnd = TryBody->getEndLoc(); // points to '}'
+  std::string AfterTry = " mulle_objc_exception_tryexit(&" + excVar + ", 0); }";
+  // insert before the '}' — replace '}' with '} tryexit; }'
+  Rewrite.ReplaceText(TryEnd, 1, AfterTry);
+
+  if (NumCatch > 0) {
+    // Insert "else { void *_e = extract; " before first @catch
+    ObjCAtCatchStmt *FirstCatch = S->getCatchStmt(0);
+    std::string ElseOpen;
+    ElseOpen  = " else {\n";
+    ElseOpen += "  void *_rethrow = 0;\n";
+    ElseOpen += "  void *_e = mulle_objc_exception_extract(&" + excVar + ", 0);\n";
+    Rewrite.InsertTextBefore(FirstCatch->getBeginLoc(), ElseOpen);
+
+    for (unsigned i = 0; i < NumCatch; ++i) {
+      ObjCAtCatchStmt *Catch = S->getCatchStmt(i);
+      VarDecl *CatchVar = Catch->getCatchParamDecl();
+
+      if (!CatchVar) {
+        // @catch (...) — catch all
+        // Replace "@catch (...)" with "if (1)"
+        Rewrite.ReplaceText(Catch->getBeginLoc(),
+            SM->getFileOffset(Catch->getRParenLoc()) + 1
+            - SM->getFileOffset(Catch->getBeginLoc()),
+            "if (1)");
+      } else {
+        QualType T = CatchVar->getType();
+        std::string CatchClass;
+        if (auto *PT = T->getAs<ObjCObjectPointerType>())
+          if (auto *ID = PT->getObjectType()->getInterface())
+            CatchClass = ID->getNameAsString();
+
+        std::string CatchVarName = CatchVar->getNameAsString();
+        uint32_t classId = CatchClass.empty() ? 0
+            : MulleObjCUniqueIdHashForString(CatchClass);
+
+        std::string Cond;
+        if (CatchClass.empty() || CatchClass == "id")
+          Cond = "if (1)";
+        else {
+          std::string hex;
+          llvm::raw_string_ostream HS(hex);
+          HS << "0x"; HS.write_hex(classId); HS << "U";
+          Cond = "if (mulle_objc_exception_match(_e, 0, (mulle_objc_classid_t) " + hex + "))";
+        }
+
+        // Replace "@catch (Type *var)" with "if (match) { Type *var = _e;"
+        unsigned CatchHdrLen = SM->getFileOffset(Catch->getRParenLoc()) + 1
+            - SM->getFileOffset(Catch->getBeginLoc());
+        std::string CatchType = PrintType(T);
+        Rewrite.ReplaceText(Catch->getBeginLoc(), CatchHdrLen,
+            Cond + " { " + CatchType + " " + CatchVarName + " = (" + CatchType + ") _e;");
+
+        // Close the extra '{' after the catch body
+        SourceLocation BodyEnd = Catch->getCatchBody()->getEndLoc();
+        Rewrite.ReplaceText(BodyEnd, 1, "} }");
+      }
+    }
+
+    // Close the else block, with rethrow if needed
+    ObjCAtCatchStmt *LastCatch = S->getCatchStmt(NumCatch - 1);
+    SourceLocation AfterLastCatch = LastCatch->getCatchBody()->getEndLoc();
+    // We already replaced that '}' above — insert after it
+    std::string ElseClose = "\n  if (_rethrow) mulle_objc_exception_throw(_rethrow, 0);\n}";
+    Rewrite.InsertTextAfter(AfterLastCatch, ElseClose);
+  } else {
+    // No catch — just else { extract; rethrow }
+    std::string ElseRethrow;
+    ElseRethrow  = " else {\n";
+    ElseRethrow += "  void *_rethrow = mulle_objc_exception_extract(&" + excVar + ", 0);\n";
+    ElseRethrow += "  mulle_objc_exception_throw(_rethrow, 0);\n}";
+    if (Finally)
+      Rewrite.InsertTextBefore(Finally->getBeginLoc(), ElseRethrow);
+    // else appended after try body — handled by AfterTry above
+  }
+
+  // @finally — just strip the keyword
+  if (Finally)
+    Rewrite.ReplaceText(Finally->getBeginLoc(), 8, ""); // "@finally" = 8 chars
+
+  // Close outer block after everything
+  SourceLocation End = S->getEndLoc();
+  Rewrite.InsertTextAfter(End, "\n}");
 }
 
 void RewriteMulleObjC::RewriteReturnStmt(ReturnStmt *S) {
