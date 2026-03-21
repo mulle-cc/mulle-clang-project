@@ -160,7 +160,7 @@ public:
         << "  0,\n"  // loaduniverse
         << "  " << (LoadClasses.empty()    ? "0" : "(struct _mulle_objc_loadclasslist *)&OBJC_CLASS_LOADS") << ",\n"
         << "  " << (LoadCategories.empty() ? "0" : "(struct _mulle_objc_loadcategorylist *)&OBJC_CATEGORY_LOADS") << ",\n"
-        << "  " << (LoadSupers.empty()     ? "0" : "(struct _mulle_objc_loadsuperlist *)&OBJC_SUPER_LOADS") << ",\n"
+        << "  " << (LoadSupers.empty()     ? "0" : "(struct _mulle_objc_superlist *)&OBJC_SUPER_LOADS") << ",\n"
         << "  " << (NSStringPtrs.empty() ? "0" : "(struct _mulle_objc_loadstringlist *)&OBJC_STATICSTRING_LOADS") << ",\n"
         << "  " << (LoadClasses.empty() ? "0" : "(struct _mulle_objc_loadhashedstringlist *)&OBJC_HASHNAME_LOADS") << "\n"
         << "};\n";
