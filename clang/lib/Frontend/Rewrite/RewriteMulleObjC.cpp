@@ -397,14 +397,17 @@ void RewriteMulleObjC::RewriteMethodDecl(ObjCMethodDecl *M,
         << " = *(" << PrintType(P->getType()) << " *)_param;\n";
   }
 
+  std::string SelfType = M->isInstanceMethod()
+      ? CD->getNameAsString() + " *"
+      : "void *";
   // Build the C function signature with __asm__ for the ObjC name
   std::string Sig;
   llvm::raw_string_ostream SigOS(Sig);
   SigOS << "static void *" << CName
-        << "(" << CD->getNameAsString() << " *self, mulle_objc_methodid_t _cmd, void *_param)"
+        << "(" << SelfType << "self, mulle_objc_methodid_t _cmd, void *_param)"
         << " __asm__(\"" << ObjCName << "\");\n"
         << "static void *" << CName
-        << "(" << CD->getNameAsString() << " *self, mulle_objc_methodid_t _cmd, void *_param)\n";
+        << "(" << SelfType << "self, mulle_objc_methodid_t _cmd, void *_param)\n";
 
   // Rewrite inner ObjC expressions in the body first
   InMethod = true;
