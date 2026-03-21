@@ -269,9 +269,13 @@ void RewriteMulleObjC::RewriteStmt(Stmt *S) {
     RewriteTryStmt(TS);
   else if (auto *TS = dyn_cast<ObjCAtThrowStmt>(S))
     RewriteThrowStmt(TS);
+  else if (auto *IV = dyn_cast<ObjCIvarRefExpr>(S)) {
+    // bare ivar access -> self->ivar
+    std::string R = "self->" + IV->getDecl()->getNameAsString();
+    Rewrite.ReplaceText(IV->getSourceRange().getBegin(),
+        Rewrite.getRangeSize(IV->getSourceRange()), R);
+  }
 }
-
-// ---------------------------------------------------------------------------
 // ObjC declaration implementations
 // ---------------------------------------------------------------------------
 
@@ -547,22 +551,25 @@ void RewriteMulleObjC::RewriteDeclStmt(DeclStmt *S) {
 }
 
 void RewriteMulleObjC::RewriteThrowStmt(ObjCAtThrowStmt *S) {
-  // @throw expr;  ->  mulle_objc_exception_throw(expr, 0);
-  // @throw;       ->  mulle_objc_exception_throw(_rethrow, 0);  (rethrow in catch)
-  std::string R;
   if (Expr *E = S->getThrowExpr()) {
-    std::string ExprText = Rewrite.getRewrittenText(E->getSourceRange());
-    R = "mulle_objc_exception_throw(" + ExprText + ", 0)";
+    // The expression is already rewritten in-place (bottom-up).
+    // Just replace "@throw " with "mulle_objc_exception_throw(" and
+    // append ", 0)" before the semicolon.
+    // @throw is 6 chars; replace up to (but not including) the expression.
+    unsigned ThrowLen = SM->getFileOffset(E->getBeginLoc())
+                      - SM->getFileOffset(S->getBeginLoc());
+    Rewrite.ReplaceText(S->getBeginLoc(), ThrowLen,
+                        "mulle_objc_exception_throw(");
+    // Insert ", 0)" after the expression's (original) end
+    SourceLocation ExprEnd = Lexer::getLocForEndOfToken(
+        E->getEndLoc(), 0, *SM, LangOpts);
+    Rewrite.InsertTextBefore(ExprEnd, ", 0)");
   } else {
-    R = "mulle_objc_exception_throw(_rethrow, 0)";
+    // bare @throw; -> rethrow
+    Rewrite.ReplaceText(S->getBeginLoc(),
+        Rewrite.getRangeSize(S->getSourceRange()),
+        "mulle_objc_exception_throw(_rethrow, 0)");
   }
-  // Replace from '@' through ';'
-  SourceLocation End = Lexer::findLocationAfterToken(
-      S->getEndLoc(), tok::semi, *SM, LangOpts, false);
-  unsigned Len = End.isValid()
-      ? SM->getFileOffset(End) - SM->getFileOffset(S->getBeginLoc())
-      : Rewrite.getRangeSize(S->getSourceRange());
-  Rewrite.ReplaceText(S->getBeginLoc(), Len, R + ";");
 }
 
 void RewriteMulleObjC::RewriteTryStmt(ObjCAtTryStmt *S) {
@@ -787,7 +794,7 @@ void RewriteMulleObjC::RewriteStringLiteral(ObjCStringLiteral *E) {
   }
 
   if (value) {
-    OS << "((id) 0x";
+    OS << "((void *) 0x";
     OS.write_hex(value);
     OS << "ULL) /* @\"" << Str << "\" */";
   } else {
@@ -808,7 +815,7 @@ void RewriteMulleObjC::RewriteStringLiteral(ObjCStringLiteral *E) {
     NSStringPtrs.push_back("(struct _mulle_objc_object *)&" + VarName + "._str");
     NSStringDefs += Def;
 
-    OS << "((id) &" << VarName << "._str) /* @\"" << Str << "\" */";
+    OS << "((void *) &" << VarName << "._str) /* @\"" << Str << "\" */";
   }
 
   ReplaceText(E->getSourceRange(), OS.str());
