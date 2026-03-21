@@ -421,8 +421,9 @@ void RewriteMulleObjC::RewriteMethodDecl(ObjCMethodDecl *M,
   std::string Unpack;
   RecordDecl *RD = M->getParamRecord();
 
-  if (RD && M->param_size() > 1) {
-    // Multi-param: _param points to a struct
+  if (RD && (M->param_size() > 1 || M->isVariadic())) {
+    // Multi-param or variadic: _param points to a struct
+    // (mulle_vararg_start needs _param to be a typed struct pointer)
     std::string StructName = CName + "_t";
     llvm::raw_string_ostream SDef(ParamStructDef);
     SDef << "struct " << StructName << " { ";
@@ -431,10 +432,19 @@ void RewriteMulleObjC::RewriteMethodDecl(ObjCMethodDecl *M,
     SDef << "};\n";
 
     llvm::raw_string_ostream UOS(Unpack);
-    for (auto *FD : RD->fields())
-      UOS << "  " << PrintType(FD->getType()) << " " << FD->getNameAsString()
-          << " = ((struct " << StructName << " *)_param)->"
-          << FD->getNameAsString() << ";\n";
+    // For variadic methods, keep _param as struct pointer (mulle_vararg_start uses it).
+    // For non-variadic multi-param, unpack all fields.
+    if (M->isVariadic()) {
+      // _param is already typed struct pointer in the signature.
+      for (auto *FD : RD->fields())
+        UOS << "  " << PrintType(FD->getType()) << " " << FD->getNameAsString()
+            << " = _param->" << FD->getNameAsString() << ";\n";
+    } else {
+      for (auto *FD : RD->fields())
+        UOS << "  " << PrintType(FD->getType()) << " " << FD->getNameAsString()
+            << " = ((struct " << StructName << " *)_param)->"
+            << FD->getNameAsString() << ";\n";
+    }
 
   } else if (M->param_size() == 1) {
     // Single-param: _param IS a pointer to the single value
@@ -447,14 +457,17 @@ void RewriteMulleObjC::RewriteMethodDecl(ObjCMethodDecl *M,
   std::string SelfType = M->isInstanceMethod()
       ? CD->getNameAsString() + " *"
       : "void *";
+  std::string ParamType = (M->isVariadic() && RD)
+      ? "struct " + CName + "_t *"
+      : "void *";
   // Build the C function signature with __asm__ for the ObjC name
   std::string Sig;
   llvm::raw_string_ostream SigOS(Sig);
   SigOS << "static void *" << CName
-        << "(" << SelfType << "self, mulle_objc_methodid_t _cmd, void *_param)"
+        << "(" << SelfType << "self, mulle_objc_methodid_t _cmd, " << ParamType << "_param)"
         << " __asm__(\"" << ObjCName << "\");\n"
         << "static void *" << CName
-        << "(" << SelfType << "self, mulle_objc_methodid_t _cmd, void *_param)\n";
+        << "(" << SelfType << "self, mulle_objc_methodid_t _cmd, " << ParamType << "_param)\n";
 
   // Rewrite inner ObjC expressions in the body first
   InMethod = true;
@@ -762,8 +775,13 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
     llvm::raw_string_ostream PS(param);
     PS << "&(struct { ";
     Selector Sel = E->getSelector();
-    for (unsigned i = 0; i < NumArgs; ++i)
-      PS << PrintType(E->getArg(i)->getType()) << " " << Sel.getNameForSlot(i).str() << "_; ";
+    unsigned NumSlots = Sel.getNumArgs();
+    for (unsigned i = 0; i < NumArgs; ++i) {
+      std::string fname = (i < NumSlots)
+          ? Sel.getNameForSlot(i).str() + "_"
+          : "_v" + std::to_string(i - NumSlots);
+      PS << PrintType(E->getArg(i)->getType()) << " " << fname << "; ";
+    }
     PS << "}){ ";
     for (unsigned i = 0; i < NumArgs; ++i) {
       if (i) PS << ", ";
