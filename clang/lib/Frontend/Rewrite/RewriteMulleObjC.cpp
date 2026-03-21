@@ -712,8 +712,12 @@ std::string RewriteMulleObjC::EmitHashNameList() {
     add(ID->getNameAsString());
     if (auto *Super = ID->getSuperClass())
       add(Super->getNameAsString());
-    for (auto *IV : ID->ivars())
-      add(IV->getNameAsString() + ":" + ObjCEncodeType(IV->getType()));
+    // walk full ivar chain (own + inherited) for hashname coverage
+    for (ObjCInterfaceDecl *C = ID; C; C = C->getSuperClass())
+      for (auto *IV : C->ivars()) {
+        add(IV->getNameAsString());
+        add(IV->getNameAsString() + ":" + ObjCEncodeType(IV->getType()));
+      }
     for (auto *M : D->methods())
       add(M->getSelector().getAsString());
   }
