@@ -37,6 +37,8 @@ class RewriteMulleObjC : public ASTConsumer {
   std::unique_ptr<raw_ostream> OutFile;
   std::string                 InFileName;
   bool                        InMethod = false; // for return-cast gating
+  unsigned                    NSStringCount = 0;
+  std::string                 NSStringDefs; // static NSConstantString globals
 
 public:
   RewriteMulleObjC(const std::string &InFile,
@@ -63,14 +65,24 @@ public:
     if (Diags.hasErrorOccurred())
       return;
 
+    std::string Result;
     if (const RewriteBuffer *Buf =
             Rewrite.getRewriteBufferFor(SM->getMainFileID()))
-      *OutFile << std::string(Buf->begin(), Buf->end());
-    else {
-      // No rewrites — emit original source unchanged
-      StringRef MainBuf = SM->getBufferData(SM->getMainFileID());
-      *OutFile << MainBuf;
+      Result = std::string(Buf->begin(), Buf->end());
+    else
+      Result = SM->getBufferData(SM->getMainFileID()).str();
+
+    if (!NSStringDefs.empty()) {
+      // Insert static NSConstantString globals after the last #include line
+      size_t pos = Result.rfind("\n#include");
+      if (pos != std::string::npos) {
+        pos = Result.find('\n', pos + 1) + 1;
+        Result.insert(pos, NSStringDefs);
+      } else {
+        Result = NSStringDefs + Result;
+      }
     }
+    *OutFile << Result;
     OutFile->flush();
   }
 
@@ -476,18 +488,26 @@ void RewriteMulleObjC::RewriteStringLiteral(ObjCStringLiteral *E) {
     OS.write_hex(value);
     OS << "ULL) /* @\"" << Str << "\" */";
   } else {
-    // Fall back to static struct: { MULLE_OBJC_NEVER_RELEASE, NULL, "str", len }
-    // Emit a compound literal that matches the NSConstantString layout
-    OS << "((id) &(struct { intptr_t rc; void *isa; const char *str; unsigned len; })"
-       << "{ (intptr_t) 0x" ;
-    OS.write_hex((uint64_t)(INTPTR_MAX - 1));
-    OS << ", 0, \"";
-    // Escape the string
-    for (char c : Str) {
-      if (c == '"' || c == '\\') OS << '\\';
-      OS << c;
-    }
-    OS << "\", " << Len << " }) /* @\"" << Str << "\" */";
+    // Static NSConstantString struct — isa patched at load time by runtime.
+    // Layout: { intptr_t rc; void *isa; const char *str; unsigned len; }
+    // The object pointer is &str (field 2), matching the compiler's alias.
+    std::string VarName = "__nsstr_" + std::to_string(NSStringCount++);
+    std::string Def;
+    llvm::raw_string_ostream DS(Def);
+    DS << "static struct { intptr_t _rc; void *_isa; const char *_str; unsigned _len; } "
+       << VarName << " = { (intptr_t) 0x";
+    DS.write_hex((uint64_t)(INTPTR_MAX - 1));
+    DS << ", 0, \"";
+    for (char c : Str) { if (c == '"' || c == '\\') DS << '\\'; DS << c; }
+    DS << "\", " << Len << " };\n";
+    // Register with runtime load info so _isa gets patched at startup.
+    // Layout matches OBJC_STATICSTRING_LOADS: { int32_t count; void *strings[]; }
+    DS << "static struct { int _n; void *_s; } __nsstr_reg_" << (NSStringCount-1)
+       << " __attribute__((used, section(\".data.objc.objc_load_info\"))) = "
+       << "{ 1, (void*)&" << VarName << "._str };\n";
+    NSStringDefs += Def;
+
+    OS << "((id) &" << VarName << "._str) /* @\"" << Str << "\" */";
   }
 
   ReplaceText(E->getSourceRange(), OS.str());
