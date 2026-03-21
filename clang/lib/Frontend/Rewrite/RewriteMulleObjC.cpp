@@ -725,6 +725,26 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
     EmitMethodList(IMethodListVar, IMethods);
     EmitMethodList(CMethodListVar, CMethods);
 
+    // --- protocols ---
+    std::string ProtoListVar;
+    auto &Protos = ID->getReferencedProtocols();
+    if (!Protos.empty()) {
+      ProtoListVar = "OBJC_CLASS_PROTOCOLS_" + ClassName;
+      OS << "static struct {\n"
+         << "  unsigned int n_protocols;\n"
+         << "  struct _mulle_objc_protocol protocols[" << Protos.size() << "];\n"
+         << "} " << ProtoListVar
+         << " __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n"
+         << "  " << Protos.size() << ",\n  {\n";
+      for (auto *P : Protos) {
+        uint32_t pid = MulleObjCUniqueIdHashForString(P->getNameAsString());
+        OS << "    { (mulle_objc_protocolid_t) 0x";
+        OS.write_hex(pid);
+        OS << "U, \"" << P->getNameAsString() << "\" },\n";
+      }
+      OS << "  }\n};\n";
+    }
+
     // --- loadclass struct ---
     // instancesize = sizeof(ClassName) — emit as expression
     OS << "static struct _mulle_objc_loadclass " << VarBase
@@ -737,12 +757,14 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
     OS << "U,\n  " << (superName.empty() ? "0" : "\"" + superName + "\"") << ",\n"
        << "  (mulle_objc_hash_t) 0x"; OS.write_hex(superIvarHash);
     OS << "U,\n"
-       << "  -1,\n"  // fastclassindex
+       << "  -1,\n"
        << "  (int) sizeof(" << ClassName << "),\n"
-       << "  " << (OwnIvars.empty() ? "0" : "(struct _mulle_objc_ivarlist *)&" + IvarListVar) << ",\n"
-       << "  " << (CMethods.empty() ? "0" : "(struct _mulle_objc_methodlist *)&" + CMethodListVar) << ",\n"
-       << "  " << (IMethods.empty() ? "0" : "(struct _mulle_objc_methodlist *)&" + IMethodListVar) << ",\n"
-       << "  0, 0, 0, 0\n"  // properties, protocols, protocolclassids, origin
+       << "  " << (OwnIvars.empty()      ? "0" : "(struct _mulle_objc_ivarlist *)&"    + IvarListVar)    << ",\n"
+       << "  " << (CMethods.empty()      ? "0" : "(struct _mulle_objc_methodlist *)&"  + CMethodListVar) << ",\n"
+       << "  " << (IMethods.empty()      ? "0" : "(struct _mulle_objc_methodlist *)&"  + IMethodListVar) << ",\n"
+       << "  0,\n"  // properties
+       << "  " << (ProtoListVar.empty()  ? "0" : "(struct _mulle_objc_protocollist *)&" + ProtoListVar)  << ",\n"
+       << "  0, 0\n"  // protocolclassids, origin
        << "};\n";
   }
 
@@ -817,6 +839,29 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
     EmitMethodList(IMethodListVar, IMethods);
     EmitMethodList(CMethodListVar, CMethods);
 
+    // --- protocols ---
+    std::string ProtoListVar;
+    ObjCCategoryDecl *CatDecl = D->getCategoryDecl();
+    if (CatDecl) {
+      auto &Protos = CatDecl->getReferencedProtocols();
+      if (!Protos.empty()) {
+        ProtoListVar = "OBJC_CAT_PROTOCOLS_" + ClassName + "_" + CatName;
+        OS << "static struct {\n"
+           << "  unsigned int n_protocols;\n"
+           << "  struct _mulle_objc_protocol protocols[" << Protos.size() << "];\n"
+           << "} " << ProtoListVar
+           << " __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n"
+           << "  " << Protos.size() << ",\n  {\n";
+        for (auto *P : Protos) {
+          uint32_t pid = MulleObjCUniqueIdHashForString(P->getNameAsString());
+          OS << "    { (mulle_objc_protocolid_t) 0x";
+          OS.write_hex(pid);
+          OS << "U, \"" << P->getNameAsString() << "\" },\n";
+        }
+        OS << "  }\n};\n";
+      }
+    }
+
     OS << "static struct _mulle_objc_loadcategory " << VarBase
        << " __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n"
        << "  (mulle_objc_categoryid_t) 0x"; OS.write_hex(catId);
@@ -825,9 +870,11 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
     OS << "U,\n  \"" << ClassName << "\",\n"
        << "  (mulle_objc_hash_t) 0x"; OS.write_hex(classIvarHash);
     OS << "U,\n"
-       << "  " << (CMethods.empty() ? "0" : "(struct _mulle_objc_methodlist *)&" + CMethodListVar) << ",\n"
-       << "  " << (IMethods.empty() ? "0" : "(struct _mulle_objc_methodlist *)&" + IMethodListVar) << ",\n"
-       << "  0, 0, 0, 0\n"  // properties, protocols, protocolclassids, origin
+       << "  " << (CMethods.empty()     ? "0" : "(struct _mulle_objc_methodlist *)&"   + CMethodListVar) << ",\n"
+       << "  " << (IMethods.empty()     ? "0" : "(struct _mulle_objc_methodlist *)&"   + IMethodListVar) << ",\n"
+       << "  0,\n"  // properties
+       << "  " << (ProtoListVar.empty() ? "0" : "(struct _mulle_objc_protocollist *)&" + ProtoListVar)   << ",\n"
+       << "  0, 0\n"  // protocolclassids, origin
        << "};\n";
   }
 
@@ -865,6 +912,8 @@ std::string RewriteMulleObjC::EmitHashNameList() {
     add(ID->getNameAsString());
     if (auto *Super = ID->getSuperClass())
       add(Super->getNameAsString());
+    for (auto *P : ID->getReferencedProtocols())
+      add(P->getNameAsString());
     // walk full ivar chain (own + inherited) for hashname coverage
     for (ObjCInterfaceDecl *C = ID; C; C = C->getSuperClass())
       for (auto *IV : C->ivars()) {
