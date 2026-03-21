@@ -8045,6 +8045,85 @@ uint32_t  MulleObjCUniqueIdHashForString( std::string s)
    return( value);
 }
 
+static int mulle_char5_encode_character( int c)
+{
+   switch( c)
+   {
+   case  0  : return( 0); case '.' : return( 1); case 'A' : return( 2);
+   case 'C' : return( 3); case 'D' : return( 4); case 'E' : return( 5);
+   case 'I' : return( 6); case 'N' : return( 7); case 'O' : return( 8);
+   case 'P' : return( 9); case 'S' : return( 10); case 'T' : return( 11);
+   case '_' : return( 12); case 'a' : return( 13); case 'b' : return( 14);
+   case 'c' : return( 15); case 'd' : return( 16); case 'e' : return( 17);
+   case 'f' : return( 18); case 'g' : return( 19); case 'h' : return( 20);
+   case 'i' : return( 21); case 'l' : return( 22); case 'm' : return( 23);
+   case 'n' : return( 24); case 'o' : return( 25); case 'p' : return( 26);
+   case 'r' : return( 27); case 's' : return( 28); case 't' : return( 29);
+   case 'u' : return( 30); case 'y' : return( 31);
+   }
+   return( -1);
+}
+
+int   MulleObjCChar5StringIs64Bit( char *src, size_t len)
+{
+   char   *sentinel;
+   if( len > 12) return( 0);
+   sentinel = &src[ len];
+   while( src < sentinel)
+      switch( mulle_char5_encode_character( *src++))
+      { case 0: return( 1); case -1: return( 0); }
+   return( 1);
+}
+
+uint64_t  MulleObjCChar5StringEncode64( char *src, size_t len)
+{
+   char       *s;
+   char       *sentinel;
+   int        char5;
+   uint64_t   value;
+   value    = 0;
+   sentinel = src;
+   s        = &src[ len];
+   while( s > sentinel)
+   {
+      char c = *--s;
+      if( ! c) continue;
+      char5 = mulle_char5_encode_character( c);
+      value <<= 5;
+      value  |= char5;
+   }
+   return( value);
+}
+
+int   MulleObjCChar7StringIs64Bit( char *src, size_t len)
+{
+   char   *sentinel;
+   if( len > 8) return( 0);
+   sentinel = &src[ len];
+   while( src < sentinel)
+      if( *src++ & 0x80) return( 0);
+   return( 1);
+}
+
+uint64_t  MulleObjCChar7StringEncode64( char *src, size_t len)
+{
+   char       *s;
+   char       *sentinel;
+   int        char7;
+   uint64_t   value;
+   value    = 0;
+   sentinel = src;
+   s        = &src[ len];
+   while( s > sentinel)
+   {
+      char7 = *--s;
+      if( ! char7) continue;
+      value <<= 7;
+      value  |= char7;
+   }
+   return( value);
+}
+
 } // extern C
 // @mulle-objc@: give access to hash calculation <
 

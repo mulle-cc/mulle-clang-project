@@ -75,6 +75,10 @@ using namespace CodeGen;
 extern "C"
 {
    extern uint32_t  MulleObjCUniqueIdHashForString( std::string s);
+   extern int       MulleObjCChar5StringIs64Bit( char *src, size_t len);
+   extern uint64_t  MulleObjCChar5StringEncode64( char *src, size_t len);
+   extern int       MulleObjCChar7StringIs64Bit( char *src, size_t len);
+   extern uint64_t  MulleObjCChar7StringEncode64( char *src, size_t len);
 }
 // @mulle-objc@: <<
 
@@ -2562,20 +2566,13 @@ static int   mulle_char5_is32bit( char *src, size_t len)
 
 static int   mulle_char5_is64bit( char *src, size_t len)
 {
-   char   *sentinel;
+   return MulleObjCChar5StringIs64Bit( src, len);
+}
 
-   if( len > 12)
-      return( 0);
 
-   sentinel = &src[ len];
-   while( src < sentinel)
-      switch( mulle_char5_encode_character( *src++))
-      {
-      case 0  : return( 1);
-      case -1 : return( 0);
-      }
-
-   return( 1);
+uint64_t  mulle_char5_encode64_ascii( char *src, size_t len)
+{
+   return MulleObjCChar5StringEncode64( src, len);
 }
 
 
@@ -2586,33 +2583,6 @@ uint32_t  mulle_char5_encode32_ascii( char *src, size_t len)
    char       c;
    int        char5;
    uint32_t   value;
-
-   value    = 0;
-   sentinel = src;
-   s        = &src[ len];
-   while( s > sentinel)
-   {
-      c = *--s;
-      if( ! c)
-         continue;
-
-      char5 = mulle_char5_encode_character( c);
-      assert( char5 > 0 && char5 < 0x20);
-      assert( value << 5 >> 5 == value);  // hope the optimizer doesn't fck up
-      value <<= 5;
-      value  |= char5;
-   }
-   return( value);
-}
-
-
-uint64_t  mulle_char5_encode64_ascii( char *src, size_t len)
-{
-   char       *s;
-   char       *sentinel;
-   char       c;
-   int        char5;
-   uint64_t   value;
 
    value    = 0;
    sentinel = src;
@@ -2651,17 +2621,13 @@ int   mulle_char7_is32bit( char *src, size_t len)
 
 int   mulle_char7_is64bit( char *src, size_t len)
 {
-   char   *sentinel;
+   return MulleObjCChar7StringIs64Bit( src, len);
+}
 
-   if( len > 8)
-      return( 0);
 
-   sentinel = &src[ len];
-   while( src < sentinel)
-      if( *src++ & 0x80)
-         return( 0);   // invalid char
-
-   return( 1);
+uint64_t  mulle_char7_encode64_ascii( char *src, size_t len)
+{
+   return MulleObjCChar7StringEncode64( src, len);
 }
 
 
@@ -2671,30 +2637,6 @@ uint32_t  mulle_char7_encode32_ascii( char *src, size_t len)
    char       *sentinel;
    int        char7;
    uint32_t   value;
-
-   value    = 0;
-   sentinel = src;
-   s        = &src[ len];
-   while( s > sentinel)
-   {
-      char7 = *--s;
-      if( ! char7)
-         continue;
-
-      assert( ! (char7 & 0x80));
-      value <<= 7;
-      value  |= char7;
-   }
-   return( value);
-}
-
-
-uint64_t  mulle_char7_encode64_ascii( char *src, size_t len)
-{
-   char       *s;
-   char       *sentinel;
-   int        char7;
-   uint64_t   value;
 
    value    = 0;
    sentinel = src;

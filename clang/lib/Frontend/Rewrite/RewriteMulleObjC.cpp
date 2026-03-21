@@ -19,8 +19,12 @@
 using namespace clang;
 using llvm::RewriteBuffer;
 
-// Defined in ExprConstant.cpp — same pattern as CGObjCMulleRuntime.cpp
+// Defined in ExprConstant.cpp — shared with CGObjCMulleRuntime
 extern "C" uint32_t MulleObjCUniqueIdHashForString(std::string s);
+extern "C" int      MulleObjCChar5StringIs64Bit(char *src, size_t len);
+extern "C" uint64_t MulleObjCChar5StringEncode64(char *src, size_t len);
+extern "C" int      MulleObjCChar7StringIs64Bit(char *src, size_t len);
+extern "C" uint64_t MulleObjCChar7StringEncode64(char *src, size_t len);
 
 namespace {
 
@@ -451,7 +455,42 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
 }
 
 void RewriteMulleObjC::RewriteStringLiteral(ObjCStringLiteral *E) {
-  TodoComment(E->getSourceRange(), "ObjCStringLiteral");
+  StringRef Str = E->getString()->getString();
+  size_t Len = Str.size();
+  char *S = const_cast<char *>(Str.data());
+
+  std::string Out;
+  llvm::raw_string_ostream OS(Out);
+
+  uint64_t value = 0;
+  if (MulleObjCChar7StringIs64Bit(S, Len)) {
+    value = MulleObjCChar7StringEncode64(S, Len);
+    value = (value << 3) | 0x4;
+  } else if (MulleObjCChar5StringIs64Bit(S, Len)) {
+    value = MulleObjCChar5StringEncode64(S, Len);
+    value = (value << 3) | 0x1;
+  }
+
+  if (value) {
+    OS << "((id) 0x";
+    OS.write_hex(value);
+    OS << "ULL) /* @\"" << Str << "\" */";
+  } else {
+    // Fall back to static struct: { MULLE_OBJC_NEVER_RELEASE, NULL, "str", len }
+    // Emit a compound literal that matches the NSConstantString layout
+    OS << "((id) &(struct { intptr_t rc; void *isa; const char *str; unsigned len; })"
+       << "{ (intptr_t) 0x" ;
+    OS.write_hex((uint64_t)(INTPTR_MAX - 1));
+    OS << ", 0, \"";
+    // Escape the string
+    for (char c : Str) {
+      if (c == '"' || c == '\\') OS << '\\';
+      OS << c;
+    }
+    OS << "\", " << Len << " }) /* @\"" << Str << "\" */";
+  }
+
+  ReplaceText(E->getSourceRange(), OS.str());
 }
 
 } // anonymous namespace
