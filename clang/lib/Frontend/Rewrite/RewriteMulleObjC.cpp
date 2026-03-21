@@ -77,9 +77,14 @@ private:
   void RewriteInterfaceDecl(ObjCInterfaceDecl *D);
   void RewriteForwardClassDecl(ObjCInterfaceDecl *D);
   void RewriteImplementationDecl(ObjCImplementationDecl *D);
+  void RewriteMethodDecl(ObjCMethodDecl *M, const ObjCContainerDecl *CD);
   void RewriteCategoryDecl(ObjCCategoryDecl *D);
   void RewriteCategoryImplDecl(ObjCCategoryImplDecl *D);
   void RewriteProtocolDecl(ObjCProtocolDecl *D);
+
+  // Helpers
+  std::string MethodCName(const ObjCMethodDecl *M, const ObjCContainerDecl *CD);
+  std::string PrintType(QualType T);
 
   // ObjC expression/statement handlers
   void RewriteMessageExpr(ObjCMessageExpr *E);
@@ -185,11 +190,130 @@ void RewriteMulleObjC::RewriteInterfaceDecl(ObjCInterfaceDecl *D) {
 }
 
 void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
-  // Rewrite method bodies
+  // First rewrite all method bodies in-place
   for (auto *M : D->methods())
     if (M->hasBody())
-      RewriteStmt(M->getBody());
-  TodoComment(D->getSourceRange(), "ObjCImplementationDecl");
+      RewriteMethodDecl(M, D);
+
+  // Now erase the @implementation header line.
+  // D->getAtStartLoc() is '@', D->getLocation() is the class name.
+  // We want to erase from '@' to the newline after the class name.
+  // Find the first method's start (or @end if no methods).
+  SourceLocation EraseEnd;
+  for (auto *M : D->methods()) {
+    if (M->hasBody()) { EraseEnd = M->getBeginLoc(); break; }
+  }
+  if (EraseEnd.isValid()) {
+    // Erase from @implementation up to (not including) first method
+    unsigned Len = SM->getFileOffset(EraseEnd) - SM->getFileOffset(D->getAtStartLoc());
+    Rewrite.ReplaceText(D->getAtStartLoc(), Len, "");
+  }
+
+  // Erase @end — D->getEndLoc() points to '@' of '@end' (4 chars)
+  Rewrite.ReplaceText(D->getEndLoc(), 4, "");
+}
+
+// ---------------------------------------------------------------------------
+// Build a C identifier for a method: -[Foo bar:baz:] -> Foo_im_bar_baz_
+// ---------------------------------------------------------------------------
+std::string RewriteMulleObjC::MethodCName(const ObjCMethodDecl *M,
+                                           const ObjCContainerDecl *CD) {
+  std::string S = CD->getNameAsString();
+  S += M->isInstanceMethod() ? "_im_" : "_cm_";
+  // Replace ':' with '_' in selector
+  std::string sel = M->getSelector().getAsString();
+  for (char &c : sel)
+    if (c == ':') c = '_';
+  S += sel;
+  return S;
+}
+
+// ---------------------------------------------------------------------------
+// Print a QualType as C — map ObjC types to C equivalents
+// ---------------------------------------------------------------------------
+std::string RewriteMulleObjC::PrintType(QualType T) {
+  // Strip ObjC pointer types to void *
+  if (T->isObjCObjectPointerType() || T->isObjCIdType())
+    return "void *";
+  if (T->isObjCClassType())
+    return "void *";  // Class
+  // Everything else: use clang's printer
+  std::string S;
+  llvm::raw_string_ostream OS(S);
+  T.print(OS, Context->getPrintingPolicy());
+  return OS.str();
+}
+
+// ---------------------------------------------------------------------------
+// Rewrite a single method to a C function
+// ---------------------------------------------------------------------------
+void RewriteMulleObjC::RewriteMethodDecl(ObjCMethodDecl *M,
+                                          const ObjCContainerDecl *CD) {
+  if (!M->hasBody()) return;
+
+  // The ObjC name: -[Foo bar:baz:]
+  std::string ObjCName;
+  ObjCName += M->isInstanceMethod() ? '-' : '+';
+  ObjCName += '[';
+  ObjCName += CD->getNameAsString();
+  ObjCName += ' ';
+  ObjCName += M->getSelector().getAsString();
+  ObjCName += ']';
+
+  std::string CName = MethodCName(M, CD);
+
+  // Build _param struct and unpack locals
+  std::string ParamStructDef;
+  std::string Unpack;
+  RecordDecl *RD = M->getParamRecord();
+
+  if (RD && M->param_size() > 1) {
+    // Multi-param: _param points to a struct
+    std::string StructName = CName + "_t";
+    llvm::raw_string_ostream SDef(ParamStructDef);
+    SDef << "struct " << StructName << " { ";
+    for (auto *FD : RD->fields())
+      SDef << PrintType(FD->getType()) << " " << FD->getNameAsString() << "; ";
+    SDef << "};\n";
+
+    llvm::raw_string_ostream UOS(Unpack);
+    for (auto *FD : RD->fields())
+      UOS << "  " << PrintType(FD->getType()) << " " << FD->getNameAsString()
+          << " = ((struct " << StructName << " *)_param)->"
+          << FD->getNameAsString() << ";\n";
+
+  } else if (M->param_size() == 1) {
+    // Single-param: _param IS a pointer to the single value
+    auto *P = *M->param_begin();
+    llvm::raw_string_ostream UOS(Unpack);
+    UOS << "  " << PrintType(P->getType()) << " " << P->getNameAsString()
+        << " = *(" << PrintType(P->getType()) << " *)_param;\n";
+  }
+
+  // Build the C function signature with __asm__ for the ObjC name
+  std::string Sig;
+  llvm::raw_string_ostream SigOS(Sig);
+  SigOS << "static void *" << CName
+        << "(void *self, mulle_objc_methodid_t _cmd, void *_param)"
+        << " __asm__(\"" << ObjCName << "\");\n"
+        << "static void *" << CName
+        << "(void *self, mulle_objc_methodid_t _cmd, void *_param)\n";
+
+  // Rewrite inner ObjC expressions in the body first
+  RewriteStmt(M->getBody());
+  std::string BodyText = Rewrite.getRewrittenText(M->getBody()->getSourceRange());
+
+  // Inject unpack locals after opening brace
+  std::string FuncBody;
+  if (!Unpack.empty() && !BodyText.empty() && BodyText[0] == '{')
+    FuncBody = "{\n" + Unpack + BodyText.substr(1);
+  else
+    FuncBody = BodyText;
+
+  std::string Full = ParamStructDef + Sig + FuncBody;
+
+  SourceRange MRange(M->getBeginLoc(), M->getBody()->getEndLoc());
+  Rewrite.ReplaceText(MRange.getBegin(), Rewrite.getRangeSize(MRange), Full);
 }
 
 void RewriteMulleObjC::RewriteCategoryDecl(ObjCCategoryDecl *D) {
