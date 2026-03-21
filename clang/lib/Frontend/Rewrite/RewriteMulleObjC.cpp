@@ -380,6 +380,11 @@ void RewriteMulleObjC::RewriteInterfaceDecl(ObjCInterfaceDecl *D) {
     OwnIvars += PrintType(IV->getType());
     OwnIvars += " ";
     OwnIvars += IV->getNameAsString();
+    if (IV->isBitField()) {
+      unsigned width = IV->getBitWidthValue();
+      OwnIvars += ":";
+      OwnIvars += std::to_string(width);
+    }
     OwnIvars += "; ";
   }
 
@@ -1093,10 +1098,13 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
         std::string ivarName = IV->getNameAsString();
         std::string ivarEnc = ObjCEncodeType(IV->getType());
         uint32_t ivarId = MulleObjCUniqueIdHashForString(ivarName + ":" + ivarEnc);
+        std::string offset = IV->isBitField()
+            ? "0" // offsetof is invalid for bit-fields
+            : "(int) __builtin_offsetof(" + ClassName + ", " + ivarName + ")";
         OS << "    { { (mulle_objc_ivarid_t) 0x";
         OS.write_hex(ivarId);
         OS << "U, \"" << ivarName << "\", \"" << ivarEnc << "\" },"
-           << " (int) __builtin_offsetof(" << ClassName << ", " << ivarName << ") },\n";
+           << " " << offset << " },\n";
       }
       OS << "  }\n};\n";
     }
