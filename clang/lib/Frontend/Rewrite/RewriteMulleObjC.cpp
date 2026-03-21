@@ -223,9 +223,34 @@ void RewriteMulleObjC::HandleTopLevelSingleDecl(Decl *D) {
       if (FD->isThisDeclarationADefinition() && FD->getBody())
         RewriteStmt(FD->getBody());
     break;
-  default:
-    llvm::errs() << "TopLevel unhandled kind=" << D->getDeclKindName() << "\n";
+  case Decl::Record: {
+    // Handle @defs(ClassName) inside struct definitions
+    auto *RD = cast<RecordDecl>(D);
+    if (!RD->isThisDeclarationADefinition()) break;
+    for (auto *Field : RD->fields()) {
+      if (!isa<ObjCAtDefsFieldDecl>(Field)) continue;
+      // Find @defs( in the source buffer near the record's opening brace
+      SourceLocation LBrace = RD->getBraceRange().getBegin();
+      if (LBrace.isInvalid()) break;
+      const char *Buf = SM->getCharacterData(LBrace);
+      // scan forward for '@defs('
+      const char *p = Buf;
+      while (*p && strncmp(p, "@defs(", 6) != 0) ++p;
+      if (strncmp(p, "@defs(", 6) != 0) break;
+      const char *nameStart = p + 6;
+      while (*nameStart == ' ') ++nameStart;
+      const char *nameEnd = nameStart;
+      while (*nameEnd && *nameEnd != ')' && *nameEnd != ' ') ++nameEnd;
+      std::string ClassName(nameStart, nameEnd - nameStart);
+      const char *end = nameEnd;
+      while (*end && *end != ')') ++end;
+      if (*end == ')') ++end;
+      SourceLocation DefsLoc = LBrace.getLocWithOffset(p - Buf);
+      Rewrite.ReplaceText(DefsLoc, end - p, "OBJC_CLASS_" + ClassName + "_IVARS");
+      break;
+    }
     break;
+  }
   }
 }
 
