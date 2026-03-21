@@ -6027,6 +6027,9 @@ def remap : Flag<["-"], "remap">;
 def rewrite_objc : Flag<["-"], "rewrite-objc">, Flags<[NoXarchOption]>,
   Visibility<[ClangOption, CC1Option]>,
   HelpText<"Rewrite Objective-C source to C++">, Group<Action_Group>;
+def rewrite_mulle_objc : Flag<["-"], "rewrite-mulle-objc">, Flags<[NoXarchOption]>,
+  Visibility<[ClangOption, CC1Option]>,
+  HelpText<"Rewrite Objective-C source to C for mulle-objc runtime">, Group<Action_Group>;
 def rewrite_legacy_objc : Flag<["-"], "rewrite-legacy-objc">,
   Flags<[NoXarchOption]>,
   HelpText<"Rewrite Legacy Objective-C source to C++">;

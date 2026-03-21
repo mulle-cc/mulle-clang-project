@@ -432,6 +432,7 @@ phases::ID Driver::getFinalPhase(const DerivedArgList &DAL,
              (PhaseArg = DAL.getLastArg(options::OPT_module_file_info)) ||
              (PhaseArg = DAL.getLastArg(options::OPT_verify_pch)) ||
              (PhaseArg = DAL.getLastArg(options::OPT_rewrite_objc)) ||
+             (PhaseArg = DAL.getLastArg(options::OPT_rewrite_mulle_objc)) ||
              (PhaseArg = DAL.getLastArg(options::OPT_rewrite_legacy_objc)) ||
              (PhaseArg = DAL.getLastArg(options::OPT__analyze)) ||
              (PhaseArg = DAL.getLastArg(options::OPT_emit_cir)) ||
@@ -5166,6 +5167,8 @@ Action *Driver::ConstructPhaseAction(
       return C.MakeAction<CompileJobAction>(Input, types::TY_Nothing);
     if (Args.hasArg(options::OPT_rewrite_objc))
       return C.MakeAction<CompileJobAction>(Input, types::TY_RewrittenObjC);
+    if (Args.hasArg(options::OPT_rewrite_mulle_objc))
+      return C.MakeAction<CompileJobAction>(Input, types::TY_RewrittenMulleObjC);
     if (Args.hasArg(options::OPT_rewrite_legacy_objc))
       return C.MakeAction<CompileJobAction>(Input,
                                             types::TY_RewrittenLegacyObjC);
