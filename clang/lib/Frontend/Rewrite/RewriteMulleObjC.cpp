@@ -293,21 +293,71 @@ void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
     if (M->hasBody())
       RewriteMethodDecl(M, D);
 
-  // Now erase the @implementation header line.
-  // D->getAtStartLoc() is '@', D->getLocation() is the class name.
-  // We want to erase from '@' to the newline after the class name.
-  // Find the first method's start (or @end if no methods).
-  SourceLocation EraseEnd;
-  for (auto *M : D->methods()) {
-    if (M->hasBody()) { EraseEnd = M->getBeginLoc(); break; }
+  // Emit synthesized property accessors as C functions before @implementation
+  std::string SynthFuncs;
+  for (auto *PI : D->property_impls()) {
+    if (PI->getPropertyImplementation() != ObjCPropertyImplDecl::Synthesize)
+      continue;
+    ObjCIvarDecl *IV = PI->getPropertyIvarDecl();
+    if (!IV) continue;
+    ObjCPropertyDecl *PD = PI->getPropertyDecl();
+    if (!PD) continue;
+
+    std::string ClassName = D->getNameAsString();
+    std::string IvarName  = IV->getNameAsString();
+    QualType PropTy       = PD->getType();
+    std::string CType     = PrintType(PropTy);
+    std::string PropName  = PD->getNameAsString();
+
+    // getter
+    std::string GetterSel = PD->getGetterName().getAsString();
+    std::string GetterCName = ClassName + "_im_" + GetterSel;
+    std::string GetterObjC  = "-[" + ClassName + " " + GetterSel + "]";
+    SynthFuncs += "static void *" + GetterCName +
+        "("+ClassName+" *self, mulle_objc_methodid_t _cmd, void *_param)"
+        " __asm__(\"" + GetterObjC + "\");\n";
+    SynthFuncs += "static void *" + GetterCName +
+        "("+ClassName+" *self, mulle_objc_methodid_t _cmd, void *_param)\n"
+        "{ return (void *)(intptr_t)(self->" + IvarName + "); }\n";
+
+    // setter (only if not readonly)
+    if (!PD->isReadOnly()) {
+      std::string SetterSel = PD->getSetterName().getAsString();
+      std::string SetterCName = ClassName + "_im_" + SetterSel;
+      // setterSel has trailing ':' — replace with '_'
+      std::string SetterCNameSafe = SetterCName;
+      for (char &c : SetterCNameSafe) if (c == ':') c = '_';
+      std::string SetterObjC = "-[" + ClassName + " " + SetterSel + "]";
+      SynthFuncs += "static void *" + SetterCNameSafe +
+          "("+ClassName+" *self, mulle_objc_methodid_t _cmd, void *_param)"
+          " __asm__(\"" + SetterObjC + "\");\n";
+      SynthFuncs += "static void *" + SetterCNameSafe +
+          "("+ClassName+" *self, mulle_objc_methodid_t _cmd, void *_param)\n"
+          "{ self->" + IvarName + " = *(" + CType + " *)_param; return 0; }\n";
+    }
+
+    // Erase the @synthesize line — skip, handled by @implementation block erase below
   }
+
+  // Insert synthesized functions before the @implementation block
+  if (!SynthFuncs.empty())
+    Rewrite.InsertTextBefore(D->getAtStartLoc(), SynthFuncs);
+
+  // Erase @implementation header up to first explicit method (or @end)
+  SourceLocation EraseEnd;
+  for (auto *M : D->methods())
+    if (M->hasBody()) { EraseEnd = M->getBeginLoc(); break; }
+
   if (EraseEnd.isValid()) {
-    // Erase from @implementation up to (not including) first method
     unsigned Len = SM->getFileOffset(EraseEnd) - SM->getFileOffset(D->getAtStartLoc());
+    Rewrite.ReplaceText(D->getAtStartLoc(), Len, "");
+  } else {
+    // No explicit methods — erase everything from @implementation to @end
+    unsigned Len = SM->getFileOffset(D->getEndLoc()) - SM->getFileOffset(D->getAtStartLoc());
     Rewrite.ReplaceText(D->getAtStartLoc(), Len, "");
   }
 
-  // Erase @end — D->getEndLoc() points to '@' of '@end' (4 chars)
+  // Erase @end (4 chars)
   Rewrite.ReplaceText(D->getEndLoc(), 4, "");
 }
 
