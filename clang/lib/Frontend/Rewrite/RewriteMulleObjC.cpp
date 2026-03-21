@@ -251,12 +251,13 @@ void RewriteMulleObjC::RewriteStmt(Stmt *S) {
     Context->getObjCEncodingForType(EE->getEncodedType(), enc);
     ReplaceText(EE->getSourceRange(), "\"" + enc + "\"");
   }
+  else if (auto *AP = dyn_cast<ObjCAutoreleasePoolStmt>(S))
+    Rewrite.ReplaceText(AP->getAtLoc(), 16, "/* @autoreleasepool */");
   else if (auto *DS = dyn_cast<DeclStmt>(S))
     RewriteDeclStmt(DS);
   else if (auto *CE = dyn_cast<CStyleCastExpr>(S)) {
     QualType T = CE->getType();
     if (T->isObjCObjectPointerType() || T->isObjCIdType()) {
-      // Replace "(id)" or "(NSFoo *)" cast type with "(void *)"
       SourceRange TR = CE->getLParenLoc().isValid()
           ? SourceRange(CE->getLParenLoc(), CE->getRParenLoc())
           : SourceRange();
@@ -535,13 +536,13 @@ void RewriteMulleObjC::RewriteDeclStmt(DeclStmt *S) {
     if (!VD) continue;
     QualType T = VD->getType();
     if (!T->isObjCObjectPointerType() && !T->isObjCIdType()) continue;
-    // Replace the type spelling in source with void *
-    // The type source range covers just the type, not the name
-    TypeSourceInfo *TSI = VD->getTypeSourceInfo();
-    if (!TSI) continue;
-    SourceRange TR = TSI->getTypeLoc().getSourceRange();
-    if (TR.isInvalid()) continue;
-    Rewrite.ReplaceText(TR.getBegin(), Rewrite.getRangeSize(TR), "void *");
+    // Replace everything from start of decl to start of variable name with "void *"
+    SourceLocation Start   = VD->getBeginLoc();
+    SourceLocation NameLoc = VD->getLocation();
+    if (NameLoc.isInvalid() || Start.isInvalid()) continue;
+    unsigned Len = SM->getFileOffset(NameLoc) - SM->getFileOffset(Start);
+    if (Len == 0) continue;
+    Rewrite.ReplaceText(Start, Len, "void *");
   }
 }
 
