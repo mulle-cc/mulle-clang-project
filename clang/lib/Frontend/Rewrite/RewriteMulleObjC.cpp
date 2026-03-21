@@ -15,6 +15,7 @@
 #include "clang/Rewrite/Frontend/ASTConsumers.h"
 #include "llvm/Support/raw_ostream.h"
 #include <memory>
+#include <set>
 #include <vector>
 
 using namespace clang;
@@ -38,13 +39,14 @@ class RewriteMulleObjC : public ASTConsumer {
   std::unique_ptr<raw_ostream> OutFile;
   std::string                 InFileName;
   bool                        InMethod = false;
-  ObjCInterfaceDecl          *CurrentClass = nullptr; // for return-cast gating
+  ObjCInterfaceDecl          *CurrentClass = nullptr;
   unsigned                    TryCount = 0;
   unsigned                    NSStringCount = 0;
   std::string                 NSStringDefs;
   std::vector<std::string>    NSStringPtrs;
   std::vector<ObjCImplementationDecl *> LoadClasses;
   std::vector<ObjCCategoryImplDecl *>   LoadCategories;
+  std::set<std::string>       EmittedIvarStructs; // classes whose ivar struct was emitted
 
 public:
   RewriteMulleObjC(const std::string &InFile,
@@ -222,6 +224,7 @@ void RewriteMulleObjC::HandleTopLevelSingleDecl(Decl *D) {
         RewriteStmt(FD->getBody());
     break;
   default:
+    llvm::errs() << "TopLevel unhandled kind=" << D->getDeclKindName() << "\n";
     break;
   }
 }
@@ -280,18 +283,15 @@ void RewriteMulleObjC::RewriteStmt(Stmt *S) {
 // ---------------------------------------------------------------------------
 
 void RewriteMulleObjC::RewriteForwardClassDecl(ObjCInterfaceDecl *D) {
-  // @class Foo;  ->  typedef struct Foo Foo;
-  std::string S = "typedef struct ";
-  S += D->getNameAsString();
-  S += " ";
-  S += D->getNameAsString();
-  // Extend range to include the trailing semicolon if present
+  // @class Foo;  or  @protocolclass Foo;  ->  typedef struct Foo Foo;
+  std::string S = "typedef struct " + D->getNameAsString() + " " + D->getNameAsString() + ";";
   SourceLocation End = Lexer::findLocationAfterToken(
-      D->getEndLoc(), tok::semi, *SM, LangOpts, /*SkipTrailingWhitespace=*/false);
+      D->getEndLoc(), tok::semi, *SM, LangOpts, false);
+  SourceLocation Begin = D->getBeginLoc();
   SourceRange R = End.isValid()
-      ? SourceRange(D->getBeginLoc(), End.getLocWithOffset(-1))
+      ? SourceRange(Begin, End.getLocWithOffset(-1))
       : D->getSourceRange();
-  ReplaceText(R, S + ";");
+  ReplaceText(R, S);
 }
 
 void RewriteMulleObjC::RewriteInterfaceDecl(ObjCInterfaceDecl *D) {
@@ -322,10 +322,28 @@ void RewriteMulleObjC::RewriteInterfaceDecl(ObjCInterfaceDecl *D) {
 
   SourceRange R(D->getAtStartLoc(), D->getEndLoc().getLocWithOffset(3));
   ReplaceText(R, S);
+  EmittedIvarStructs.insert(Name);
 }
 
 void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
   CurrentClass = D->getClassInterface();
+
+  // If the @interface/@protocolclass definition had invalid sloc (e.g. @protocolclass
+  // with no explicit @interface), emit the ivar struct now before the methods.
+  if (CurrentClass && EmittedIvarStructs.find(CurrentClass->getNameAsString()) == EmittedIvarStructs.end()) {
+    // Synthesize and insert before @implementation
+    std::string tmp;
+    llvm::raw_string_ostream OS(tmp);
+    std::string Name = CurrentClass->getNameAsString();
+    std::string Guard = "OBJC_CLASS_" + Name + "_IVARS";
+    std::string MacroVal;
+    if (ObjCInterfaceDecl *Super = CurrentClass->getSuperClass())
+      MacroVal += "OBJC_CLASS_" + Super->getNameAsString() + "_IVARS ";
+    OS << "#ifndef " << Guard << "\n#define " << Guard << " " << MacroVal << "\n#endif\n"
+       << "typedef struct " << Name << " { " << Guard << " } " << Name << ";\n";
+    Rewrite.InsertTextBefore(D->getAtStartLoc(), OS.str());
+    EmittedIvarStructs.insert(Name);
+  }
 
   for (auto *M : D->methods())
     if (M->hasBody())
@@ -527,8 +545,11 @@ void RewriteMulleObjC::RewriteCategoryImplDecl(ObjCCategoryImplDecl *D) {
 }
 
 void RewriteMulleObjC::RewriteProtocolDecl(ObjCProtocolDecl *D) {
-  // @protocol — no C output needed, just erase
-  ReplaceText(D->getSourceRange(), "");
+  // @protocol — no C output needed
+  // Only erase the definition; forward decls are handled by RewriteForwardClassDecl
+  // (for @protocolclass) or are already erased by the interface rewrite.
+  if (D->isThisDeclarationADefinition())
+    ReplaceText(D->getSourceRange(), "");
 }
 
 // ---------------------------------------------------------------------------
@@ -956,7 +977,7 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
        << "  (mulle_objc_hash_t) 0x"; OS.write_hex(superIvarHash);
     OS << "U,\n"
        << "  -1,\n"
-       << "  (int) sizeof(" << ClassName << "),\n"
+       << "  " << (OwnIvars.empty() ? "0" : "(int) sizeof(" + ClassName + ")") << ",\n"
        << "  " << (OwnIvars.empty()      ? "0" : "(struct _mulle_objc_ivarlist *)&"    + IvarListVar)    << ",\n"
        << "  " << (CMethods.empty()      ? "0" : "(struct _mulle_objc_methodlist *)&"  + CMethodListVar) << ",\n"
        << "  " << (IMethods.empty()      ? "0" : "(struct _mulle_objc_methodlist *)&"  + IMethodListVar) << ",\n"
