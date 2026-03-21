@@ -10,6 +10,7 @@
 #include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Lex/Lexer.h"
+#include "clang/Basic/TokenKinds.h"
 #include "clang/Rewrite/Core/Rewriter.h"
 #include "clang/Rewrite/Frontend/ASTConsumers.h"
 #include "llvm/Support/raw_ostream.h"
@@ -17,6 +18,9 @@
 
 using namespace clang;
 using llvm::RewriteBuffer;
+
+// Defined in ExprConstant.cpp — same pattern as CGObjCMulleRuntime.cpp
+extern "C" uint32_t MulleObjCUniqueIdHashForString(std::string s);
 
 namespace {
 
@@ -69,14 +73,15 @@ private:
   void HandleTopLevelSingleDecl(Decl *D);
   void RewriteStmt(Stmt *S);
 
-  // ObjC declaration handlers — stubs for now
+  // ObjC declaration handlers
   void RewriteInterfaceDecl(ObjCInterfaceDecl *D);
+  void RewriteForwardClassDecl(ObjCInterfaceDecl *D);
   void RewriteImplementationDecl(ObjCImplementationDecl *D);
   void RewriteCategoryDecl(ObjCCategoryDecl *D);
   void RewriteCategoryImplDecl(ObjCCategoryImplDecl *D);
   void RewriteProtocolDecl(ObjCProtocolDecl *D);
 
-  // ObjC expression/statement handlers — stubs for now
+  // ObjC expression/statement handlers
   void RewriteMessageExpr(ObjCMessageExpr *E);
   void RewriteStringLiteral(ObjCStringLiteral *E);
   void RewriteSelectorExpr(ObjCSelectorExpr *E);
@@ -106,9 +111,14 @@ void RewriteMulleObjC::HandleTopLevelSingleDecl(Decl *D) {
   if (SM->isInSystemHeader(D->getLocation())) return;
 
   switch (D->getKind()) {
-  case Decl::ObjCInterface:
-    RewriteInterfaceDecl(cast<ObjCInterfaceDecl>(D));
+  case Decl::ObjCInterface: {
+    auto *ID = cast<ObjCInterfaceDecl>(D);
+    if (ID->isThisDeclarationADefinition())
+      RewriteInterfaceDecl(ID);
+    else
+      RewriteForwardClassDecl(ID);  // @class Foo;
     break;
+  }
   case Decl::ObjCImplementation:
     RewriteImplementationDecl(cast<ObjCImplementationDecl>(D));
     break;
@@ -152,8 +162,23 @@ void RewriteMulleObjC::RewriteStmt(Stmt *S) {
 }
 
 // ---------------------------------------------------------------------------
-// ObjC declaration stubs
+// ObjC declaration implementations
 // ---------------------------------------------------------------------------
+
+void RewriteMulleObjC::RewriteForwardClassDecl(ObjCInterfaceDecl *D) {
+  // @class Foo;  ->  typedef struct Foo Foo;
+  std::string S = "typedef struct ";
+  S += D->getNameAsString();
+  S += " ";
+  S += D->getNameAsString();
+  // Extend range to include the trailing semicolon if present
+  SourceLocation End = Lexer::findLocationAfterToken(
+      D->getEndLoc(), tok::semi, *SM, LangOpts, /*SkipTrailingWhitespace=*/false);
+  SourceRange R = End.isValid()
+      ? SourceRange(D->getBeginLoc(), End.getLocWithOffset(-1))
+      : D->getSourceRange();
+  ReplaceText(R, S + ";");
+}
 
 void RewriteMulleObjC::RewriteInterfaceDecl(ObjCInterfaceDecl *D) {
   TodoComment(D->getSourceRange(), "ObjCInterfaceDecl");
@@ -183,8 +208,20 @@ void RewriteMulleObjC::RewriteProtocolDecl(ObjCProtocolDecl *D) {
 }
 
 // ---------------------------------------------------------------------------
-// ObjC expression stubs
+// ObjC expression implementations
 // ---------------------------------------------------------------------------
+
+void RewriteMulleObjC::RewriteSelectorExpr(ObjCSelectorExpr *E) {
+  // @selector(foo:bar:)  ->  ((mulle_objc_methodid_t) 0x12345678UL)
+  std::string selStr = E->getSelector().getAsString();
+  uint32_t hash = MulleObjCUniqueIdHashForString(selStr);
+  std::string S;
+  llvm::raw_string_ostream OS(S);
+  OS << "((mulle_objc_methodid_t) 0x";
+  OS.write_hex(hash);
+  OS << "UL) /* @selector(" << selStr << ") */";
+  ReplaceText(E->getSourceRange(), OS.str());
+}
 
 void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
   TodoComment(E->getSourceRange(), "ObjCMessageExpr");
@@ -192,10 +229,6 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
 
 void RewriteMulleObjC::RewriteStringLiteral(ObjCStringLiteral *E) {
   TodoComment(E->getSourceRange(), "ObjCStringLiteral");
-}
-
-void RewriteMulleObjC::RewriteSelectorExpr(ObjCSelectorExpr *E) {
-  TodoComment(E->getSourceRange(), "ObjCSelectorExpr");
 }
 
 } // anonymous namespace
