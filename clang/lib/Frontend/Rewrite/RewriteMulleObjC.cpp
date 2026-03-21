@@ -83,6 +83,10 @@ public:
       }
     }
     *OutFile << Result;
+    *OutFile << "\nstatic void __attribute__((constructor))\n"
+                "__load_mulle_objc(void)\n"
+                "{\n"
+                "}\n";
     OutFile->flush();
   }
 
