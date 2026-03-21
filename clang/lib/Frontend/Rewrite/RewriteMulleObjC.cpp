@@ -143,6 +143,7 @@ public:
 private:
   void HandleTopLevelSingleDecl(Decl *D);
   void RewriteStmt(Stmt *S);
+  void RewriteDeclStmt(DeclStmt *S);
   void RewriteTryStmt(ObjCAtTryStmt *S);
   void RewriteThrowStmt(ObjCAtThrowStmt *S);
 
@@ -245,6 +246,19 @@ void RewriteMulleObjC::RewriteStmt(Stmt *S) {
     RewriteSelectorExpr(E);
   else if (auto *RS = dyn_cast<ReturnStmt>(S))
     RewriteReturnStmt(RS);
+  else if (auto *DS = dyn_cast<DeclStmt>(S))
+    RewriteDeclStmt(DS);
+  else if (auto *CE = dyn_cast<CStyleCastExpr>(S)) {
+    QualType T = CE->getType();
+    if (T->isObjCObjectPointerType() || T->isObjCIdType()) {
+      // Replace "(id)" or "(NSFoo *)" cast type with "(void *)"
+      SourceRange TR = CE->getLParenLoc().isValid()
+          ? SourceRange(CE->getLParenLoc(), CE->getRParenLoc())
+          : SourceRange();
+      if (TR.isValid())
+        Rewrite.ReplaceText(TR.getBegin(), Rewrite.getRangeSize(TR), "(void *)");
+    }
+  }
   else if (auto *TS = dyn_cast<ObjCAtTryStmt>(S))
     RewriteTryStmt(TS);
   else if (auto *TS = dyn_cast<ObjCAtThrowStmt>(S))
@@ -510,6 +524,22 @@ void RewriteMulleObjC::RewriteSelectorExpr(ObjCSelectorExpr *E) {
   ReplaceText(E->getSourceRange(), OS.str());
 }
 
+void RewriteMulleObjC::RewriteDeclStmt(DeclStmt *S) {
+  for (auto *D : S->decls()) {
+    auto *VD = dyn_cast<VarDecl>(D);
+    if (!VD) continue;
+    QualType T = VD->getType();
+    if (!T->isObjCObjectPointerType() && !T->isObjCIdType()) continue;
+    // Replace the type spelling in source with void *
+    // The type source range covers just the type, not the name
+    TypeSourceInfo *TSI = VD->getTypeSourceInfo();
+    if (!TSI) continue;
+    SourceRange TR = TSI->getTypeLoc().getSourceRange();
+    if (TR.isInvalid()) continue;
+    Rewrite.ReplaceText(TR.getBegin(), Rewrite.getRangeSize(TR), "void *");
+  }
+}
+
 void RewriteMulleObjC::RewriteThrowStmt(ObjCAtThrowStmt *S) {
   // @throw expr;  ->  mulle_objc_exception_throw(expr, 0);
   // @throw;       ->  mulle_objc_exception_throw(_rethrow, 0);  (rethrow in catch)
@@ -671,8 +701,14 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
   } else if (Kind == ObjCMessageExpr::Instance) {
     Receiver = Rewrite.getRewrittenText(E->getInstanceReceiver()->getSourceRange());
   } else {
-    // class message
-    Receiver = E->getClassReceiver()->castAs<ObjCObjectType>()->getInterface()->getNameAsString();
+    // class message — look up the infraclass at runtime
+    ObjCInterfaceDecl *ID = E->getClassReceiver()
+        ->castAs<ObjCObjectType>()->getInterface();
+    uint32_t classId = MulleObjCUniqueIdHashForString(ID->getNameAsString());
+    std::string hex;
+    llvm::raw_string_ostream HS(hex);
+    HS << "0x"; HS.write_hex(classId); HS << "U";
+    Receiver = "mulle_objc_global_lookup_infraclass_inline_nofail(0, (mulle_objc_classid_t) " + hex + ")";
   }
 
   // Selector hash
