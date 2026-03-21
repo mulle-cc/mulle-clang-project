@@ -46,7 +46,9 @@ class RewriteMulleObjC : public ASTConsumer {
   std::vector<std::string>    NSStringPtrs;
   std::vector<ObjCImplementationDecl *> LoadClasses;
   std::vector<ObjCCategoryImplDecl *>   LoadCategories;
-  std::set<std::string>       EmittedIvarStructs; // classes whose ivar struct was emitted
+  std::set<std::string>       EmittedIvarStructs;
+  struct SuperEntry { uint32_t superid; std::string name; uint32_t classid; uint32_t methodid; };
+  std::vector<SuperEntry>     LoadSupers; // collected [super msg] calls
 
 public:
   RewriteMulleObjC(const std::string &InFile,
@@ -132,13 +134,33 @@ public:
       LOS << "\n  }\n};\n";
     }
 
+    if (!LoadSupers.empty()) {
+      LOS << "static struct {\n"
+          << "  unsigned int n_supers;\n"
+          << "  struct _mulle_objc_super supers[" << LoadSupers.size() << "];\n"
+          << "} OBJC_SUPER_LOADS __attribute__((used, section(\".data.objc.objc_load_info\"))) = {\n"
+          << "  " << LoadSupers.size() << ",\n  {\n";
+      for (auto &SE : LoadSupers) {
+        LOS << "    { (mulle_objc_superid_t) 0x";
+        LOS.write_hex(SE.superid);
+        LOS << "U, \"" << SE.name << "\","
+            << " (mulle_objc_classid_t) 0x";
+        LOS.write_hex(SE.classid);
+        LOS << "U,"
+            << " (mulle_objc_methodid_t) 0x";
+        LOS.write_hex(SE.methodid);
+        LOS << "UL },\n";
+      }
+      LOS << "  }\n};\n";
+    }
+
     LOS << "static struct _mulle_objc_loadinfo OBJC_LOAD_INFO"
         << " __attribute__((used, section(\".data.objc.objc_load_info\"))) = {\n"
         << "  { MULLE_OBJC_RUNTIME_LOAD_VERSION, 0, 0, 0, 0 },\n"
         << "  0,\n"  // loaduniverse
-        << "  " << (LoadClasses.empty() ? "0" : "(struct _mulle_objc_loadclasslist *)&OBJC_CLASS_LOADS") << ",\n"
+        << "  " << (LoadClasses.empty()    ? "0" : "(struct _mulle_objc_loadclasslist *)&OBJC_CLASS_LOADS") << ",\n"
         << "  " << (LoadCategories.empty() ? "0" : "(struct _mulle_objc_loadcategorylist *)&OBJC_CATEGORY_LOADS") << ",\n"
-        << "  0,\n"  // supers
+        << "  " << (LoadSupers.empty()     ? "0" : "(struct _mulle_objc_loadsuperlist *)&OBJC_SUPER_LOADS") << ",\n"
         << "  " << (NSStringPtrs.empty() ? "0" : "(struct _mulle_objc_loadstringlist *)&OBJC_STATICSTRING_LOADS") << ",\n"
         << "  " << (LoadClasses.empty() ? "0" : "(struct _mulle_objc_loadhashedstringlist *)&OBJC_HASHNAME_LOADS") << "\n"
         << "};\n";
@@ -898,12 +920,21 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
   std::string SuperId;
   if (isSuper) {
     Receiver = "self";
-    // superid = hash of the superclass name
     ObjCInterfaceDecl *Super = CurrentClass ? CurrentClass->getSuperClass() : nullptr;
-    std::string SuperName = Super ? Super->getNameAsString() : "";
-    uint32_t SHash = MulleObjCUniqueIdHashForString(SuperName);
+    std::string SuperClassName = Super ? Super->getNameAsString() : "";
+    std::string SelName = E->getSelector().getAsString();
+    // superid = hash("SuperClassName;selectorName")
+    std::string superKey = SuperClassName + ";" + SelName;
+    uint32_t superHash  = MulleObjCUniqueIdHashForString(superKey);
+    uint32_t classHash  = MulleObjCUniqueIdHashForString(SuperClassName);
+    uint32_t methodHash = MulleObjCUniqueIdHashForString(SelName);
     llvm::raw_string_ostream SOS(SuperId);
-    SOS << "(mulle_objc_superid_t) 0x"; SOS.write_hex(SHash); SOS << "UL";
+    SOS << "(mulle_objc_superid_t) 0x"; SOS.write_hex(superHash); SOS << "UL";
+    // Collect for OBJC_SUPER_LOADS (deduplicate by superKey)
+    bool found = false;
+    for (auto &SE : LoadSupers) if (SE.name == superKey) { found = true; break; }
+    if (!found)
+      LoadSupers.push_back({superHash, superKey, classHash, methodHash});
   } else if (Kind == ObjCMessageExpr::Instance) {
     Receiver = Rewrite.getRewrittenText(E->getInstanceReceiver()->getSourceRange());
   } else {
