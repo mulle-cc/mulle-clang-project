@@ -246,6 +246,11 @@ void RewriteMulleObjC::RewriteStmt(Stmt *S) {
     RewriteSelectorExpr(E);
   else if (auto *RS = dyn_cast<ReturnStmt>(S))
     RewriteReturnStmt(RS);
+  else if (auto *EE = dyn_cast<ObjCEncodeExpr>(S)) {
+    std::string enc;
+    Context->getObjCEncodingForType(EE->getEncodedType(), enc);
+    ReplaceText(EE->getSourceRange(), "\"" + enc + "\"");
+  }
   else if (auto *DS = dyn_cast<DeclStmt>(S))
     RewriteDeclStmt(DS);
   else if (auto *CE = dyn_cast<CStyleCastExpr>(S)) {
