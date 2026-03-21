@@ -190,16 +190,32 @@ void RewriteMulleObjC::RewriteForwardClassDecl(ObjCInterfaceDecl *D) {
 }
 
 void RewriteMulleObjC::RewriteInterfaceDecl(ObjCInterfaceDecl *D) {
-  // @interface Foo ... @end  ->  typedef struct Foo Foo;
-  // (ivars are not exposed in the C output — opaque struct)
   std::string Name = D->getNameAsString();
-  std::string S = "typedef struct " + Name + " " + Name + ";";
-  // Replace the entire @interface...@end block
-  SourceLocation End = Lexer::findLocationAfterToken(
-      D->getEndLoc(), tok::at, *SM, LangOpts, false);
-  // D->getEndLoc() is '@' of @end; @end is 4 chars
-  SourceRange R(D->getAtStartLoc(),
-                D->getEndLoc().getLocWithOffset(3));
+  std::string Guard = "OBJC_CLASS_" + Name + "_IVARS";
+
+  // Own ivars as flat token list for the macro value
+  std::string OwnIvars;
+  for (auto *IV : D->ivars()) {
+    OwnIvars += PrintType(IV->getType());
+    OwnIvars += " ";
+    OwnIvars += IV->getNameAsString();
+    OwnIvars += "; ";
+  }
+
+  // The macro value inlines the superclass macro (expands at use-time)
+  std::string MacroVal;
+  if (ObjCInterfaceDecl *Super = D->getSuperClass())
+    MacroVal += "OBJC_CLASS_" + Super->getNameAsString() + "_IVARS ";
+  MacroVal += OwnIvars;
+
+  std::string S;
+  llvm::raw_string_ostream OS(S);
+  OS << "#ifndef " << Guard << "\n"
+     << "#define " << Guard << " " << MacroVal << "\n"
+     << "#endif\n"
+     << "typedef struct " << Name << " { " << Guard << " } " << Name << ";";
+
+  SourceRange R(D->getAtStartLoc(), D->getEndLoc().getLocWithOffset(3));
   ReplaceText(R, S);
 }
 
