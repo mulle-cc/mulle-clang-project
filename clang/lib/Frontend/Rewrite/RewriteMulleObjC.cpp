@@ -109,19 +109,22 @@ public:
 
       // Prepend TPS/FCS/TAO defines before the runtime header so the C output
       // is self-contained (no need for -D flags when compiling the .c file).
+      // Mirror the actual lang options so the runtime header sees the right values.
       const std::string runtimeInclude = "#include <mulle-objc-runtime/mulle-objc-runtime.h>";
       size_t rp = Result.find(runtimeInclude);
       if (rp != std::string::npos) {
-        Result.insert(rp,
-          "#ifndef __MULLE_OBJC_TPS__\n"
-          "# define __MULLE_OBJC_TPS__\n"
-          "#endif\n"
-          "#ifndef __MULLE_OBJC_FCS__\n"
-          "# define __MULLE_OBJC_FCS__\n"
-          "#endif\n"
-          "#ifndef __MULLE_OBJC_TAO__\n"
-          "# define __MULLE_OBJC_TAO__\n"
-          "#endif\n");
+        // @mulle-objc@ emit correct TPS/FCS/TAO based on lang options >
+        std::string tps = LangOpts.ObjCDisableTaggedPointers
+            ? "#ifndef __MULLE_OBJC_NO_TPS__\n# define __MULLE_OBJC_NO_TPS__\n#endif\n"
+            : "#ifndef __MULLE_OBJC_TPS__\n# define __MULLE_OBJC_TPS__\n#endif\n";
+        std::string fcs = LangOpts.ObjCDisableFastCalls
+            ? "#ifndef __MULLE_OBJC_NO_FCS__\n# define __MULLE_OBJC_NO_FCS__\n#endif\n"
+            : "#ifndef __MULLE_OBJC_FCS__\n# define __MULLE_OBJC_FCS__\n#endif\n";
+        std::string tao = LangOpts.ObjCEnableThreadAffineObjects
+            ? "#ifndef __MULLE_OBJC_TAO__\n# define __MULLE_OBJC_TAO__\n#endif\n"
+            : "#ifndef __MULLE_OBJC_NO_TAO__\n# define __MULLE_OBJC_NO_TAO__\n#endif\n";
+        Result.insert(rp, tps + fcs + tao);
+        // @mulle-objc@ emit correct TPS/FCS/TAO based on lang options <
       }
     }
 
