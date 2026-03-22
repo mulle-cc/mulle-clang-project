@@ -480,18 +480,48 @@ void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
       RewriteMethodDecl(M, D);
   }
 
-  // @synthesize / @dynamic are no-ops in mulle-objc — replace with comment
+  // @synthesize: emit getter/setter C functions; @dynamic: no-op comment
   for (auto *PI : D->property_impls()) {
-    std::string kind = (PI->getPropertyImplementation() == ObjCPropertyImplDecl::Synthesize)
-        ? "@synthesize" : "@dynamic";
-    // Include the trailing semicolon
     SourceLocation End = Lexer::findLocationAfterToken(
         PI->getSourceRange().getEnd(), tok::semi, *SM, LangOpts, false);
     if (End.isInvalid())
       End = PI->getSourceRange().getEnd();
     unsigned Len = SM->getFileOffset(End) - SM->getFileOffset(PI->getBeginLoc());
-    Rewrite.ReplaceText(PI->getBeginLoc(), Len,
-        "/* " + kind + " is a no-op in mulle-objc */");
+
+    if (PI->getPropertyImplementation() != ObjCPropertyImplDecl::Synthesize) {
+      Rewrite.ReplaceText(PI->getBeginLoc(), Len, "/* @dynamic is a no-op in mulle-objc */");
+      continue;
+    }
+
+    ObjCPropertyDecl *PD   = PI->getPropertyDecl();
+    ObjCIvarDecl    *IVar  = PI->getPropertyIvarDecl();
+    if (!PD || !IVar) {
+      Rewrite.ReplaceText(PI->getBeginLoc(), Len, "/* @synthesize (no ivar) */");
+      continue;
+    }
+
+    std::string ClassName = D->getClassInterface()->getNameAsString();
+    std::string IVarName  = IVar->getNameAsString();
+    std::string IVarType  = PrintType(IVar->getType());
+
+    // Find getter and setter stubs
+    std::string Accessors;
+    llvm::raw_string_ostream AOS(Accessors);
+    for (auto *M : D->methods()) {
+      if (!M->isSynthesizedAccessorStub()) continue;
+      std::string CName = MethodCName(M, D->getClassInterface());
+      std::string ObjCName = M->getSelector().getAsString();
+      AOS << "static void *\n" << CName
+          << "(" << ClassName << " *self, mulle_objc_methodid_t _cmd, void *_param)\n{\n";
+      if (M->getSelector().getNumArgs() == 0) {
+        // getter — return value via intptr_t cast (MetaABI scalar return)
+        AOS << "  return (void *)(intptr_t) self->" << IVarName << ";\n}\n";
+      } else {
+        // setter
+        AOS << "  self->" << IVarName << " = *(" << IVarType << " *)_param;\n  return NULL;\n}\n";
+      }
+    }
+    Rewrite.ReplaceText(PI->getBeginLoc(), Len, Accessors);
   }
 
   // Erase "@implementation ClassName" header line — find end of that line
@@ -1148,8 +1178,7 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
     // --- instance methods ---
     std::vector<ObjCMethodDecl *> IMethods, CMethods;
     for (auto *M : D->methods())
-      if (!M->isSynthesizedAccessorStub())
-        (M->isInstanceMethod() ? IMethods : CMethods).push_back(M);
+      (M->isInstanceMethod() ? IMethods : CMethods).push_back(M);
     auto sortMethods = [](ObjCMethodDecl *A, ObjCMethodDecl *B) {
       return (int32_t)MulleObjCUniqueIdHashForString(A->getSelector().getAsString())
            < (int32_t)MulleObjCUniqueIdHashForString(B->getSelector().getAsString());
@@ -1306,8 +1335,7 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
 
     std::vector<ObjCMethodDecl *> IMethods, CMethods;
     for (auto *M : D->methods())
-      if (!M->isSynthesizedAccessorStub())
-        (M->isInstanceMethod() ? IMethods : CMethods).push_back(M);
+      (M->isInstanceMethod() ? IMethods : CMethods).push_back(M);
     {
       auto sortMethods = [](ObjCMethodDecl *A, ObjCMethodDecl *B) {
         return (int32_t)MulleObjCUniqueIdHashForString(A->getSelector().getAsString())
