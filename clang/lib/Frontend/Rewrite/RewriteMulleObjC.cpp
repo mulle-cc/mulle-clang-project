@@ -1213,6 +1213,33 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
       OS << "  }\n};\n";
     }
 
+    // --- protocolclassids: protocols that are @protocolclass declarations ---
+    std::string ProtoClassIdsVar;
+    {
+      std::vector<std::pair<uint32_t,std::string>> PCIds;
+      for (auto *P : Protos) {
+        ObjCInterfaceDecl *PI = nullptr;
+        auto Results = Context->getTranslationUnitDecl()->lookup(
+            DeclarationName(&Context->Idents.get(P->getName())));
+        for (auto *R : Results)
+          if ((PI = dyn_cast<ObjCInterfaceDecl>(R))) break;
+        if (PI && PI->isProtocolClass())
+          PCIds.push_back({MulleObjCUniqueIdHashForString(P->getNameAsString()),
+                           P->getNameAsString()});
+      }
+      if (!PCIds.empty()) {
+        ProtoClassIdsVar = "OBJC_CLASS_PROTOCOLCLASSIDS_" + ClassName;
+        OS << "static mulle_objc_classid_t " << ProtoClassIdsVar
+           << "[] __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n";
+        for (auto &PC : PCIds) {
+          OS << "  (mulle_objc_classid_t) 0x";
+          OS.write_hex(PC.first);
+          OS << "U, /* " << PC.second << " */\n";
+        }
+        OS << "  (mulle_objc_classid_t) 0\n};\n";
+      }
+    }
+
     // --- loadclass struct ---
     // instancesize = sizeof(ClassName) — emit as expression
     OS << "static struct _mulle_objc_loadclass " << VarBase
@@ -1232,7 +1259,8 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
        << "  " << (IMethods.empty()      ? "0" : "(struct _mulle_objc_methodlist *)&"  + IMethodListVar) << ",\n"
        << "  0,\n"  // properties
        << "  " << (ProtoListVar.empty()  ? "0" : "(struct _mulle_objc_protocollist *)&" + ProtoListVar)  << ",\n"
-       << "  0, 0\n"  // protocolclassids, origin
+       << "  " << (ProtoClassIdsVar.empty() ? "0" : ProtoClassIdsVar) << ",\n"
+       << "  0\n"  // origin
        << "};\n";
   }
 
@@ -1347,6 +1375,33 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
       }
     }
 
+    // --- protocolclassids for category ---
+    std::string CatProtoClassIdsVar;
+    if (CatDecl) {
+      std::vector<std::pair<uint32_t,std::string>> PCIds;
+      for (auto *P : CatDecl->getReferencedProtocols()) {
+        ObjCInterfaceDecl *PI = nullptr;
+        auto Results = Context->getTranslationUnitDecl()->lookup(
+            DeclarationName(&Context->Idents.get(P->getName())));
+        for (auto *R : Results)
+          if ((PI = dyn_cast<ObjCInterfaceDecl>(R))) break;
+        if (PI && PI->isProtocolClass())
+          PCIds.push_back({MulleObjCUniqueIdHashForString(P->getNameAsString()),
+                           P->getNameAsString()});
+      }
+      if (!PCIds.empty()) {
+        CatProtoClassIdsVar = "OBJC_CAT_PROTOCOLCLASSIDS_" + ClassName + "_" + CatName;
+        OS << "static mulle_objc_classid_t " << CatProtoClassIdsVar
+           << "[] __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n";
+        for (auto &PC : PCIds) {
+          OS << "  (mulle_objc_classid_t) 0x";
+          OS.write_hex(PC.first);
+          OS << "U, /* " << PC.second << " */\n";
+        }
+        OS << "  (mulle_objc_classid_t) 0\n};\n";
+      }
+    }
+
     OS << "static struct _mulle_objc_loadcategory " << VarBase
        << " __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n"
        << "  (mulle_objc_categoryid_t) 0x"; OS.write_hex(catId);
@@ -1355,11 +1410,12 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
     OS << "U,\n  \"" << ClassName << "\",\n"
        << "  (mulle_objc_hash_t) 0x"; OS.write_hex(classIvarHash);
     OS << "U,\n"
-       << "  " << (CMethods.empty()     ? "0" : "(struct _mulle_objc_methodlist *)&"   + CMethodListVar) << ",\n"
-       << "  " << (IMethods.empty()     ? "0" : "(struct _mulle_objc_methodlist *)&"   + IMethodListVar) << ",\n"
+       << "  " << (CMethods.empty()          ? "0" : "(struct _mulle_objc_methodlist *)&"   + CMethodListVar)   << ",\n"
+       << "  " << (IMethods.empty()          ? "0" : "(struct _mulle_objc_methodlist *)&"   + IMethodListVar)   << ",\n"
        << "  0,\n"  // properties
-       << "  " << (ProtoListVar.empty() ? "0" : "(struct _mulle_objc_protocollist *)&" + ProtoListVar)   << ",\n"
-       << "  0, 0\n"  // protocolclassids, origin
+       << "  " << (ProtoListVar.empty()      ? "0" : "(struct _mulle_objc_protocollist *)&" + ProtoListVar)     << ",\n"
+       << "  " << (CatProtoClassIdsVar.empty() ? "0" : CatProtoClassIdsVar)                                    << ",\n"
+       << "  0\n"  // origin
        << "};\n";
   }
 
