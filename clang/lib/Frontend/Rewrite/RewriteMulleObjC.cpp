@@ -1153,6 +1153,29 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
       OS << CastOpen << "mulle_objc_rewrite_call(" << Receiver << ", " << HashStr << ", " << param << ")" << CastClose;
   };
 
+  // At -O2+, retain/release/zone bypass the message send (matches codegen INLINE_CALL_PARTIAL)
+  if (!isSuper && NumArgs == 0) {
+    std::string selName = E->getSelector().getAsString();
+    if (selName == "retain") {
+      OS << "#ifdef __OPTIMIZE__\n"
+         << CastOpen << "mulle_objc_object_retain_inline(" << Receiver << ")" << CastClose << "\n"
+         << "#else\n";
+      buildCall("NULL");
+      OS << "\n#endif";
+      ReplaceText(E->getSourceRange(), OS.str());
+      return;
+    }
+    if (selName == "release") {
+      OS << "#ifdef __OPTIMIZE__\n"
+         << "mulle_objc_object_release_inline(" << Receiver << ")\n"
+         << "#else\n";
+      buildCall("NULL");
+      OS << "\n#endif";
+      ReplaceText(E->getSourceRange(), OS.str());
+      return;
+    }
+  }
+
   if (NumArgs == 0) {
     buildCall("NULL");
   } else if (NumArgs == 1) {
