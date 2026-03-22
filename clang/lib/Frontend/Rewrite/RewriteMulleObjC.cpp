@@ -1336,9 +1336,9 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
       bool isRetain = (selName == "retain");
       std::string inlineFn = isRetain ? "mulle_objc_object_retain_inline"
                                       : "mulle_objc_object_release_inline";
-      std::string fallback;
-      llvm::raw_string_ostream FOS(fallback);
-      buildCall("NULL");
+      std::string fallback = CastOpen
+          + "mulle_objc_rewrite_call(" + Receiver + ", " + HashStr + ", NULL)"
+          + CastClose;
 
       if (forceLevel >= 3) {
         // known at rewrite time: use inline directly
@@ -1350,16 +1350,22 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
         // known at rewrite time: no inline
         OS << fallback;
       } else {
-        // defer to downstream compiler
+        // defer to downstream compiler — include trailing ';' inside the #if block
         OS << "#if __MULLE_OBJC_INLINE_METHOD_CALLS__ >= 3\n";
         if (isRetain)
           OS << CastOpen << inlineFn << "(" << Receiver << ")" << CastClose;
         else
           OS << inlineFn << "(" << Receiver << ")";
-        OS << ";\n#else\n" << fallback << ";\n#endif";
+        OS << ";\n#else\n" << fallback << ";\n#endif\n";
+        // Extend range to swallow the trailing semicolon so we don't get '#endif;'
+        SourceLocation End = Lexer::findLocationAfterToken(
+            E->getEndLoc(), tok::semi, *SM, LangOpts, false);
+        SourceRange R = End.isValid()
+            ? SourceRange(E->getBeginLoc(), End.getLocWithOffset(-1))
+            : E->getSourceRange();
+        ReplaceText(R, OS.str());
+        return;
       }
-      ReplaceText(E->getSourceRange(), OS.str());
-      return;
     }
   }
   // @mulle-objc@ full 5-level inline support + forceLevel emits direct calls <
