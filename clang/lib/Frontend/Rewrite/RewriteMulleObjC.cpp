@@ -397,15 +397,31 @@ void RewriteMulleObjC::HandleTopLevelSingleDecl(Decl *D) {
     RewriteProtocolDecl(cast<ObjCProtocolDecl>(D));
     break;
   case Decl::Function:
-    if (auto *FD = cast<FunctionDecl>(D))
+    if (auto *FD = cast<FunctionDecl>(D)) {
+      // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef >
+      // Rewrite ObjC pointer types in C function parameter declarations
+      for (auto *P : FD->parameters()) {
+        QualType T = P->getType().getUnqualifiedType();
+        if (!T->isObjCObjectPointerType() && !T->isObjCIdType()) continue;
+        SourceLocation Start   = P->getBeginLoc();
+        SourceLocation NameLoc = P->getLocation();
+        if (Start.isInvalid() || NameLoc.isInvalid()) continue;
+        unsigned Len = SM->getFileOffset(NameLoc) - SM->getFileOffset(Start);
+        if (Len == 0) continue;
+        Rewrite.ReplaceText(Start, Len, PrintType(T) + " ");
+      }
+      // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef <
       if (FD->isThisDeclarationADefinition() && FD->getBody())
         RewriteStmt(FD->getBody());
+    }
     break;
   case Decl::ObjCCompatibleAlias: {
-    // @compatibility_alias Foo Bar  ->  typedef Bar Foo;
+    // @compatibility_alias Foo Bar  ->  typedef OBJC_CLASS_Bar OBJC_CLASS_Foo;
+    // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef >
     auto *AD = cast<ObjCCompatibleAliasDecl>(D);
-    std::string S = "typedef " + AD->getClassInterface()->getNameAsString()
-                  + " " + AD->getNameAsString() + ";";
+    std::string S = "typedef OBJC_CLASS_" + AD->getClassInterface()->getNameAsString()
+                  + " OBJC_CLASS_" + AD->getNameAsString() + ";";
+    // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef <
     // getBeginLoc() points to the alias name, not '@' — scan back
     const char *p = SM->getCharacterData(D->getBeginLoc());
     while (*p != '@') --p;
@@ -511,8 +527,10 @@ void RewriteMulleObjC::RewriteStmt(Stmt *S) {
 // ---------------------------------------------------------------------------
 
 void RewriteMulleObjC::RewriteForwardClassDecl(ObjCInterfaceDecl *D) {
-  // @class Foo;  or  @protocolclass Foo;  ->  typedef struct Foo Foo;
-  std::string S = "typedef struct " + D->getNameAsString() + " " + D->getNameAsString() + ";";
+  // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef >
+  // @class Foo;  or  @protocolclass Foo;  ->  typedef struct { } OBJC_CLASS_Foo;
+  std::string Name = D->getNameAsString();
+  std::string S = "typedef struct { } OBJC_CLASS_" + Name + ";";
   SourceLocation End = Lexer::findLocationAfterToken(
       D->getEndLoc(), tok::semi, *SM, LangOpts, false);
   SourceLocation Begin = D->getBeginLoc();
@@ -520,6 +538,7 @@ void RewriteMulleObjC::RewriteForwardClassDecl(ObjCInterfaceDecl *D) {
       ? SourceRange(Begin, End.getLocWithOffset(-1))
       : D->getSourceRange();
   ReplaceText(R, S);
+  // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef <
 }
 
 void RewriteMulleObjC::RewriteInterfaceDecl(ObjCInterfaceDecl *D) {
@@ -566,10 +585,12 @@ void RewriteMulleObjC::RewriteInterfaceDecl(ObjCInterfaceDecl *D) {
 
   std::string S;
   llvm::raw_string_ostream OS(S);
+  // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef >
   OS << "#ifndef " << Guard << "\n"
      << "#define " << Guard << " " << MacroVal << "\n"
      << "#endif\n"
-     << "typedef struct " << Name << " { " << Guard << " } " << Name << ";";
+     << "typedef struct { " << Guard << " } OBJC_CLASS_" << Name << ";";
+  // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef <
 
   SourceRange R(D->getAtStartLoc(), D->getEndLoc().getLocWithOffset(3));
   ReplaceText(R, S);
@@ -583,8 +604,10 @@ void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
   // emit a bare typedef before the methods so the type is known.
   if (CurrentClass && EmittedIvarStructs.find(CurrentClass->getNameAsString()) == EmittedIvarStructs.end()) {
     std::string Name = CurrentClass->getNameAsString();
+    // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef >
     Rewrite.InsertTextBefore(D->getAtStartLoc(),
-        "typedef struct " + Name + " " + Name + ";\n");
+        "typedef struct { } OBJC_CLASS_" + Name + ";\n");
+    // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef <
     EmittedIvarStructs.insert(Name);
   }
 
@@ -618,11 +641,14 @@ void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
       std::string ObjCName = (M->isInstanceMethod() ? "-[" : "+[")
           + D->getClassInterface()->getNameAsString() + " "
           + M->getSelector().getAsString() + "]";
+      // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef >
+      std::string SelfTypeName = "OBJC_CLASS_" + ClassName;
       FOS << "static void *\n" << CName
-          << "(" << ClassName << " *self, mulle_objc_methodid_t _cmd, void *_param)"
+          << "(" << SelfTypeName << " *self, mulle_objc_methodid_t _cmd, void *_param)"
           << " __asm__(\"" << ObjCName << "\");\n"
           << "static void *\n" << CName
-          << "(" << ClassName << " *self, mulle_objc_methodid_t _cmd, void *_param)\n{\n";
+          << "(" << SelfTypeName << " *self, mulle_objc_methodid_t _cmd, void *_param)\n{\n";
+      // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef <
       if (M->getSelector().getNumArgs() == 0)
         FOS << "  return (void *)(intptr_t) self->" << IVarName << ";\n}\n";
       else
@@ -687,8 +713,18 @@ std::string RewriteMulleObjC::ObjCEncodeType(QualType T) {
 // Print a QualType as C — map ObjC types to C equivalents
 // ---------------------------------------------------------------------------
 std::string RewriteMulleObjC::PrintType(QualType T) {
-  // Strip ObjC pointer types to void *
-  if (T->isObjCObjectPointerType() || T->isObjCIdType())
+  // @mulle-objc@ use OBJC_CLASS_ prefix for ObjC class pointer types >
+  // ObjC class pointer: Foo * -> OBJC_CLASS_Foo *
+  if (T->isObjCObjectPointerType()) {
+    if (T->isObjCIdType())
+      return "void *";
+    if (auto *OPT = T->getAs<ObjCObjectPointerType>()) {
+      if (auto *ID = OPT->getInterfaceDecl())
+        return "OBJC_CLASS_" + ID->getNameAsString() + " *";
+    }
+    return "void *";
+  }
+  if (T->isObjCIdType())
     return "void *";
   if (T->isObjCClassType())
     return "void *";
@@ -698,6 +734,7 @@ std::string RewriteMulleObjC::PrintType(QualType T) {
     if (Pointee->isObjCObjectPointerType() || Pointee->isObjCIdType())
       return "void **";
   }
+  // @mulle-objc@ use OBJC_CLASS_ prefix for ObjC class pointer types <
   // Everything else: use clang's printer
   std::string S;
   llvm::raw_string_ostream OS(S);
@@ -761,9 +798,11 @@ void RewriteMulleObjC::RewriteMethodDecl(ObjCMethodDecl *M,
         << " = *(" << PrintType(P->getType()) << " *)_param;\n";
   }
 
+  // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef >
   std::string SelfType = M->isInstanceMethod()
-      ? CD->getNameAsString() + " *"
+      ? "OBJC_CLASS_" + CD->getNameAsString() + " *"
       : "void *";
+  // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef <
   std::string ParamType = (M->isVariadic() && RD)
       ? "struct " + CName + "_t *"
       : "void *";
@@ -901,13 +940,13 @@ void RewriteMulleObjC::RewriteDeclStmt(DeclStmt *S) {
     if (!VD) continue;
     QualType T = VD->getType().getUnqualifiedType();
     if (!T->isObjCObjectPointerType() && !T->isObjCIdType()) continue;
-    // Replace everything from start of decl to start of variable name with "void *"
+    // Replace everything from start of decl to start of variable name with the C type
     SourceLocation Start   = VD->getBeginLoc();
     SourceLocation NameLoc = VD->getLocation();
     if (NameLoc.isInvalid() || Start.isInvalid()) continue;
     unsigned Len = SM->getFileOffset(NameLoc) - SM->getFileOffset(Start);
     if (Len == 0) continue;
-    Rewrite.ReplaceText(Start, Len, "void *");
+    Rewrite.ReplaceText(Start, Len, PrintType(T) + " ");
   }
 }
 
@@ -1426,7 +1465,9 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
         uint32_t ivarId = MulleObjCUniqueIdHashForString(ivarName + ":" + ivarEnc);
         std::string offset = IV->isBitField()
             ? "0"
-            : "(int) __builtin_offsetof(" + ClassName + ", " + ivarName + ")";
+            // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef >
+            : "(int) __builtin_offsetof(OBJC_CLASS_" + ClassName + ", " + ivarName + ")";
+            // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef <
         L << "      { { (mulle_objc_ivarid_t) 0x";
         L.write_hex(ivarId);
         L << "U, \"" << ivarName << "\", \"" << ivarEnc << "\" }, " << offset << " },\n";
@@ -1558,7 +1599,9 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
        << "  (mulle_objc_hash_t) 0x"; OS.write_hex(superIvarHash);
     OS << "U,\n"
        << "  -1,\n"
-       << "  " << (OwnIvars.empty() ? "0" : "(int) sizeof(" + ClassName + ")") << ",\n"
+       // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef >
+       << "  " << (OwnIvars.empty() ? "0" : "(int) sizeof(OBJC_CLASS_" + ClassName + ")") << ",\n"
+       // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef <
        << "  " << EmitIvarList() << ",\n"
        << "  " << EmitMethodListInline(CMethods, 0) << ",\n"
        << "  " << EmitMethodListInline(IMethods, 0) << ",\n"
