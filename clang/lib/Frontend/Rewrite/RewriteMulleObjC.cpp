@@ -983,11 +983,13 @@ void RewriteMulleObjC::RewriteForCollectionStmt(ObjCForCollectionStmt *S) {
   if (!bodyText.empty() && bodyText.back() != '}' && bodyText.back() != ';')
     bodyText += ";";
 
-  // call helper macro
+  // call helper macro — use temp var to avoid macro comma issues
+  std::string feParam = "_fe_param" + idx;
   std::string callExpr =
+    "({ struct { NSFastEnumerationState *rover_; void **objects_; NSUInteger count_; } " + feParam +
+    " = { &" + state + ", (void **)" + buf + ", 16 }; "
     "(NSUInteger)(intptr_t)mulle_objc_rewrite_call(" + collText + ", " + hashStr +
-    ", &(struct { NSFastEnumerationState *rover_; void **objects_; NSUInteger count_; })"
-    "{ &" + state + ", (void **)" + buf + ", 16 })";
+    ", &" + feParam + "); })";
 
   std::string R;
   R += "{ NSFastEnumerationState " + state + " = { 0 };\n";
@@ -1121,10 +1123,11 @@ void RewriteMulleObjC::RewriteReturnStmt(ReturnStmt *S) {
   if (T->isPointerType() || T->isObjCObjectPointerType() || T->isVoidType())
     return;
   // Wrap scalar: return (void*)(intptr_t)(expr)
-  std::string ValText = Rewrite.getRewrittenText(RV->getSourceRange());
-  std::string Wrapped = "(void *)(intptr_t)(" + ValText + ")";
-  Rewrite.ReplaceText(RV->getBeginLoc(),
-                      Rewrite.getRangeSize(RV->getSourceRange()), Wrapped);
+  // Use InsertText to avoid clobbering already-rewritten sub-expressions.
+  SourceLocation Begin = RV->getBeginLoc();
+  SourceLocation End = Lexer::getLocForEndOfToken(RV->getEndLoc(), 0, *SM, LangOpts);
+  Rewrite.InsertTextBefore(Begin, "(void *)(intptr_t)(");
+  Rewrite.InsertTextBefore(End, ")");
 }
 
 void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
@@ -1227,24 +1230,29 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
     std::string ArgText = Rewrite.getRewrittenText(E->getArg(0)->getSourceRange());
     buildCall("&(" + PrintType(ArgTy) + "){ " + ArgText + " }");
   } else {
-    std::string param;
-    llvm::raw_string_ostream PS(param);
-    PS << "&(struct { ";
+    // Use a named temp variable to avoid macro argument comma confusion.
+    static unsigned TmpCount = 0;
+    std::string tmpName = "_mulle_p" + std::to_string(TmpCount++);
+    std::string structType;
+    llvm::raw_string_ostream TS(structType);
+    TS << "struct { ";
     Selector Sel = E->getSelector();
     unsigned NumSlots = Sel.getNumArgs();
     for (unsigned i = 0; i < NumArgs; ++i) {
       std::string fname = (i < NumSlots)
           ? Sel.getNameForSlot(i).str() + "_"
           : "_v" + std::to_string(i - NumSlots);
-      PS << PrintType(E->getArg(i)->getType()) << " " << fname << "; ";
+      TS << PrintType(E->getArg(i)->getType()) << " " << fname << "; ";
     }
-    PS << "}){ ";
+    TS << "}";
+    OS << "({ " << structType << " " << tmpName << " = { ";
     for (unsigned i = 0; i < NumArgs; ++i) {
-      if (i) PS << ", ";
-      PS << Rewrite.getRewrittenText(E->getArg(i)->getSourceRange());
+      if (i) OS << ", ";
+      OS << Rewrite.getRewrittenText(E->getArg(i)->getSourceRange());
     }
-    PS << " }";
-    buildCall(param);
+    OS << " }; ";
+    buildCall("&" + tmpName);
+    OS << "; })";
   }
 
   ReplaceText(E->getSourceRange(), OS.str());
