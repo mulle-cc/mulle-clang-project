@@ -839,9 +839,9 @@ void RewriteMulleObjC::RewriteTryStmt(ObjCAtTryStmt *S) {
 
   // --- Replace "@try" (4 chars) with setup + if ---
   std::string TryOpen;
-  TryOpen  = "{ struct { void *_s; jmp_buf _j; } " + excVar + ";\n";
+  TryOpen  = "{ struct { void *exception; void *previous; void *unused[2]; jmp_buf buf; } " + excVar + ";\n";
   TryOpen += "  mulle_objc_exception_tryenter(&" + excVar + ", 0);\n";
-  TryOpen += "  if (!_setjmp(" + excVar + "._j))";
+  TryOpen += "  if (!_setjmp(" + excVar + ".buf))";
   // @try is 4 chars
   Rewrite.ReplaceText(S->getAtTryLoc(), 4, TryOpen);
 
