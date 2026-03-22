@@ -40,6 +40,7 @@ class RewriteMulleObjC : public ASTConsumer {
   std::unique_ptr<raw_ostream> OutFile;
   std::string                 InFileName;
   bool                        InMethod = false;
+  ObjCMethodDecl             *CurrentMethod = nullptr;
   ObjCInterfaceDecl          *CurrentClass = nullptr;
   unsigned                    TryCount = 0;
   unsigned                    NSStringCount = 0;
@@ -777,8 +778,10 @@ void RewriteMulleObjC::RewriteMethodDecl(ObjCMethodDecl *M,
 
   // Rewrite inner ObjC expressions in the body first
   InMethod = true;
+  CurrentMethod = M;
   RewriteStmt(M->getBody());
   InMethod = false;
+  CurrentMethod = nullptr;
   std::string BodyText = Rewrite.getRewrittenText(M->getBody()->getSourceRange());
 
   // Inject unpack locals after opening brace, and ensure void methods return 0
@@ -1122,6 +1125,24 @@ void RewriteMulleObjC::RewriteReturnStmt(ReturnStmt *S) {
   // void* and ObjC pointer returns are already compatible with void*
   if (T->isPointerType() || T->isObjCObjectPointerType() || T->isVoidType())
     return;
+
+  // Struct (aggregate) return via MetaABI:
+  // _param points to the union; write the struct into it and return _param.
+  if (CurrentMethod && CurrentMethod->getRvalRecord()) {
+    std::string RetType = PrintType(T);
+    // Replace: return EXPR  →  *( RetType *)_param = EXPR; return _param
+    // We insert before `return` and after the expression.
+    SourceLocation RetLoc = S->getBeginLoc(); // points to 'return'
+    SourceLocation Begin  = RV->getBeginLoc();
+    SourceLocation End    = Lexer::getLocForEndOfToken(RV->getEndLoc(), 0, *SM, LangOpts);
+    // Replace 'return ' with '*( RetType *)_param = '
+    unsigned RetToExpr = SM->getFileOffset(Begin) - SM->getFileOffset(RetLoc);
+    Rewrite.ReplaceText(RetLoc, RetToExpr, "*((" + RetType + " *)_param) = ");
+    // After expression insert '; return _param'
+    Rewrite.InsertTextBefore(End, "; return _param");
+    return;
+  }
+
   // Wrap scalar: return (void*)(intptr_t)(expr)
   // Use InsertText to avoid clobbering already-rewritten sub-expressions.
   SourceLocation Begin = RV->getBeginLoc();
@@ -1182,7 +1203,18 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
 
   // Return cast: message returns void*, cast to actual return type if needed
   QualType RetTy = E->getType();
-  bool needCast = !RetTy->isVoidType() &&
+
+  // MetaABI aggregate return: build union with rval field, read _p.rval after call.
+  bool isAggregateReturn = false;
+  if (RetTy->isRecordType() && !RetTy->isUnionType()) {
+    if (auto *MD = E->getMethodDecl())
+      isAggregateReturn = (MD->getRvalRecord() != nullptr);
+    else
+      isAggregateReturn = Context->typeNeedsMetaABIAlloca(RetTy);
+  }
+
+  bool needCast = !isAggregateReturn &&
+                  !RetTy->isVoidType() &&
                   !RetTy->isObjCObjectPointerType() &&
                   !RetTy->isPointerType();
   std::string CastOpen, CastClose;
@@ -1192,6 +1224,42 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
   }
 
   unsigned NumArgs = E->getNumArgs();
+
+  if (isAggregateReturn) {
+    // Build: ({ union { struct { args... } v; void *space; RetType rval; } _p = { .v = { args } };
+    //          mulle_objc_rewrite_call(recv, sel, &_p); _p.rval; })
+    static unsigned AggCount = 0;
+    std::string pName = "_mulle_agg" + std::to_string(AggCount++);
+    std::string retType = PrintType(RetTy);
+
+    OS << "({ union { struct { ";
+    Selector Sel = E->getSelector();
+    unsigned NumSlots = Sel.getNumArgs();
+    for (unsigned i = 0; i < NumArgs; ++i) {
+      std::string fname = (i < NumSlots)
+          ? Sel.getNameForSlot(i).str() + "_"
+          : "_v" + std::to_string(i - NumSlots);
+      OS << PrintType(E->getArg(i)->getType()) << " " << fname << "; ";
+    }
+    if (NumArgs == 0) OS << "void *_dummy; ";
+    OS << "} v; void *space; " << retType << " rval; } " << pName;
+    if (NumArgs > 0) {
+      OS << " = { .v = { ";
+      for (unsigned i = 0; i < NumArgs; ++i) {
+        if (i) OS << ", ";
+        OS << Rewrite.getRewrittenText(E->getArg(i)->getSourceRange());
+      }
+      OS << " } }";
+    }
+    OS << "; ";
+    if (isSuper)
+      OS << "mulle_objc_rewrite_call_super(" << Receiver << ", " << HashStr << ", &" << pName << ", " << SuperId << ")";
+    else
+      OS << "mulle_objc_rewrite_call(" << Receiver << ", " << HashStr << ", &" << pName << ")";
+    OS << "; " << pName << ".rval; })";
+    ReplaceText(E->getSourceRange(), OS.str());
+    return;
+  }
 
   auto buildCall = [&](const std::string &param) {
     if (isSuper)
