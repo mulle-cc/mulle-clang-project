@@ -50,6 +50,7 @@ class RewriteMulleObjC : public ASTConsumer {
   std::set<std::string>       EmittedIvarStructs;
   struct SuperEntry { uint32_t superid; std::string name; uint32_t classid; uint32_t methodid; };
   std::vector<SuperEntry>     LoadSupers; // collected [super msg] calls
+  bool                        HasObjCContent = false; // any ObjC seen?
 
 public:
   RewriteMulleObjC(const std::string &InFile,
@@ -104,6 +105,43 @@ public:
       };
       replaceObjCImport("#include \"import.h\"");
       replaceObjCImport("#include \"import-private.h\"");
+
+      // Prepend TPS/FCS/TAO defines before the runtime header so the C output
+      // is self-contained (no need for -D flags when compiling the .c file).
+      const std::string runtimeInclude = "#include <mulle-objc-runtime/mulle-objc-runtime.h>";
+      size_t rp = Result.find(runtimeInclude);
+      if (rp != std::string::npos) {
+        Result.insert(rp,
+          "#ifndef __MULLE_OBJC_TPS__\n"
+          "# define __MULLE_OBJC_TPS__\n"
+          "#endif\n"
+          "#ifndef __MULLE_OBJC_FCS__\n"
+          "# define __MULLE_OBJC_FCS__\n"
+          "#endif\n"
+          "#ifndef __MULLE_OBJC_TAO__\n"
+          "# define __MULLE_OBJC_TAO__\n"
+          "#endif\n");
+      }
+    }
+
+    // Strip ARC ownership qualifiers — not valid in plain C.
+    for (const char *kw : {"__unsafe_unretained ", "__strong ", "__weak ", "__autoreleasing "}) {
+      std::string s(kw);
+      size_t p = 0;
+      while ((p = Result.find(s, p)) != std::string::npos)
+        Result.erase(p, s.size());
+    }
+    // Replace any remaining bare `id ` type uses (e.g. after stripping __unsafe_unretained)
+    // Only replace `id ` when preceded by whitespace/newline (i.e. used as a type).
+    {
+      size_t p = 0;
+      while ((p = Result.find("id ", p)) != std::string::npos) {
+        bool atWordBoundary = (p == 0 || !isalnum((unsigned char)Result[p-1]) && Result[p-1] != '_');
+        if (atWordBoundary)
+          Result.replace(p, 3, "void *");
+        else
+          p += 3;
+      }
     }
 
     if (!NSStringDefs.empty()) {
@@ -137,10 +175,10 @@ public:
         "#endif\n");
     }
 
-    // Insert call-function macros after the last #include.
+    // Insert call-function macros after the last #include — only if ObjC was used.
     // These select inline vs non-inline variants based on optimization level,
     // mirroring CGObjCMulleRuntime's INLINE_CALL_LEVEL logic.
-    {
+    if (HasObjCContent) {
       // Determine inline level from ObjCInlineMethodCalls lang option.
       // 0 = auto (use __OPTIMIZE__), 1 = none, 2+ = forced inline.
       unsigned forceLevel = LangOpts.ObjCInlineMethodCalls;
@@ -245,6 +283,7 @@ public:
       LOS << "  }\n};\n";
     }
 
+    if (HasObjCContent) {
     LOS << "static struct _mulle_objc_loadinfo OBJC_IMAGE_INFO"
         << " __attribute__((used, section(\".data.objc.objc_load_info\"))) = {\n"
         << "  { MULLE_OBJC_RUNTIME_LOAD_VERSION, MULLE_OBJC_RUNTIME_VERSION, 0, 0,\n"
@@ -272,6 +311,7 @@ public:
            "{\n"
            "  mulle_objc_loadinfo_enqueue_nofail(&OBJC_IMAGE_INFO);\n"
            "}\n";
+    } // HasObjCContent
 
     *OutFile << Load;
     OutFile->flush();
@@ -344,6 +384,7 @@ void RewriteMulleObjC::HandleTopLevelSingleDecl(Decl *D) {
   case Decl::ObjCImplementation:
     RewriteImplementationDecl(cast<ObjCImplementationDecl>(D));
     LoadClasses.push_back(cast<ObjCImplementationDecl>(D));
+    HasObjCContent = true;
     break;
   case Decl::ObjCCategory:
     RewriteCategoryDecl(cast<ObjCCategoryDecl>(D));
@@ -765,6 +806,7 @@ void RewriteMulleObjC::RewriteCategoryDecl(ObjCCategoryDecl *D) {
 void RewriteMulleObjC::RewriteCategoryImplDecl(ObjCCategoryImplDecl *D) {
   CurrentClass = D->getClassInterface();
   LoadCategories.push_back(D);
+  HasObjCContent = true;
 
   for (auto *M : D->methods()) {
     if (M->isAlias()) {
@@ -814,6 +856,7 @@ void RewriteMulleObjC::RewriteProtocolDecl(ObjCProtocolDecl *D) {
 // ---------------------------------------------------------------------------
 
 void RewriteMulleObjC::RewriteSelectorExpr(ObjCSelectorExpr *E) {
+  HasObjCContent = true;
   // @selector(foo:bar:)  ->  ((mulle_objc_methodid_t) 0x12345678UL)
   std::string selStr = E->getSelector().getAsString();
   uint32_t hash = MulleObjCUniqueIdHashForString(selStr);
@@ -853,7 +896,7 @@ void RewriteMulleObjC::RewriteDeclStmt(DeclStmt *S) {
     }
     auto *VD = dyn_cast<VarDecl>(D);
     if (!VD) continue;
-    QualType T = VD->getType();
+    QualType T = VD->getType().getUnqualifiedType();
     if (!T->isObjCObjectPointerType() && !T->isObjCIdType()) continue;
     // Replace everything from start of decl to start of variable name with "void *"
     SourceLocation Start   = VD->getBeginLoc();
@@ -1085,6 +1128,7 @@ void RewriteMulleObjC::RewriteReturnStmt(ReturnStmt *S) {
 }
 
 void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
+  HasObjCContent = true;
   std::string S;
   llvm::raw_string_ostream OS(S);
 
