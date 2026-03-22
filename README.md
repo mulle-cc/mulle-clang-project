@@ -196,7 +196,7 @@ won't be any inlining, since -O0 prohibits it.
 | Function                                            | Memo
 |-----------------------------------------------------|-------------
 | `mulle_objc_object_call`                            | `[self foo:bar]`
-| `mulle_objc_object_supercall`                       | `[super foo:bar]`
+| `mulle_objc_object_call_super`                      | `[super foo:bar]`
 | &nbsp;                                              |
 | `mulle_objc_object_lookup_infraclass_nofail`        | `[Foo ...` for methods
 | `mulle_objc_object_lookup_infraclass_nofast_nofail` | `__MULLE_OBJC_NO_FCS__`
@@ -222,7 +222,7 @@ functions, and two new inlining functions are used:
 | Function                                                   | Memo
 |------------------------------------------------------------|-------------
 | `mulle_objc_object_call_inline_partial`                    | `[self foo:bar]`
-| `mulle_objc_object_supercall_inline_partial`               | `[super foo:bar]`
+| `mulle_objc_object_call_super_inline_partial`              | `[super foo:bar]`
 | &nbsp;                                                     |
 | `mulle_objc_object_lookup_infraclass_inline_nofail`        | `[Foo ...` for methods
 | `mulle_objc_global_lookup_infraclass_inline_nofail`        |  `__MULLE_OBJC_NO_FCS__`
