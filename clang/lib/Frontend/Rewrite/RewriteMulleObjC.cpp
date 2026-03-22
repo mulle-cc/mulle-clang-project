@@ -1318,6 +1318,48 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
       }
     }
 
+    // --- properties ---
+    std::string PropListVar;
+    {
+      // Collect properties declared in this class's own @interface
+      SmallVector<ObjCPropertyDecl *, 8> Props(ID->instance_properties());
+      if (!Props.empty()) {
+        PropListVar = "OBJC_CLASS_PROPERTIES_" + ClassName;
+        OS << "static struct {\n"
+           << "  unsigned int n_properties;\n"
+           << "  struct _mulle_objc_property properties[" << Props.size() << "];\n"
+           << "} " << PropListVar
+           << " __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n"
+           << "  " << Props.size() << ",\n  {\n";
+        for (auto *PD : Props) {
+          uint32_t propId   = MulleObjCUniqueIdHashForString(PD->getNameAsString());
+          // ivarid: hash of the backing ivar name (conventionally _propName)
+          ObjCIvarDecl *IVar = PD->getPropertyIvarDecl();
+          std::string ivarName = IVar ? IVar->getNameAsString()
+                                      : "_" + PD->getNameAsString();
+          uint32_t ivarId = MulleObjCUniqueIdHashForString(ivarName);
+          // getter/setter selectors
+          uint32_t getterId = MulleObjCUniqueIdHashForString(PD->getGetterName().getAsString());
+          uint32_t setterId = PD->isReadOnly() ? 0
+              : MulleObjCUniqueIdHashForString(PD->getSetterName().getAsString());
+          // signature
+          std::string sig;
+          sig = Context->getObjCEncodingForPropertyDecl(PD, nullptr);
+          OS << "    { (mulle_objc_propertyid_t) 0x";
+          OS.write_hex(propId);
+          OS << "U, (mulle_objc_ivarid_t) 0x";
+          OS.write_hex(ivarId);
+          OS << "U, \"" << PD->getNameAsString() << "\", \"" << sig << "\","
+             << " (mulle_objc_methodid_t) 0x";
+          OS.write_hex(getterId);
+          OS << "U, (mulle_objc_methodid_t) 0x";
+          OS.write_hex(setterId);
+          OS << "U, 0, 0, 0 },\n";  // adder, remover, bits
+        }
+        OS << "  }\n};\n";
+      }
+    }
+
     // --- loadclass struct ---
     // instancesize = sizeof(ClassName) — emit as expression
     OS << "static struct _mulle_objc_loadclass " << VarBase
@@ -1335,7 +1377,7 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
        << "  " << (OwnIvars.empty()      ? "0" : "(struct _mulle_objc_ivarlist *)&"    + IvarListVar)    << ",\n"
        << "  " << (CMethods.empty()      ? "0" : "(struct _mulle_objc_methodlist *)&"  + CMethodListVar) << ",\n"
        << "  " << (IMethods.empty()      ? "0" : "(struct _mulle_objc_methodlist *)&"  + IMethodListVar) << ",\n"
-       << "  0,\n"  // properties
+       << "  " << (PropListVar.empty()   ? "0" : "(struct _mulle_objc_propertylist *)&" + PropListVar)   << ",\n"
        << "  " << (ProtoListVar.empty()  ? "0" : "(struct _mulle_objc_protocollist *)&" + ProtoListVar)  << ",\n"
        << "  " << (ProtoClassIdsVar.empty() ? "0" : ProtoClassIdsVar) << ",\n"
        << "  0\n"  // origin
@@ -1479,6 +1521,43 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
       }
     }
 
+    // --- category properties ---
+    std::string CatPropListVar;
+    if (CatDecl) {
+      SmallVector<ObjCPropertyDecl *, 8> CatProps(CatDecl->instance_properties());
+      if (!CatProps.empty()) {
+        CatPropListVar = "OBJC_CAT_PROPERTIES_" + ClassName + "_" + CatName;
+        OS << "static struct {\n"
+           << "  unsigned int n_properties;\n"
+           << "  struct _mulle_objc_property properties[" << CatProps.size() << "];\n"
+           << "} " << CatPropListVar
+           << " __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n"
+           << "  " << CatProps.size() << ",\n  {\n";
+        for (auto *PD : CatProps) {
+          uint32_t propId  = MulleObjCUniqueIdHashForString(PD->getNameAsString());
+          ObjCIvarDecl *IVar = PD->getPropertyIvarDecl();
+          std::string ivarName = IVar ? IVar->getNameAsString() : "_" + PD->getNameAsString();
+          uint32_t ivarId  = MulleObjCUniqueIdHashForString(ivarName);
+          uint32_t getterId = MulleObjCUniqueIdHashForString(PD->getGetterName().getAsString());
+          uint32_t setterId = PD->isReadOnly() ? 0
+              : MulleObjCUniqueIdHashForString(PD->getSetterName().getAsString());
+          std::string sig;
+          sig = Context->getObjCEncodingForPropertyDecl(PD, nullptr);
+          OS << "    { (mulle_objc_propertyid_t) 0x";
+          OS.write_hex(propId);
+          OS << "U, (mulle_objc_ivarid_t) 0x";
+          OS.write_hex(ivarId);
+          OS << "U, \"" << PD->getNameAsString() << "\", \"" << sig << "\","
+             << " (mulle_objc_methodid_t) 0x";
+          OS.write_hex(getterId);
+          OS << "U, (mulle_objc_methodid_t) 0x";
+          OS.write_hex(setterId);
+          OS << "U, 0, 0, 0 },\n";
+        }
+        OS << "  }\n};\n";
+      }
+    }
+
     OS << "static struct _mulle_objc_loadcategory " << VarBase
        << " __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n"
        << "  (mulle_objc_categoryid_t) 0x"; OS.write_hex(catId);
@@ -1487,11 +1566,11 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
     OS << "U,\n  \"" << ClassName << "\",\n"
        << "  (mulle_objc_hash_t) 0x"; OS.write_hex(classIvarHash);
     OS << "U,\n"
-       << "  " << (CMethods.empty()          ? "0" : "(struct _mulle_objc_methodlist *)&"   + CMethodListVar)   << ",\n"
-       << "  " << (IMethods.empty()          ? "0" : "(struct _mulle_objc_methodlist *)&"   + IMethodListVar)   << ",\n"
-       << "  0,\n"  // properties
-       << "  " << (ProtoListVar.empty()      ? "0" : "(struct _mulle_objc_protocollist *)&" + ProtoListVar)     << ",\n"
-       << "  " << (CatProtoClassIdsVar.empty() ? "0" : CatProtoClassIdsVar)                                    << ",\n"
+       << "  " << (CMethods.empty()            ? "0" : "(struct _mulle_objc_methodlist *)&"   + CMethodListVar)   << ",\n"
+       << "  " << (IMethods.empty()            ? "0" : "(struct _mulle_objc_methodlist *)&"   + IMethodListVar)   << ",\n"
+       << "  " << (CatPropListVar.empty()      ? "0" : "(struct _mulle_objc_propertylist *)&" + CatPropListVar)   << ",\n"
+       << "  " << (ProtoListVar.empty()        ? "0" : "(struct _mulle_objc_protocollist *)&" + ProtoListVar)     << ",\n"
+       << "  " << (CatProtoClassIdsVar.empty() ? "0" : CatProtoClassIdsVar)                                      << ",\n"
        << "  0\n"  // origin
        << "};\n";
   }
