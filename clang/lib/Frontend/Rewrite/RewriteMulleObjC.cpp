@@ -136,6 +136,64 @@ public:
         "#define NSFastEnumerationState NSFastEnumerationState\n"
         "#endif\n");
     }
+
+    // Insert call-function macros after the last #include.
+    // These select inline vs non-inline variants based on optimization level,
+    // mirroring CGObjCMulleRuntime's INLINE_CALL_LEVEL logic.
+    {
+      // Determine inline level from ObjCInlineMethodCalls lang option.
+      // 0 = auto (use __OPTIMIZE__), 1 = none, 2+ = forced inline.
+      unsigned forceLevel = LangOpts.ObjCInlineMethodCalls;
+      std::string callFn, callSuperFn, classLookupFn;
+      if (forceLevel == 1) {
+        // forced off
+        callFn        = "mulle_objc_object_call";
+        callSuperFn   = "mulle_objc_object_call_super";
+        classLookupFn = "mulle_objc_global_lookup_infraclass_nofail";
+      } else if (forceLevel >= 3) {
+        // forced partial/default/full inline
+        callFn        = "mulle_objc_object_call_inline";
+        callSuperFn   = "mulle_objc_object_call_super_inline";
+        classLookupFn = "mulle_objc_global_lookup_infraclass_inline_nofail";
+      } else {
+        // auto: use preprocessor conditionals in the emitted C
+        callFn        = "";  // use macro
+        callSuperFn   = "";
+        classLookupFn = "";
+      }
+
+      std::string macros;
+      if (callFn.empty()) {
+        // emit #ifdef __OPTIMIZE__ guards
+        macros =
+          "#ifdef __OPTIMIZE_SIZE__\n"
+          "# define mulle_objc_rewrite_call(obj,sel,param)            mulle_objc_object_call_inline_minimal(obj,sel,param)\n"
+          "# define mulle_objc_rewrite_call_super(obj,sel,param,sid)  mulle_objc_object_call_super_inline(obj,sel,param,sid)\n"
+          "# define mulle_objc_rewrite_lookup_class(u,cid)            mulle_objc_global_lookup_infraclass_nofail(u,cid)\n"
+          "#elif defined(__OPTIMIZE__)\n"
+          "# define mulle_objc_rewrite_call(obj,sel,param)            mulle_objc_object_call_inline(obj,sel,param)\n"
+          "# define mulle_objc_rewrite_call_super(obj,sel,param,sid)  mulle_objc_object_call_super_inline(obj,sel,param,sid)\n"
+          "# define mulle_objc_rewrite_lookup_class(u,cid)            mulle_objc_global_lookup_infraclass_inline_nofail(u,cid)\n"
+          "#else\n"
+          "# define mulle_objc_rewrite_call(obj,sel,param)            mulle_objc_object_call(obj,sel,param)\n"
+          "# define mulle_objc_rewrite_call_super(obj,sel,param,sid)  mulle_objc_object_call_super(obj,sel,param,sid)\n"
+          "# define mulle_objc_rewrite_lookup_class(u,cid)            mulle_objc_global_lookup_infraclass_nofail(u,cid)\n"
+          "#endif\n";
+      } else {
+        macros =
+          "#define mulle_objc_rewrite_call(obj,sel,param)            " + callFn + "(obj,sel,param)\n"
+          "#define mulle_objc_rewrite_call_super(obj,sel,param,sid)  " + callSuperFn + "(obj,sel,param,sid)\n"
+          "#define mulle_objc_rewrite_lookup_class(u,cid)            " + classLookupFn + "(u,cid)\n";
+      }
+
+      size_t pos = Result.rfind("\n#include");
+      if (pos != std::string::npos)
+        pos = Result.find('\n', pos + 1) + 1;
+      else
+        pos = 0;
+      Result.insert(pos, macros);
+    }
+
     *OutFile << Result;
 
     // Emit load info and constructor
@@ -884,7 +942,7 @@ void RewriteMulleObjC::RewriteForCollectionStmt(ObjCForCollectionStmt *S) {
 
   // call helper macro
   std::string callExpr =
-    "(NSUInteger)(intptr_t)mulle_objc_object_call(" + collText + ", " + hashStr +
+    "(NSUInteger)(intptr_t)mulle_objc_rewrite_call(" + collText + ", " + hashStr +
     ", &(struct { NSFastEnumerationState *rover_; void **objects_; NSUInteger count_; })"
     "{ &" + state + ", (void **)" + buf + ", 16 })";
 
@@ -1065,7 +1123,7 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
     std::string hex;
     llvm::raw_string_ostream HS(hex);
     HS << "0x"; HS.write_hex(classId); HS << "U";
-    Receiver = "mulle_objc_global_lookup_infraclass_nofail(0, (mulle_objc_classid_t) " + hex + ")";
+    Receiver = "mulle_objc_rewrite_lookup_class(0, (mulle_objc_classid_t) " + hex + ")";
   }
 
   // Selector hash
@@ -1086,13 +1144,13 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
     CastClose = ")";
   }
 
-  std::string CallFn = isSuper ? "mulle_objc_object_call_super" : "mulle_objc_object_call";
   unsigned NumArgs = E->getNumArgs();
 
   auto buildCall = [&](const std::string &param) {
-    OS << CastOpen << CallFn << "(" << Receiver << ", " << HashStr << ", " << param;
-    if (isSuper) OS << ", " << SuperId;
-    OS << ")" << CastClose;
+    if (isSuper)
+      OS << CastOpen << "mulle_objc_rewrite_call_super(" << Receiver << ", " << HashStr << ", " << param << ", " << SuperId << ")" << CastClose;
+    else
+      OS << CastOpen << "mulle_objc_rewrite_call(" << Receiver << ", " << HashStr << ", " << param << ")" << CastClose;
   };
 
   if (NumArgs == 0) {
