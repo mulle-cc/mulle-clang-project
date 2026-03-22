@@ -209,33 +209,30 @@ public:
                      "#define mulle_objc_rewrite_call_super(obj,sel,param,sid)  "  + fns[idx].callSuper   + "(obj,sel,param,sid)\n"
                      "#define mulle_objc_rewrite_lookup_class(u,cid)            "  + fns[idx].lookup      + "(u,cid)\n";
       } else {
-        // Level unknown — defer to downstream C compiler via __MULLE_OBJC_REWRITE_INLINE_LEVEL__.
-        // __MULLE_OBJC_INLINE_METHOD_CALLS__ (source macro) overrides if defined.
+        // Level unknown — defer to downstream C compiler via __MULLE_OBJC_INLINE_METHOD_CALLS__.
         macros =
-          "#ifndef __MULLE_OBJC_REWRITE_INLINE_LEVEL__\n"
-          "# ifdef __MULLE_OBJC_INLINE_METHOD_CALLS__\n"
-          "#  define __MULLE_OBJC_REWRITE_INLINE_LEVEL__ __MULLE_OBJC_INLINE_METHOD_CALLS__\n"
-          "# elif defined(__OPTIMIZE_SIZE__)\n"
-          "#  define __MULLE_OBJC_REWRITE_INLINE_LEVEL__ 2\n"
+          "#ifndef __MULLE_OBJC_INLINE_METHOD_CALLS__\n"
+          "# ifdef __OPTIMIZE_SIZE__\n"
+          "#  define __MULLE_OBJC_INLINE_METHOD_CALLS__ 2\n"
           "# elif defined(__OPTIMIZE__)\n"
-          "#  define __MULLE_OBJC_REWRITE_INLINE_LEVEL__ 4\n"
+          "#  define __MULLE_OBJC_INLINE_METHOD_CALLS__ 4\n"
           "# else\n"
-          "#  define __MULLE_OBJC_REWRITE_INLINE_LEVEL__ 1\n"
+          "#  define __MULLE_OBJC_INLINE_METHOD_CALLS__ 1\n"
           "# endif\n"
           "#endif\n"
-          "#if __MULLE_OBJC_REWRITE_INLINE_LEVEL__ <= 1\n"
+          "#if __MULLE_OBJC_INLINE_METHOD_CALLS__ <= 1\n"
           "# define mulle_objc_rewrite_call(obj,sel,param)            mulle_objc_object_call(obj,sel,param)\n"
           "# define mulle_objc_rewrite_call_super(obj,sel,param,sid)  mulle_objc_object_call_super(obj,sel,param,sid)\n"
           "# define mulle_objc_rewrite_lookup_class(u,cid)            mulle_objc_global_lookup_infraclass_nofail(u,cid)\n"
-          "#elif __MULLE_OBJC_REWRITE_INLINE_LEVEL__ == 2\n"
+          "#elif __MULLE_OBJC_INLINE_METHOD_CALLS__ == 2\n"
           "# define mulle_objc_rewrite_call(obj,sel,param)            mulle_objc_object_call_inline_minimal(obj,sel,param)\n"
           "# define mulle_objc_rewrite_call_super(obj,sel,param,sid)  mulle_objc_object_call_super_inline(obj,sel,param,sid)\n"
           "# define mulle_objc_rewrite_lookup_class(u,cid)            mulle_objc_global_lookup_infraclass_nofail(u,cid)\n"
-          "#elif __MULLE_OBJC_REWRITE_INLINE_LEVEL__ == 3\n"
+          "#elif __MULLE_OBJC_INLINE_METHOD_CALLS__ == 3\n"
           "# define mulle_objc_rewrite_call(obj,sel,param)            mulle_objc_object_call_inline_partial(obj,sel,param)\n"
           "# define mulle_objc_rewrite_call_super(obj,sel,param,sid)  mulle_objc_object_call_super_inline_partial(obj,sel,param,sid)\n"
           "# define mulle_objc_rewrite_lookup_class(u,cid)            mulle_objc_global_lookup_infraclass_inline_nofail(u,cid)\n"
-          "#elif __MULLE_OBJC_REWRITE_INLINE_LEVEL__ == 4\n"
+          "#elif __MULLE_OBJC_INLINE_METHOD_CALLS__ == 4\n"
           "# define mulle_objc_rewrite_call(obj,sel,param)            mulle_objc_object_call_inline(obj,sel,param)\n"
           "# define mulle_objc_rewrite_call_super(obj,sel,param,sid)  mulle_objc_object_call_super_inline(obj,sel,param,sid)\n"
           "# define mulle_objc_rewrite_lookup_class(u,cid)            mulle_objc_global_lookup_infraclass_inline_nofail(u,cid)\n"
@@ -1330,7 +1327,7 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
   };
 
   // At partial inlining (level 3+), retain/release bypass the message send.
-  // When forceLevel is known, emit direct calls; otherwise use __MULLE_OBJC_REWRITE_INLINE_LEVEL__.
+  // When forceLevel is known, emit direct calls; otherwise use __MULLE_OBJC_INLINE_METHOD_CALLS__.
   // @mulle-objc@ full 5-level inline support + forceLevel emits direct calls >
   if (!isSuper && NumArgs == 0) {
     unsigned forceLevel = LangOpts.ObjCInlineMethodCalls;
@@ -1354,7 +1351,7 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
         OS << fallback;
       } else {
         // defer to downstream compiler
-        OS << "#if __MULLE_OBJC_REWRITE_INLINE_LEVEL__ >= 3\n";
+        OS << "#if __MULLE_OBJC_INLINE_METHOD_CALLS__ >= 3\n";
         if (isRetain)
           OS << CastOpen << inlineFn << "(" << Receiver << ")" << CastClose;
         else
