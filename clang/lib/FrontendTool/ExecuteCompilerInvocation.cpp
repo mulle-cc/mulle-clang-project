@@ -154,7 +154,9 @@ CreateFrontendBaseAction(CompilerInstance &CI) {
 #else
   case RewriteObjC:            Action = "RewriteObjC"; break;
 #endif
+  // @mulle-objc@ --mulle-objc-emit-c action >
   case RewriteMulleObjC:       return std::make_unique<RewriteMulleObjCAction>();
+  // @mulle-objc@ --mulle-objc-emit-c action <
 #if CLANG_ENABLE_STATIC_ANALYZER
   case RunAnalysis:            return std::make_unique<ento::AnalysisAction>();
 #else

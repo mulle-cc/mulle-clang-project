@@ -5289,7 +5289,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-rewrite-objc");
       rewriteKind = RK_Fragile;
     } else if (JA.getType() == types::TY_RewrittenMulleObjC) {
+      // @mulle-objc@ --mulle-objc-emit-c action >
       CmdArgs.push_back("-rewrite-mulle-objc");
+      // @mulle-objc@ --mulle-objc-emit-c action <
     } else if (JA.getType() == types::TY_CIR) {
       CmdArgs.push_back("-emit-cir");
     } else {

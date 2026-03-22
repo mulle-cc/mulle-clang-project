@@ -2824,7 +2824,9 @@ static const auto &getFrontendActionTable() {
       {frontend::TemplightDump, OPT_templight_dump},
       {frontend::RewriteMacros, OPT_rewrite_macros},
       {frontend::RewriteObjC, OPT_rewrite_objc},
+      // @mulle-objc@ --mulle-objc-emit-c action >
       {frontend::RewriteMulleObjC, OPT_rewrite_mulle_objc},
+      // @mulle-objc@ --mulle-objc-emit-c action <
       {frontend::RewriteTest, OPT_rewrite_test},
       {frontend::RunAnalysis, OPT_analyze},
       {frontend::RunPreprocessorOnly, OPT_Eonly},
@@ -4885,7 +4887,9 @@ static bool isStrictlyPreprocessorAction(frontend::ActionKind Action) {
   case frontend::VerifyPCH:
   case frontend::PluginAction:
   case frontend::RewriteObjC:
+  // @mulle-objc@ --mulle-objc-emit-c action >
   case frontend::RewriteMulleObjC:
+  // @mulle-objc@ --mulle-objc-emit-c action <
   case frontend::RewriteTest:
   case frontend::RunAnalysis:
   case frontend::TemplightDump:
@@ -4933,7 +4937,9 @@ static bool isCodeGenAction(frontend::ActionKind Action) {
   case frontend::VerifyPCH:
   case frontend::PluginAction:
   case frontend::RewriteObjC:
+  // @mulle-objc@ --mulle-objc-emit-c action >
   case frontend::RewriteMulleObjC:
+  // @mulle-objc@ --mulle-objc-emit-c action <
   case frontend::RewriteTest:
   case frontend::RunAnalysis:
   case frontend::TemplightDump:
@@ -5262,7 +5268,9 @@ bool CompilerInvocation::CreateFromArgsImpl(
   ParseLangArgs(LangOpts, Args, DashX, T, Res.getPreprocessorOpts().Includes,
                 Diags);
   if (Res.getFrontendOpts().ProgramAction == frontend::RewriteObjC ||
+      // @mulle-objc@ --mulle-objc-emit-c action >
       Res.getFrontendOpts().ProgramAction == frontend::RewriteMulleObjC)
+      // @mulle-objc@ --mulle-objc-emit-c action <
     LangOpts.ObjCExceptions = 1;
 
   for (auto Warning : Res.getDiagnosticOpts().Warnings) {

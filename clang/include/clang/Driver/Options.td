@@ -6027,6 +6027,7 @@ def remap : Flag<["-"], "remap">;
 def rewrite_objc : Flag<["-"], "rewrite-objc">, Flags<[NoXarchOption]>,
   Visibility<[ClangOption, CC1Option]>,
   HelpText<"Rewrite Objective-C source to C++">, Group<Action_Group>;
+// @mulle-objc@ --mulle-objc-emit-c flag >
 def rewrite_mulle_objc : Flag<["-"], "rewrite-mulle-objc">, Flags<[NoXarchOption]>,
   Visibility<[ClangOption, CC1Option]>,
   HelpText<"Rewrite Objective-C source to C for mulle-objc runtime (deprecated: use --mulle-objc-emit-c)">, Group<Action_Group>;
@@ -6034,6 +6035,7 @@ def mulle_objc_emit_c : Flag<["--"], "mulle-objc-emit-c">, Flags<[NoXarchOption]
   Visibility<[ClangOption, CC1Option]>,
   Alias<rewrite_mulle_objc>,
   HelpText<"Emit Objective-C source as plain C for mulle-objc runtime (output to stdout if no -o given)">, Group<Action_Group>;
+// @mulle-objc@ --mulle-objc-emit-c flag <
 def rewrite_legacy_objc : Flag<["-"], "rewrite-legacy-objc">,
   Flags<[NoXarchOption]>,
   HelpText<"Rewrite Legacy Objective-C source to C++">;

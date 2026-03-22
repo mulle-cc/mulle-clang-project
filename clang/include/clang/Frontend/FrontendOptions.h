@@ -133,7 +133,9 @@ enum ActionKind {
   RewriteObjC,
 
   /// ObjC->C Rewriter for mulle-objc runtime.
+  // @mulle-objc@ --mulle-objc-emit-c action >
   RewriteMulleObjC,
+  // @mulle-objc@ --mulle-objc-emit-c action <
 
   /// Rewriter playground
   RewriteTest,
