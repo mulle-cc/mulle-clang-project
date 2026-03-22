@@ -117,7 +117,8 @@ public:
       }
     }
     // Insert fastenumeration header if needed (for mulle_objc_enumeration_mutation)
-    if (Result.find("mulle_objc_enumeration_mutation") != std::string::npos) {
+    if (Result.find("mulle_objc_enumeration_mutation") != std::string::npos ||
+        Result.find("NSFastEnumerationState") != std::string::npos) {
       size_t pos = Result.rfind("\n#include");
       if (pos != std::string::npos)
         pos = Result.find('\n', pos + 1) + 1;
@@ -125,7 +126,15 @@ public:
         pos = Result.find('\n') + 1;
       else
         pos = 0;
-      Result.insert(pos, "#include <mulle-objc-runtime/mulle-objc-fastenumeration.h>\n");
+      Result.insert(pos,
+        "#include <mulle-objc-runtime/mulle-objc-fastenumeration.h>\n"
+        "#ifndef NSUInteger\n"
+        "typedef unsigned long NSUInteger;\n"
+        "#endif\n"
+        "#ifndef NSFastEnumerationState\n"
+        "typedef struct { NSUInteger state; void **itemsPtr; NSUInteger *mutationsPtr; NSUInteger extra[5]; } NSFastEnumerationState;\n"
+        "#define NSFastEnumerationState NSFastEnumerationState\n"
+        "#endif\n");
     }
     *OutFile << Result;
 
@@ -369,12 +378,20 @@ void RewriteMulleObjC::RewriteStmt(Stmt *S) {
     RewriteDeclStmt(DS);
   else if (auto *CE = dyn_cast<CStyleCastExpr>(S)) {
     QualType T = CE->getType();
-    if (T->isObjCObjectPointerType() || T->isObjCIdType()) {
+    std::string CastStr;
+    if (T->isObjCObjectPointerType() || T->isObjCIdType())
+      CastStr = "(void *)";
+    else if (auto *PT = T->getAs<PointerType>()) {
+      QualType Pointee = PT->getPointeeType();
+      if (Pointee->isObjCObjectPointerType() || Pointee->isObjCIdType())
+        CastStr = "(void **)";
+    }
+    if (!CastStr.empty()) {
       SourceRange TR = CE->getLParenLoc().isValid()
           ? SourceRange(CE->getLParenLoc(), CE->getRParenLoc())
           : SourceRange();
       if (TR.isValid())
-        Rewrite.ReplaceText(TR.getBegin(), Rewrite.getRangeSize(TR), "(void *)");
+        Rewrite.ReplaceText(TR.getBegin(), Rewrite.getRangeSize(TR), CastStr);
     }
   }
   else if (auto *TS = dyn_cast<ObjCAtTryStmt>(S))
@@ -412,9 +429,20 @@ void RewriteMulleObjC::RewriteInterfaceDecl(ObjCInterfaceDecl *D) {
   // Own ivars as flat token list for the macro value
   std::string OwnIvars;
   for (auto *IV : D->ivars()) {
-    OwnIvars += PrintType(IV->getType());
-    OwnIvars += " ";
-    OwnIvars += IV->getNameAsString();
+    QualType T = IV->getType();
+    std::string ivarName = IV->getNameAsString();
+    // For array types, emit "base_type name[N]" not "base_type[N] name"
+    if (auto *AT = Context->getAsArrayType(T)) {
+      std::string base = PrintType(AT->getElementType());
+      std::string suffix;
+      if (auto *CAT = dyn_cast<ConstantArrayType>(AT))
+        suffix = "[" + std::to_string(CAT->getZExtSize()) + "]";
+      else
+        suffix = "[]";
+      OwnIvars += base + " " + ivarName + suffix;
+    } else {
+      OwnIvars += PrintType(T) + " " + ivarName;
+    }
     if (IV->isBitField()) {
       unsigned width = IV->getBitWidthValue();
       OwnIvars += ":";
@@ -844,6 +872,9 @@ void RewriteMulleObjC::RewriteForCollectionStmt(ObjCForCollectionStmt *S) {
 
   // body (already rewritten)
   std::string bodyText = Rewrite.getRewrittenText(S->getBody()->getSourceRange());
+  // Ensure body ends with semicolon if it's a bare expression statement
+  if (!bodyText.empty() && bodyText.back() != '}' && bodyText.back() != ';')
+    bodyText += ";";
 
   // call helper macro
   std::string callExpr =
@@ -1192,8 +1223,8 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
     for (auto *M : D->methods())
       (M->isInstanceMethod() ? IMethods : CMethods).push_back(M);
     auto sortMethods = [](ObjCMethodDecl *A, ObjCMethodDecl *B) {
-      return (int32_t)MulleObjCUniqueIdHashForString(A->getSelector().getAsString())
-           < (int32_t)MulleObjCUniqueIdHashForString(B->getSelector().getAsString());
+      return MulleObjCUniqueIdHashForString(A->getSelector().getAsString())
+           < MulleObjCUniqueIdHashForString(B->getSelector().getAsString());
     };
     std::sort(IMethods.begin(), IMethods.end(), sortMethods);
     std::sort(CMethods.begin(), CMethods.end(), sortMethods);
@@ -1350,8 +1381,8 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
       (M->isInstanceMethod() ? IMethods : CMethods).push_back(M);
     {
       auto sortMethods = [](ObjCMethodDecl *A, ObjCMethodDecl *B) {
-        return (int32_t)MulleObjCUniqueIdHashForString(A->getSelector().getAsString())
-             < (int32_t)MulleObjCUniqueIdHashForString(B->getSelector().getAsString());
+        return MulleObjCUniqueIdHashForString(A->getSelector().getAsString())
+             < MulleObjCUniqueIdHashForString(B->getSelector().getAsString());
       };
       std::sort(IMethods.begin(), IMethods.end(), sortMethods);
       std::sort(CMethods.begin(), CMethods.end(), sortMethods);
