@@ -180,50 +180,72 @@ public:
     // These select inline vs non-inline variants based on optimization level,
     // mirroring CGObjCMulleRuntime's INLINE_CALL_LEVEL logic.
     if (HasObjCContent) {
-      // Determine inline level from ObjCInlineMethodCalls lang option.
-      // 0 = auto (use __OPTIMIZE__), 1 = none, 2+ = forced inline.
+      // @mulle-objc@ full 5-level inline support + forceLevel emits direct calls >
       unsigned forceLevel = LangOpts.ObjCInlineMethodCalls;
-      std::string callFn, callSuperFn, classLookupFn;
-      if (forceLevel == 1) {
-        // forced off
-        callFn        = "mulle_objc_object_call";
-        callSuperFn   = "mulle_objc_object_call_super";
-        classLookupFn = "mulle_objc_global_lookup_infraclass_nofail";
-      } else if (forceLevel >= 3) {
-        // forced partial/default/full inline
-        callFn        = "mulle_objc_object_call_inline";
-        callSuperFn   = "mulle_objc_object_call_super_inline";
-        classLookupFn = "mulle_objc_global_lookup_infraclass_inline_nofail";
-      } else {
-        // auto: use preprocessor conditionals in the emitted C
-        callFn        = "";  // use macro
-        callSuperFn   = "";
-        classLookupFn = "";
-      }
-
       std::string macros;
-      if (callFn.empty()) {
-        // emit #ifdef __OPTIMIZE__ guards
+
+      if (forceLevel != 0) {
+        // Level known at rewrite time — emit direct calls, no macro needed.
+        struct { const char *call, *callSuper, *lookup; } fns[] = {
+          { "mulle_objc_object_call",
+            "mulle_objc_object_call_super",
+            "mulle_objc_global_lookup_infraclass_nofail" },           // 1: none
+          { "mulle_objc_object_call_inline_minimal",
+            "mulle_objc_object_call_super_inline",
+            "mulle_objc_global_lookup_infraclass_nofail" },           // 2: minimal
+          { "mulle_objc_object_call_inline_partial",
+            "mulle_objc_object_call_super_inline_partial",
+            "mulle_objc_global_lookup_infraclass_inline_nofail" },    // 3: partial
+          { "mulle_objc_object_call_inline",
+            "mulle_objc_object_call_super_inline",
+            "mulle_objc_global_lookup_infraclass_inline_nofail" },    // 4: default
+          { "mulle_objc_object_call_inline_full",
+            "mulle_objc_object_call_super_inline_full",
+            "mulle_objc_global_lookup_infraclass_inline_nofail" },    // 5: full
+        };
+        unsigned idx = (forceLevel < 1 ? 0 : forceLevel > 5 ? 4 : forceLevel - 1);
         macros =
-          "#ifdef __OPTIMIZE_SIZE__\n"
+          std::string("#define mulle_objc_rewrite_call(obj,sel,param)            ") + fns[idx].call        + "(obj,sel,param)\n"
+                     "#define mulle_objc_rewrite_call_super(obj,sel,param,sid)  "  + fns[idx].callSuper   + "(obj,sel,param,sid)\n"
+                     "#define mulle_objc_rewrite_lookup_class(u,cid)            "  + fns[idx].lookup      + "(u,cid)\n";
+      } else {
+        // Level unknown — defer to downstream C compiler via __MULLE_OBJC_REWRITE_INLINE_LEVEL__.
+        // __MULLE_OBJC_INLINE_METHOD_CALLS__ (source macro) overrides if defined.
+        macros =
+          "#ifndef __MULLE_OBJC_REWRITE_INLINE_LEVEL__\n"
+          "# ifdef __MULLE_OBJC_INLINE_METHOD_CALLS__\n"
+          "#  define __MULLE_OBJC_REWRITE_INLINE_LEVEL__ __MULLE_OBJC_INLINE_METHOD_CALLS__\n"
+          "# elif defined(__OPTIMIZE_SIZE__)\n"
+          "#  define __MULLE_OBJC_REWRITE_INLINE_LEVEL__ 2\n"
+          "# elif defined(__OPTIMIZE__)\n"
+          "#  define __MULLE_OBJC_REWRITE_INLINE_LEVEL__ 4\n"
+          "# else\n"
+          "#  define __MULLE_OBJC_REWRITE_INLINE_LEVEL__ 1\n"
+          "# endif\n"
+          "#endif\n"
+          "#if __MULLE_OBJC_REWRITE_INLINE_LEVEL__ <= 1\n"
+          "# define mulle_objc_rewrite_call(obj,sel,param)            mulle_objc_object_call(obj,sel,param)\n"
+          "# define mulle_objc_rewrite_call_super(obj,sel,param,sid)  mulle_objc_object_call_super(obj,sel,param,sid)\n"
+          "# define mulle_objc_rewrite_lookup_class(u,cid)            mulle_objc_global_lookup_infraclass_nofail(u,cid)\n"
+          "#elif __MULLE_OBJC_REWRITE_INLINE_LEVEL__ == 2\n"
           "# define mulle_objc_rewrite_call(obj,sel,param)            mulle_objc_object_call_inline_minimal(obj,sel,param)\n"
           "# define mulle_objc_rewrite_call_super(obj,sel,param,sid)  mulle_objc_object_call_super_inline(obj,sel,param,sid)\n"
           "# define mulle_objc_rewrite_lookup_class(u,cid)            mulle_objc_global_lookup_infraclass_nofail(u,cid)\n"
-          "#elif defined(__OPTIMIZE__)\n"
+          "#elif __MULLE_OBJC_REWRITE_INLINE_LEVEL__ == 3\n"
+          "# define mulle_objc_rewrite_call(obj,sel,param)            mulle_objc_object_call_inline_partial(obj,sel,param)\n"
+          "# define mulle_objc_rewrite_call_super(obj,sel,param,sid)  mulle_objc_object_call_super_inline_partial(obj,sel,param,sid)\n"
+          "# define mulle_objc_rewrite_lookup_class(u,cid)            mulle_objc_global_lookup_infraclass_inline_nofail(u,cid)\n"
+          "#elif __MULLE_OBJC_REWRITE_INLINE_LEVEL__ == 4\n"
           "# define mulle_objc_rewrite_call(obj,sel,param)            mulle_objc_object_call_inline(obj,sel,param)\n"
           "# define mulle_objc_rewrite_call_super(obj,sel,param,sid)  mulle_objc_object_call_super_inline(obj,sel,param,sid)\n"
           "# define mulle_objc_rewrite_lookup_class(u,cid)            mulle_objc_global_lookup_infraclass_inline_nofail(u,cid)\n"
           "#else\n"
-          "# define mulle_objc_rewrite_call(obj,sel,param)            mulle_objc_object_call(obj,sel,param)\n"
-          "# define mulle_objc_rewrite_call_super(obj,sel,param,sid)  mulle_objc_object_call_super(obj,sel,param,sid)\n"
-          "# define mulle_objc_rewrite_lookup_class(u,cid)            mulle_objc_global_lookup_infraclass_nofail(u,cid)\n"
+          "# define mulle_objc_rewrite_call(obj,sel,param)            mulle_objc_object_call_inline_full(obj,sel,param)\n"
+          "# define mulle_objc_rewrite_call_super(obj,sel,param,sid)  mulle_objc_object_call_super_inline_full(obj,sel,param,sid)\n"
+          "# define mulle_objc_rewrite_lookup_class(u,cid)            mulle_objc_global_lookup_infraclass_inline_nofail(u,cid)\n"
           "#endif\n";
-      } else {
-        macros =
-          "#define mulle_objc_rewrite_call(obj,sel,param)            " + callFn + "(obj,sel,param)\n"
-          "#define mulle_objc_rewrite_call_super(obj,sel,param,sid)  " + callSuperFn + "(obj,sel,param,sid)\n"
-          "#define mulle_objc_rewrite_lookup_class(u,cid)            " + classLookupFn + "(u,cid)\n";
       }
+      // @mulle-objc@ full 5-level inline support + forceLevel emits direct calls <
 
       size_t pos = Result.rfind("\n#include");
       if (pos != std::string::npos)
@@ -1307,28 +1329,43 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
       OS << CastOpen << "mulle_objc_rewrite_call(" << Receiver << ", " << HashStr << ", " << param << ")" << CastClose;
   };
 
-  // At -O2+, retain/release/zone bypass the message send (matches codegen INLINE_CALL_PARTIAL)
+  // At partial inlining (level 3+), retain/release bypass the message send.
+  // When forceLevel is known, emit direct calls; otherwise use __MULLE_OBJC_REWRITE_INLINE_LEVEL__.
+  // @mulle-objc@ full 5-level inline support + forceLevel emits direct calls >
   if (!isSuper && NumArgs == 0) {
+    unsigned forceLevel = LangOpts.ObjCInlineMethodCalls;
     std::string selName = E->getSelector().getAsString();
-    if (selName == "retain") {
-      OS << "#ifdef __OPTIMIZE__\n"
-         << CastOpen << "mulle_objc_object_retain_inline(" << Receiver << ")" << CastClose << ";\n"
-         << "#else\n";
+    if (selName == "retain" || selName == "release") {
+      bool isRetain = (selName == "retain");
+      std::string inlineFn = isRetain ? "mulle_objc_object_retain_inline"
+                                      : "mulle_objc_object_release_inline";
+      std::string fallback;
+      llvm::raw_string_ostream FOS(fallback);
       buildCall("NULL");
-      OS << ";\n#endif";
-      ReplaceText(E->getSourceRange(), OS.str());
-      return;
-    }
-    if (selName == "release") {
-      OS << "#ifdef __OPTIMIZE__\n"
-         << "mulle_objc_object_release_inline(" << Receiver << ");\n"
-         << "#else\n";
-      buildCall("NULL");
-      OS << ";\n#endif";
+
+      if (forceLevel >= 3) {
+        // known at rewrite time: use inline directly
+        if (isRetain)
+          OS << CastOpen << inlineFn << "(" << Receiver << ")" << CastClose;
+        else
+          OS << inlineFn << "(" << Receiver << ")";
+      } else if (forceLevel != 0) {
+        // known at rewrite time: no inline
+        OS << fallback;
+      } else {
+        // defer to downstream compiler
+        OS << "#if __MULLE_OBJC_REWRITE_INLINE_LEVEL__ >= 3\n";
+        if (isRetain)
+          OS << CastOpen << inlineFn << "(" << Receiver << ")" << CastClose;
+        else
+          OS << inlineFn << "(" << Receiver << ")";
+        OS << ";\n#else\n" << fallback << ";\n#endif";
+      }
       ReplaceText(E->getSourceRange(), OS.str());
       return;
     }
   }
+  // @mulle-objc@ full 5-level inline support + forceLevel emits direct calls <
 
   if (NumArgs == 0) {
     buildCall("NULL");
