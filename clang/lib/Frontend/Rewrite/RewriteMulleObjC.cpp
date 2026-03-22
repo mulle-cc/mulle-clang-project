@@ -735,6 +735,30 @@ void RewriteMulleObjC::RewriteSelectorExpr(ObjCSelectorExpr *E) {
 
 void RewriteMulleObjC::RewriteDeclStmt(DeclStmt *S) {
   for (auto *D : S->decls()) {
+    // Handle @defs(ClassName) inside a local struct declaration
+    if (auto *RD = dyn_cast<RecordDecl>(D)) {
+      for (auto *Field : RD->fields()) {
+        if (!isa<ObjCAtDefsFieldDecl>(Field)) continue;
+        SourceLocation LBrace = RD->getBraceRange().getBegin();
+        if (LBrace.isInvalid()) break;
+        const char *Buf = SM->getCharacterData(LBrace);
+        const char *p = Buf;
+        while (*p && strncmp(p, "@defs(", 6) != 0) ++p;
+        if (strncmp(p, "@defs(", 6) != 0) break;
+        const char *nameStart = p + 6;
+        while (*nameStart == ' ') ++nameStart;
+        const char *nameEnd = nameStart;
+        while (*nameEnd && *nameEnd != ')' && *nameEnd != ' ') ++nameEnd;
+        std::string ClassName(nameStart, nameEnd - nameStart);
+        const char *end = nameEnd;
+        while (*end && *end != ')') ++end;
+        if (*end == ')') ++end;
+        SourceLocation DefsLoc = LBrace.getLocWithOffset(p - Buf);
+        Rewrite.ReplaceText(DefsLoc, end - p, "OBJC_CLASS_" + ClassName + "_IVARS");
+        break;
+      }
+      continue;
+    }
     auto *VD = dyn_cast<VarDecl>(D);
     if (!VD) continue;
     QualType T = VD->getType();
