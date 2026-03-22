@@ -6257,6 +6257,13 @@ const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
     return "-";
   }
 
+  // --mulle-objc-emit-c (alias: -rewrite-mulle-objc) defaults to stdout
+  // when no -o is given, matching the behaviour of -E.
+  if (AtTopLevel && !CCGenDiagnostics &&
+      JA.getType() == types::TY_RewrittenMulleObjC) {
+    return "-";
+  }
+
   if (JA.getType() == types::TY_ModuleFile &&
       C.getArgs().getLastArg(options::OPT_module_file_info)) {
     return "-";
