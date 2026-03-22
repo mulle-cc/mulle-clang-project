@@ -463,65 +463,53 @@ void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
   for (auto *M : D->methods()) {
     if (M->isAlias()) {
       // Erase the @method_implementation line.
-      // M->getBeginLoc() points to the '-' of the LHS selector.
-      // Scan backward to '@', forward to ';'.
       const char *Start = SM->getCharacterData(M->getBeginLoc());
       const char *p = Start;
-      // backward to '@'
       while (p > SM->getCharacterData(SM->getLocForStartOfFile(SM->getFileID(M->getBeginLoc()))) && *p != '@')
         --p;
-      // forward to ';'
       const char *q = Start;
       while (*q && *q != ';') ++q;
       if (*q == ';') ++q;
       SourceLocation AtLoc = M->getBeginLoc().getLocWithOffset(p - Start);
       Rewrite.ReplaceText(AtLoc, q - p, "");
+    } else if (M->isSynthesizedAccessorStub()) {
+      // Implicit or explicit @synthesize — emit C accessor before @implementation
+      const ObjCPropertyDecl *PD = M->findPropertyDecl();
+      if (!PD) continue;
+      ObjCIvarDecl *IVar = nullptr;
+      // find the ivar from property_impls, or fall back to _propName convention
+      for (auto *PI : D->property_impls())
+        if (PI->getPropertyDecl() == PD) { IVar = PI->getPropertyIvarDecl(); break; }
+      std::string IVarName = IVar ? IVar->getNameAsString()
+                                  : "_" + PD->getNameAsString();
+      std::string IVarType = PrintType(IVar ? IVar->getType() : PD->getType());
+      std::string ClassName = D->getClassInterface()->getNameAsString();
+      std::string CName = MethodCName(M, D->getClassInterface());
+      std::string Fn;
+      llvm::raw_string_ostream FOS(Fn);
+      FOS << "static void *\n" << CName
+          << "(" << ClassName << " *self, mulle_objc_methodid_t _cmd, void *_param)\n{\n";
+      if (M->getSelector().getNumArgs() == 0)
+        FOS << "  return (void *)(intptr_t) self->" << IVarName << ";\n}\n";
+      else
+        FOS << "  self->" << IVarName << " = *(" << IVarType << " *)_param;\n  return NULL;\n}\n";
+      Rewrite.InsertTextBefore(D->getAtStartLoc(), Fn);
     } else if (M->hasBody())
       RewriteMethodDecl(M, D);
   }
 
-  // @synthesize: emit getter/setter C functions; @dynamic: no-op comment
+  // @synthesize: erase (accessor already emitted above); @dynamic: no-op comment
   for (auto *PI : D->property_impls()) {
+    SourceLocation Beg = PI->getBeginLoc();
+    if (Beg.isInvalid()) continue;  // implicit synthesize — no source to erase
     SourceLocation End = Lexer::findLocationAfterToken(
         PI->getSourceRange().getEnd(), tok::semi, *SM, LangOpts, false);
     if (End.isInvalid())
       End = PI->getSourceRange().getEnd();
-    unsigned Len = SM->getFileOffset(End) - SM->getFileOffset(PI->getBeginLoc());
-
-    if (PI->getPropertyImplementation() != ObjCPropertyImplDecl::Synthesize) {
-      Rewrite.ReplaceText(PI->getBeginLoc(), Len, "/* @dynamic is a no-op in mulle-objc */");
-      continue;
-    }
-
-    ObjCPropertyDecl *PD   = PI->getPropertyDecl();
-    ObjCIvarDecl    *IVar  = PI->getPropertyIvarDecl();
-    if (!PD || !IVar) {
-      Rewrite.ReplaceText(PI->getBeginLoc(), Len, "/* @synthesize (no ivar) */");
-      continue;
-    }
-
-    std::string ClassName = D->getClassInterface()->getNameAsString();
-    std::string IVarName  = IVar->getNameAsString();
-    std::string IVarType  = PrintType(IVar->getType());
-
-    // Find getter and setter stubs
-    std::string Accessors;
-    llvm::raw_string_ostream AOS(Accessors);
-    for (auto *M : D->methods()) {
-      if (!M->isSynthesizedAccessorStub()) continue;
-      std::string CName = MethodCName(M, D->getClassInterface());
-      std::string ObjCName = M->getSelector().getAsString();
-      AOS << "static void *\n" << CName
-          << "(" << ClassName << " *self, mulle_objc_methodid_t _cmd, void *_param)\n{\n";
-      if (M->getSelector().getNumArgs() == 0) {
-        // getter — return value via intptr_t cast (MetaABI scalar return)
-        AOS << "  return (void *)(intptr_t) self->" << IVarName << ";\n}\n";
-      } else {
-        // setter
-        AOS << "  self->" << IVarName << " = *(" << IVarType << " *)_param;\n  return NULL;\n}\n";
-      }
-    }
-    Rewrite.ReplaceText(PI->getBeginLoc(), Len, Accessors);
+    unsigned Len = SM->getFileOffset(End) - SM->getFileOffset(Beg);
+    std::string Comment = (PI->getPropertyImplementation() == ObjCPropertyImplDecl::Synthesize)
+        ? "/* @synthesize */" : "/* @dynamic */";
+    Rewrite.ReplaceText(Beg, Len, Comment);
   }
 
   // Erase "@implementation ClassName" header line — find end of that line
