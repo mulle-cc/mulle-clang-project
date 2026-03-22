@@ -10,6 +10,7 @@
 #include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Lex/Lexer.h"
+#include <algorithm>
 #include "clang/Basic/TokenKinds.h"
 #include "clang/Rewrite/Core/Rewriter.h"
 #include "clang/Rewrite/Frontend/ASTConsumers.h"
@@ -81,6 +82,29 @@ public:
       Result = std::string(Buf->begin(), Buf->end());
     else
       Result = SM->getBufferData(SM->getMainFileID()).str();
+
+    // Replace #import with #include so the output is valid C.
+    // Also replace ObjC umbrella imports (import.h, import-private.h) with
+    // the runtime header — the rewriter has already processed all ObjC decls.
+    {
+      size_t pos = 0;
+      while ((pos = Result.find("#import", pos)) != std::string::npos) {
+        Result.replace(pos, 7, "#include");
+        pos += 8;
+      }
+      // Replace mulle-sde import.h / import-private.h with runtime header
+      auto replaceObjCImport = [&](const std::string &pat) {
+        size_t p = 0;
+        while ((p = Result.find(pat, p)) != std::string::npos) {
+          size_t lineEnd = Result.find('\n', p);
+          Result.replace(p, lineEnd - p,
+              "#include <mulle-objc-runtime/mulle-objc-runtime.h>");
+          p += 50;
+        }
+      };
+      replaceObjCImport("#include \"import.h\"");
+      replaceObjCImport("#include \"import-private.h\"");
+    }
 
     if (!NSStringDefs.empty()) {
       // Insert static NSConstantString globals after the last #include line
@@ -156,7 +180,18 @@ public:
 
     LOS << "static struct _mulle_objc_loadinfo OBJC_LOAD_INFO"
         << " __attribute__((used, section(\".data.objc.objc_load_info\"))) = {\n"
-        << "  { MULLE_OBJC_RUNTIME_LOAD_VERSION, 0, 0, 0, 0 },\n"
+        << "  { MULLE_OBJC_RUNTIME_LOAD_VERSION, MULLE_OBJC_RUNTIME_VERSION, 0, 0,\n"
+        << "    0\n"
+        << "#ifdef __MULLE_OBJC_NO_TPS__\n"
+        << "    | _mulle_objc_loadinfo_notaggedptrs\n"
+        << "#endif\n"
+        << "#ifdef __MULLE_OBJC_NO_FCS__\n"
+        << "    | _mulle_objc_loadinfo_nofastcalls\n"
+        << "#endif\n"
+        << "#ifdef __MULLE_OBJC_TAO__\n"
+        << "    | _mulle_objc_loadinfo_threadaffineobjects\n"
+        << "#endif\n"
+        << "  },\n"
         << "  0,\n"  // loaduniverse
         << "  " << (LoadClasses.empty()    ? "0" : "(struct _mulle_objc_loadclasslist *)&OBJC_CLASS_LOADS") << ",\n"
         << "  " << (LoadCategories.empty() ? "0" : "(struct _mulle_objc_loadcategorylist *)&OBJC_CATEGORY_LOADS") << ",\n"
@@ -927,11 +962,12 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
     Receiver = "self";
     ObjCInterfaceDecl *Super = CurrentClass ? CurrentClass->getSuperClass() : nullptr;
     std::string SuperClassName = Super ? Super->getNameAsString() : "";
+    std::string CallerClassName = CurrentClass ? CurrentClass->getNameAsString() : "";
     std::string SelName = E->getSelector().getAsString();
-    // superid = hash("SuperClassName;selectorName")
-    std::string superKey = SuperClassName + ";" + SelName;
+    // superid = hash("CallerClass;selectorName") — matches codegen GetSuperIdentifier
+    std::string superKey = CallerClassName + ";" + SelName;
     uint32_t superHash  = MulleObjCUniqueIdHashForString(superKey);
-    uint32_t classHash  = MulleObjCUniqueIdHashForString(SuperClassName);
+    uint32_t classHash  = MulleObjCUniqueIdHashForString(CallerClassName);
     uint32_t methodHash = MulleObjCUniqueIdHashForString(SelName);
     llvm::raw_string_ostream SOS(SuperId);
     SOS << "(mulle_objc_superid_t) 0x"; SOS.write_hex(superHash); SOS << "UL";
@@ -1114,6 +1150,12 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
     for (auto *M : D->methods())
       if (!M->isSynthesizedAccessorStub())
         (M->isInstanceMethod() ? IMethods : CMethods).push_back(M);
+    auto sortMethods = [](ObjCMethodDecl *A, ObjCMethodDecl *B) {
+      return (int32_t)MulleObjCUniqueIdHashForString(A->getSelector().getAsString())
+           < (int32_t)MulleObjCUniqueIdHashForString(B->getSelector().getAsString());
+    };
+    std::sort(IMethods.begin(), IMethods.end(), sortMethods);
+    std::sort(CMethods.begin(), CMethods.end(), sortMethods);
 
     auto EmitMethodList = [&](const std::string &VarName,
                                const std::vector<ObjCMethodDecl *> &Methods) {
@@ -1140,7 +1182,8 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
           cname = MethodCName(M, D->getClassInterface());
         OS << "    { { (mulle_objc_methodid_t) 0x";
         OS.write_hex(selId);
-        OS << "U, \"\", \"" << sel << "\", 0x200000 }, (mulle_objc_implementation_t) " << cname << " },\n";
+        std::string methSig = Context->getObjCEncodingForMethodDecl(M);
+        OS << "U, \"" << methSig << "\", \"" << sel << "\", 0x200000 }, (mulle_objc_implementation_t) " << cname << " },\n";
       }
       OS << "  }\n};\n";
     };
@@ -1237,6 +1280,14 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
     for (auto *M : D->methods())
       if (!M->isSynthesizedAccessorStub())
         (M->isInstanceMethod() ? IMethods : CMethods).push_back(M);
+    {
+      auto sortMethods = [](ObjCMethodDecl *A, ObjCMethodDecl *B) {
+        return (int32_t)MulleObjCUniqueIdHashForString(A->getSelector().getAsString())
+             < (int32_t)MulleObjCUniqueIdHashForString(B->getSelector().getAsString());
+      };
+      std::sort(IMethods.begin(), IMethods.end(), sortMethods);
+      std::sort(CMethods.begin(), CMethods.end(), sortMethods);
+    }
 
     auto EmitMethodList = [&](const std::string &VarName,
                                const std::vector<ObjCMethodDecl *> &Methods) {
@@ -1262,7 +1313,8 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
           cname = MethodCName(M, D->getClassInterface());
         OS << "    { { (mulle_objc_methodid_t) 0x";
         OS.write_hex(selId);
-        OS << "U, \"\", \"" << sel << "\", 0x200000 }, (mulle_objc_implementation_t) " << cname << " },\n";
+        std::string methSig = Context->getObjCEncodingForMethodDecl(M);
+        OS << "U, \"" << methSig << "\", \"" << sel << "\", 0x200000 }, (mulle_objc_implementation_t) " << cname << " },\n";
       }
       OS << "  }\n};\n";
     };
