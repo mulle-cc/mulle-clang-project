@@ -187,7 +187,7 @@ public:
       LOS << "  }\n};\n";
     }
 
-    LOS << "static struct _mulle_objc_loadinfo OBJC_LOAD_INFO"
+    LOS << "static struct _mulle_objc_loadinfo OBJC_IMAGE_INFO"
         << " __attribute__((used, section(\".data.objc.objc_load_info\"))) = {\n"
         << "  { MULLE_OBJC_RUNTIME_LOAD_VERSION, MULLE_OBJC_RUNTIME_VERSION, 0, 0,\n"
         << "    0\n"
@@ -212,7 +212,7 @@ public:
     LOS << "\nstatic void __attribute__((constructor))\n"
            "__load_mulle_objc(void)\n"
            "{\n"
-           "  mulle_objc_loadinfo_enqueue_nofail(&OBJC_LOAD_INFO);\n"
+           "  mulle_objc_loadinfo_enqueue_nofail(&OBJC_IMAGE_INFO);\n"
            "}\n";
 
     *OutFile << Load;
@@ -515,7 +515,13 @@ void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
       std::string CName = MethodCName(M, D->getClassInterface());
       std::string Fn;
       llvm::raw_string_ostream FOS(Fn);
+      std::string ObjCName = (M->isInstanceMethod() ? "-[" : "+[")
+          + D->getClassInterface()->getNameAsString() + " "
+          + M->getSelector().getAsString() + "]";
       FOS << "static void *\n" << CName
+          << "(" << ClassName << " *self, mulle_objc_methodid_t _cmd, void *_param)"
+          << " __asm__(\"" << ObjCName << "\");\n"
+          << "static void *\n" << CName
           << "(" << ClassName << " *self, mulle_objc_methodid_t _cmd, void *_param)\n{\n";
       if (M->getSelector().getNumArgs() == 0)
         FOS << "  return (void *)(intptr_t) self->" << IVarName << ";\n}\n";
@@ -1059,7 +1065,7 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
     std::string hex;
     llvm::raw_string_ostream HS(hex);
     HS << "0x"; HS.write_hex(classId); HS << "U";
-    Receiver = "mulle_objc_global_lookup_infraclass_inline_nofail(0, (mulle_objc_classid_t) " + hex + ")";
+    Receiver = "mulle_objc_global_lookup_infraclass_nofail(0, (mulle_objc_classid_t) " + hex + ")";
   }
 
   // Selector hash
