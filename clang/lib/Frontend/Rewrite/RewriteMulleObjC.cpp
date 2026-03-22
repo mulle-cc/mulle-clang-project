@@ -1267,7 +1267,8 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
   for (auto *D : LoadClasses) {
     ObjCInterfaceDecl *ID = D->getClassInterface();
     std::string ClassName = ID->getNameAsString();
-    std::string VarBase = "OBJC_CLASS_$_" + ClassName;
+    std::string VarBase    = "OBJC_CLASS___" + ClassName;  // C-safe name
+    std::string VarAsmName = "OBJC_CLASS_$_" + ClassName;  // linker symbol
     ClassVarNames.push_back(VarBase);
 
     uint32_t classId    = MulleObjCUniqueIdHashForString(ClassName);
@@ -1444,6 +1445,7 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
     // --- loadclass struct ---
     // instancesize = sizeof(ClassName) — emit as expression
     OS << "static struct _mulle_objc_loadclass " << VarBase
+       << " __asm__(\"" << VarAsmName << "\")"
        << " __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n"
        << "  (mulle_objc_classid_t) 0x"; OS.write_hex(classId);
     OS << "U,\n  \"" << ClassName << "\",\n"
@@ -1497,7 +1499,8 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
     ObjCInterfaceDecl *ID  = D->getClassInterface();
     std::string ClassName  = ID->getNameAsString();
     std::string CatName    = D->getName().str();
-    std::string VarBase    = "OBJC_CATEGORY_$_" + ClassName + "_" + CatName;
+    std::string VarBase    = "OBJC_CATEGORY___" + ClassName + "_" + CatName;
+    std::string VarAsmName = "OBJC_CATEGORY_$_" + ClassName + "_" + CatName;
     CatVarNames.push_back(VarBase);
 
     uint32_t catId   = MulleObjCUniqueIdHashForString(CatName);
@@ -1640,6 +1643,7 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
     }
 
     OS << "static struct _mulle_objc_loadcategory " << VarBase
+       << " __asm__(\"" << VarAsmName << "\")"
        << " __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n"
        << "  (mulle_objc_categoryid_t) 0x"; OS.write_hex(catId);
     OS << "U,\n  \"" << CatName << "\",\n"
