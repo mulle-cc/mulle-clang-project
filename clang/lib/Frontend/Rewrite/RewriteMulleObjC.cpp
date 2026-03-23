@@ -10,6 +10,9 @@
 #include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Lex/Lexer.h"
+#include "clang/Lex/PPCallbacks.h"
+#include "clang/Lex/Preprocessor.h"
+#include "clang/Lex/Token.h"
 #include <algorithm>
 #include "clang/Basic/TokenKinds.h"
 #include "clang/Rewrite/Core/Rewriter.h"
@@ -31,10 +34,54 @@ extern "C" uint64_t MulleObjCChar7StringEncode64(char *src, size_t len);
 
 namespace {
 
+// @mulle-objc@ inline header rewriting >
+// Records #import directives from the main file so we can inline-rewrite them.
+struct ImportEntry {
+  SourceLocation HashLoc;   // location of '#' in main file
+  FileID         FID;       // FileID of the imported file
+  std::string    FilePath;  // resolved path
+  bool           IsAngled;  // <foo.h> vs "foo.h"
+};
+
+class MulleImportTracker : public PPCallbacks {
+  SourceManager              &SM;
+  FileID                      MainFID;
+  std::vector<ImportEntry>   &Imports;
+public:
+  MulleImportTracker(SourceManager &SM, FileID MainFID,
+                     std::vector<ImportEntry> &Imports)
+      : SM(SM), MainFID(MainFID), Imports(Imports) {}
+
+  void InclusionDirective(SourceLocation HashLoc,
+                          const Token &IncludeTok,
+                          StringRef FileName,
+                          bool IsAngled,
+                          CharSourceRange FilenameRange,
+                          OptionalFileEntryRef File,
+                          StringRef SearchPath,
+                          StringRef RelativePath,
+                          const Module *SuggestedModule,
+                          bool ModuleImported,
+                          SrcMgr::CharacteristicKind FileType) override
+  {
+    // Only care about #import (not #include) in the main file
+    if (IncludeTok.getIdentifierInfo()->getPPKeywordID() != tok::pp_import)
+      return;
+    if (SM.getFileID(HashLoc) != MainFID)
+      return;
+    if (!File)
+      return;
+    FileID FID = SM.getOrCreateFileID(*File, FileType);
+    Imports.push_back({ HashLoc, FID, std::string(File->getName()), IsAngled });
+  }
+};
+// @mulle-objc@ inline header rewriting <
+
 class RewriteMulleObjC : public ASTConsumer {
   Rewriter                    Rewrite;
   DiagnosticsEngine          &Diags;
   const LangOptions          &LangOpts;
+  Preprocessor               &PP;
   ASTContext                 *Context = nullptr;
   SourceManager              *SM      = nullptr;
   std::unique_ptr<raw_ostream> OutFile;
@@ -52,6 +99,9 @@ class RewriteMulleObjC : public ASTConsumer {
   struct SuperEntry { uint32_t superid; std::string name; uint32_t classid; uint32_t methodid; };
   std::vector<SuperEntry>     LoadSupers; // collected [super msg] calls
   bool                        HasObjCContent = false; // any ObjC seen?
+  // @mulle-objc@ inline header rewriting >
+  std::vector<ImportEntry>    Imports;   // #import directives from main file
+  // @mulle-objc@ inline header rewriting <
   // @mulle-objc@ autoreleasepool rewrite >
   bool                        NeedsAutoreleasePool = false;
   // @mulle-objc@ autoreleasepool rewrite <
@@ -61,14 +111,19 @@ public:
                    std::unique_ptr<raw_ostream> OS,
                    DiagnosticsEngine &Diags,
                    const LangOptions &LOpts,
-                   bool /*SilenceRewriteMacroWarning*/)
-      : Diags(Diags), LangOpts(LOpts),
+                   bool /*SilenceRewriteMacroWarning*/,
+                   Preprocessor &PP)
+      : Diags(Diags), LangOpts(LOpts), PP(PP),
         OutFile(std::move(OS)), InFileName(InFile) {}
 
   void Initialize(ASTContext &Ctx) override {
     Context = &Ctx;
     SM      = &Ctx.getSourceManager();
     Rewrite.setSourceMgr(*SM, LangOpts);
+    // @mulle-objc@ inline header rewriting >
+    PP.addPPCallbacks(std::make_unique<MulleImportTracker>(
+        *SM, SM->getMainFileID(), Imports));
+    // @mulle-objc@ inline header rewriting <
   }
 
   bool HandleTopLevelDecl(DeclGroupRef D) override {
@@ -2019,7 +2074,9 @@ clang::CreateMulleObjCRewriter(const std::string &InFile,
                                std::unique_ptr<raw_ostream> OS,
                                DiagnosticsEngine &Diags,
                                const LangOptions &LOpts,
-                               bool SilenceRewriteMacroWarning) {
+                               bool SilenceRewriteMacroWarning,
+                               Preprocessor &PP) {
   return std::make_unique<RewriteMulleObjC>(InFile, std::move(OS), Diags,
-                                            LOpts, SilenceRewriteMacroWarning);
+                                            LOpts, SilenceRewriteMacroWarning,
+                                            PP);
 }

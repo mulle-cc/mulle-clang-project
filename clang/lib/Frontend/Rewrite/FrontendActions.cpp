@@ -164,7 +164,8 @@ RewriteMulleObjCAction::CreateASTConsumer(CompilerInstance &CI,
           CI.createDefaultOutputFile(false, InFile, "c"))
     return CreateMulleObjCRewriter(std::string(InFile), std::move(OS),
                                    CI.getDiagnostics(), CI.getLangOpts(),
-                                   CI.getDiagnosticOpts().NoRewriteMacros);
+                                   CI.getDiagnosticOpts().NoRewriteMacros,
+                                   CI.getPreprocessor());
   return nullptr;
 }
 
