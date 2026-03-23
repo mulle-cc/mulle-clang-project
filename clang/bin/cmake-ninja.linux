@@ -62,12 +62,14 @@ then
 fi
 
 
+# if use compiler-rt in LLVM_ENABLE_PROJECTS i get a warning but it works
+# if i put it in LLVM_ENABLE_PROJECTS it errors out
 [ ! -d build ] && mkdir build
 cd build &&
 cmake \
    -DLLVM_BUILD_LLVM_DYLIB='ON' \
    -DLLVM_BUILD_TESTS="OFF"  \
-   -DLLVM_ENABLE_PROJECTS="clang;compiler-rt" \
+   -DLLVM_ENABLE_PROJECTS="clang;compiler-rt;clang-tools-extra" \
    -DLLVM_ENABLE_RUNTIMES="libcxxabi;libcxx;libunwind"  \
    -DLLVM_LINK_LLVM_DYLIB=ON \
    -DLLVM_PARALLEL_LINK_JOBS=$LINK_JOBS \
@@ -104,7 +106,7 @@ do
          ${INSTALL_SUDO} mv "$bin" "mulle-nm" || exit 1
       ;;
 
-      analyze-build*|scan-build*)
+      analyze-build*|scan-build*|clangd|clangd-indexer)
          ${INSTALL_SUDO} mv "$bin" "mulle-${bin}" || exit 1
       ;;
 

@@ -102,15 +102,7 @@ public:
 
     // Only track imports from main file or from other #import'd files.
     // Angled imports (#import <Foo/Foo.h>) are framework/library headers — drop.
-    // mulle-sde umbrella shims in system include paths (import.h,
-    // import-private.h) are replaced by the runtime header, not inlined.
     if (IsAngled) return;
-    if (SM.isInSystemHeader(HashLoc)) return;
-    StringRef base = llvm::sys::path::filename(StringRef(File->getName()));
-    if ((base == "import.h" || base == "import-private.h") &&
-        SM.isInSystemHeader(SM.getLocForStartOfFile(
-            SM.getOrCreateFileID(*File, FileType))))
-      return;
 
     if (fromFID == MainFID || ImportedFIDs.count(fromFID))
       Pending_.push_back({ HashLoc, std::string(File->getName()), IsAngled, fromFID });

@@ -24,7 +24,7 @@ cd build &&
 cmake.exe \
    -DLLVM_BUILD_LLVM_DYLIB=OFF \
    -DLLVM_BUILD_TESTS="OFF"  \
-   -DLLVM_ENABLE_PROJECTS="clang" \
+   -DLLVM_ENABLE_PROJECTS="clang;clang-tools-extra" \
    -DLLVM_ENABLE_RUNTIMES=""  \
    -DLLVM_PARALLEL_LINK_JOBS=2 \
    -DLLVM_TARGETS_TO_BUILD="X86;ARM;AArch64" \
