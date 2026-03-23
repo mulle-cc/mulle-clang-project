@@ -123,8 +123,16 @@ public:
     FileID FID = SM.getFileID(Loc);
     if (FID.isInvalid()) return;
 
-    // Match pending import to this FileID
-    auto &P = Pending_.back();
+    // Match by file path, not by position — #includes also fire FileChanged
+    // and would cause back() to match the wrong pending entry.
+    auto FERef = SM.getFileEntryRefForID(FID);
+    if (!FERef) return;
+    StringRef EnteredPath = FERef->getName();
+    auto it = std::find_if(Pending_.begin(), Pending_.end(),
+                           [&](const Pending &P) { return P.FilePath == EnteredPath; });
+    if (it == Pending_.end()) return;
+    auto P = *it;
+    Pending_.erase(it);
     // Find the parent's children list
     std::vector<ImportEntry> *parentList = &Imports;
     for (auto &s : Stack_)
@@ -134,7 +142,6 @@ public:
     ImportedFIDs.insert(FID);
     // Push this file onto the stack so its nested #imports attach to it
     Stack_.push_back({ FID, &parentList->back().Children });
-    Pending_.pop_back();
   }
 };
 // @mulle-objc@ inline header rewriting <
