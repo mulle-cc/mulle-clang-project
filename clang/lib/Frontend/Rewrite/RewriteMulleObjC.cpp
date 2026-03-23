@@ -88,48 +88,45 @@ public:
     else
       Result = SM->getBufferData(SM->getMainFileID()).str();
 
-    // Replace #import with #include so the output is valid C.
-    // Also replace ObjC umbrella imports (import.h, import-private.h) with
-    // the runtime header — the rewriter has already processed all ObjC decls.
+    // Drop #import lines — ObjC declarations from imported headers are already
+    // rewritten into the C output by the rewriter. Keeping #import as #include
+    // would pull in ObjC syntax that a plain C compiler can't handle.
+    // #include lines (already C-compatible) are kept as-is.
+    // @mulle-objc@ drop #import lines >
     {
       size_t pos = 0;
       while ((pos = Result.find("#import", pos)) != std::string::npos) {
-        Result.replace(pos, 7, "#include");
-        pos += 8;
+        size_t lineEnd = Result.find('\n', pos);
+        if (lineEnd == std::string::npos) lineEnd = Result.size() - 1;
+        Result.erase(pos, lineEnd - pos + 1);
       }
-      // Replace mulle-sde import.h / import-private.h with runtime header
-      auto replaceObjCImport = [&](const std::string &pat) {
-        size_t p = 0;
-        while ((p = Result.find(pat, p)) != std::string::npos) {
-          size_t lineEnd = Result.find('\n', p);
-          Result.replace(p, lineEnd - p,
-              "#include <mulle-objc-runtime/mulle-objc-runtime.h>");
-          p += 50;
-        }
-      };
-      replaceObjCImport("#include \"import.h\"");
-      replaceObjCImport("#include \"import-private.h\"");
-
-      // Prepend TPS/FCS/TAO defines at the very top of the output so the C
-      // output is self-contained regardless of whether the runtime header is
-      // included directly or transitively via a user header.
-      // Mirror the actual lang options. The #ifndef guards make this safe to
-      // emit unconditionally.
-      // @mulle-objc@ emit correct TPS/FCS/TAO based on lang options >
-      {
-        std::string tps = LangOpts.ObjCDisableTaggedPointers
-            ? "#ifndef __MULLE_OBJC_NO_TPS__\n# define __MULLE_OBJC_NO_TPS__\n#endif\n"
-            : "#ifndef __MULLE_OBJC_TPS__\n# define __MULLE_OBJC_TPS__\n#endif\n";
-        std::string fcs = LangOpts.ObjCDisableFastCalls
-            ? "#ifndef __MULLE_OBJC_NO_FCS__\n# define __MULLE_OBJC_NO_FCS__\n#endif\n"
-            : "#ifndef __MULLE_OBJC_FCS__\n# define __MULLE_OBJC_FCS__\n#endif\n";
-        std::string tao = LangOpts.ObjCEnableThreadAffineObjects
-            ? "#ifndef __MULLE_OBJC_TAO__\n# define __MULLE_OBJC_TAO__\n#endif\n"
-            : "#ifndef __MULLE_OBJC_NO_TAO__\n# define __MULLE_OBJC_NO_TAO__\n#endif\n";
-        Result.insert(0, tps + fcs + tao);
-      }
-      // @mulle-objc@ emit correct TPS/FCS/TAO based on lang options <
     }
+    // @mulle-objc@ drop #import lines <
+    // If the source used mulle-sde import.h (now dropped), we still need the
+    // runtime header. Emit it unconditionally — the include guard makes
+    // double-inclusion safe.
+    if (Result.find("#include <mulle-objc-runtime/mulle-objc-runtime.h>") == std::string::npos)
+      Result.insert(0, "#include <mulle-objc-runtime/mulle-objc-runtime.h>\n");
+
+    // Prepend TPS/FCS/TAO defines at the very top of the output so the C
+    // output is self-contained regardless of whether the runtime header is
+    // included directly or transitively via a user header.
+    // Mirror the actual lang options. The #ifndef guards make this safe to
+    // emit unconditionally.
+    // @mulle-objc@ emit correct TPS/FCS/TAO based on lang options >
+    {
+      std::string tps = LangOpts.ObjCDisableTaggedPointers
+          ? "#ifndef __MULLE_OBJC_NO_TPS__\n# define __MULLE_OBJC_NO_TPS__\n#endif\n"
+          : "#ifndef __MULLE_OBJC_TPS__\n# define __MULLE_OBJC_TPS__\n#endif\n";
+      std::string fcs = LangOpts.ObjCDisableFastCalls
+          ? "#ifndef __MULLE_OBJC_NO_FCS__\n# define __MULLE_OBJC_NO_FCS__\n#endif\n"
+          : "#ifndef __MULLE_OBJC_FCS__\n# define __MULLE_OBJC_FCS__\n#endif\n";
+      std::string tao = LangOpts.ObjCEnableThreadAffineObjects
+          ? "#ifndef __MULLE_OBJC_TAO__\n# define __MULLE_OBJC_TAO__\n#endif\n"
+          : "#ifndef __MULLE_OBJC_NO_TAO__\n# define __MULLE_OBJC_NO_TAO__\n#endif\n";
+      Result.insert(0, tps + fcs + tao);
+    }
+    // @mulle-objc@ emit correct TPS/FCS/TAO based on lang options <
 
     // Strip ARC ownership qualifiers — not valid in plain C.
     for (const char *kw : {"__unsafe_unretained ", "__strong ", "__weak ", "__autoreleasing "}) {
