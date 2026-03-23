@@ -914,7 +914,34 @@ void RewriteMulleObjC::RewriteInterfaceDecl(ObjCInterfaceDecl *D) {
 
   SourceLocation EndLoc = Lexer::getLocForEndOfToken(
       D->getAtEndRange().getEnd(), 0, *SM, LangOpts);
-  SourceRange R(D->getAtStartLoc(), EndLoc.getLocWithOffset(-1));
+  // @mulle-objc@ strip objc_root_class attribute >
+  // __attribute__((objc_root_class)) before @interface has no meaning in C output
+  SourceLocation StartLoc = D->getAtStartLoc();
+  {
+    const char *buf = SM->getCharacterData(StartLoc);
+    const char *fileStart = SM->getCharacterData(SM->getLocForStartOfFile(SM->getFileID(StartLoc)));
+    // skip back past spaces/tabs on the current line only
+    const char *p = buf - 1;
+    while (p >= fileStart && (*p == ' ' || *p == '\t')) --p;
+    // skip one newline
+    if (p >= fileStart && *p == '\n') { --p; if (p >= fileStart && *p == '\r') --p; }
+    // check for __attribute__((objc_root_class))
+    static const char kAttr[] = "__attribute__((objc_root_class))";
+    const size_t kLen = sizeof(kAttr) - 1;
+    if (p >= fileStart + (ptrdiff_t)(kLen - 1) &&
+        strncmp(p - kLen + 1, kAttr, kLen) == 0) {
+      const char *attrStart = p - kLen + 1;
+      // skip back past leading whitespace/newline before the attribute
+      while (attrStart > fileStart && (attrStart[-1] == ' ' || attrStart[-1] == '\t')) --attrStart;
+      if (attrStart > fileStart && attrStart[-1] == '\n') {
+        --attrStart;
+        if (attrStart > fileStart && attrStart[-1] == '\r') --attrStart;
+      }
+      StartLoc = StartLoc.getLocWithOffset(attrStart - buf);
+    }
+  }
+  // @mulle-objc@ strip objc_root_class attribute <
+  SourceRange R(StartLoc, EndLoc.getLocWithOffset(-1));
   ReplaceText(R, S);
   EmittedIvarStructs.insert(Name);
 }
@@ -1086,6 +1113,8 @@ std::string RewriteMulleObjC::PrintType(QualType T) {
     return "void *";
   if (T->isObjCClassType())
     return "void *";
+  if (T->isObjCSelType())
+    return "mulle_objc_methodid_t";
   // id * -> void ** (pointer to ObjC object pointer)
   if (auto *PT = T->getAs<PointerType>()) {
     QualType Pointee = PT->getPointeeType();
@@ -2014,7 +2043,7 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
         uint32_t getterId = MulleObjCUniqueIdHashForString(PD->getGetterName().getAsString());
         uint32_t setterId = PD->isReadOnly() ? 0
             : MulleObjCUniqueIdHashForString(PD->getSetterName().getAsString());
-        std::string sig = Context->getObjCEncodingForPropertyDecl(PD, nullptr);
+        std::string sig = Context->getObjCEncodingForPropertyDecl(PD, D);
         L << "         { .propertyid = (mulle_objc_propertyid_t) 0x";
         L.write_hex(propId);
         L << "U,\n           .ivarid     = (mulle_objc_ivarid_t) 0x";
@@ -2223,7 +2252,7 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
         uint32_t getterId = MulleObjCUniqueIdHashForString(PD->getGetterName().getAsString());
         uint32_t setterId = PD->isReadOnly() ? 0
             : MulleObjCUniqueIdHashForString(PD->getSetterName().getAsString());
-        std::string sig = Context->getObjCEncodingForPropertyDecl(PD, nullptr);
+        std::string sig = Context->getObjCEncodingForPropertyDecl(PD, D);
         L << "         { .propertyid = (mulle_objc_propertyid_t) 0x";
         L.write_hex(propId);
         L << "U,\n           .ivarid     = (mulle_objc_ivarid_t) 0x";
