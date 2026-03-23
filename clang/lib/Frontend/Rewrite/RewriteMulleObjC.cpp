@@ -18,6 +18,7 @@
 #include "clang/Rewrite/Core/Rewriter.h"
 #include "clang/Rewrite/Frontend/ASTConsumers.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/Path.h"
 #include <memory>
 #include <set>
 #include <vector>
@@ -38,7 +39,7 @@ namespace {
 // Records #import directives from the main file so we can inline-rewrite them.
 struct ImportEntry {
   SourceLocation HashLoc;   // location of '#' in main file
-  FileID         FID;       // FileID of the imported file
+  FileID         FID;       // FileID of the imported file (set after FileChanged)
   std::string    FilePath;  // resolved path
   bool           IsAngled;  // <foo.h> vs "foo.h"
 };
@@ -47,6 +48,9 @@ class MulleImportTracker : public PPCallbacks {
   SourceManager              &SM;
   FileID                      MainFID;
   std::vector<ImportEntry>   &Imports;
+  // Pending import waiting for FileChanged to assign its FileID
+  struct Pending { SourceLocation HashLoc; std::string FilePath; bool IsAngled; };
+  std::vector<Pending>        Pending_;
 public:
   MulleImportTracker(SourceManager &SM, FileID MainFID,
                      std::vector<ImportEntry> &Imports)
@@ -71,8 +75,23 @@ public:
       return;
     if (!File)
       return;
-    FileID FID = SM.getOrCreateFileID(*File, FileType);
-    Imports.push_back({ HashLoc, FID, std::string(File->getName()), IsAngled });
+    // FileID not yet assigned — record as pending, resolved in FileChanged
+    Pending_.push_back({ HashLoc, std::string(File->getName()), IsAngled });
+  }
+
+  void FileChanged(SourceLocation Loc, FileChangeReason Reason,
+                   SrcMgr::CharacteristicKind FileType,
+                   FileID PrevFID) override
+  {
+    if (Reason != EnterFile || Pending_.empty())
+      return;
+    FileID FID = SM.getFileID(Loc);
+    if (FID == MainFID || FID.isInvalid())
+      return;
+    // Match the most recently pending import to this FileID
+    auto &P = Pending_.back();
+    Imports.push_back({ P.HashLoc, FID, P.FilePath, P.IsAngled });
+    Pending_.pop_back();
   }
 };
 // @mulle-objc@ inline header rewriting <
@@ -143,20 +162,7 @@ public:
     else
       Result = SM->getBufferData(SM->getMainFileID()).str();
 
-    // Drop #import lines — ObjC declarations from imported headers are already
-    // rewritten into the C output by the rewriter. Keeping #import as #include
-    // would pull in ObjC syntax that a plain C compiler can't handle.
-    // #include lines (already C-compatible) are kept as-is.
-    // @mulle-objc@ drop #import lines >
-    {
-      size_t pos = 0;
-      while ((pos = Result.find("#import", pos)) != std::string::npos) {
-        size_t lineEnd = Result.find('\n', pos);
-        if (lineEnd == std::string::npos) lineEnd = Result.size() - 1;
-        Result.erase(pos, lineEnd - pos + 1);
-      }
-    }
-    // @mulle-objc@ drop #import lines <
+    // @mulle-objc@ inline header rewriting (splice happens later, after post-processing) <
     // If the source used mulle-sde import.h (now dropped), we still need the
     // runtime header. Emit it unconditionally — the include guard makes
     // double-inclusion safe.
@@ -356,6 +362,72 @@ public:
       Result.insert(pos, macros);
     }
 
+    // @mulle-objc@ inline header rewriting >
+    // Replace each #import line with the rewritten content of that header.
+    // Done AFTER all post-processing so macros/TPS are only in the main file.
+    if (!Imports.empty()) {
+      // Build lookup by filename (quoted and angled forms)
+      std::map<std::string, const ImportEntry *> importByName;
+      for (const auto &IE : Imports) {
+        std::string key = IE.IsAngled
+            ? "#import <" + llvm::sys::path::filename(IE.FilePath).str() + ">"
+            : "#import \"" + llvm::sys::path::filename(IE.FilePath).str() + "\"";
+        importByName[key] = &IE;
+        // Also index by full path form in case filename differs
+        importByName["#import \"" + IE.FilePath + "\""] = &IE;
+      }
+
+      std::string Spliced;
+      Spliced.reserve(Result.size() * 2);
+      size_t pos = 0;
+      while (pos < Result.size()) {
+        size_t imp = Result.find("#import", pos);
+        if (imp == std::string::npos) {
+          Spliced.append(Result, pos, std::string::npos);
+          break;
+        }
+        Spliced.append(Result, pos, imp - pos);
+        size_t lineEnd = Result.find('\n', imp);
+        if (lineEnd == std::string::npos) lineEnd = Result.size();
+        std::string line = Result.substr(imp, lineEnd - imp);
+
+        // Find matching ImportEntry by scanning all entries
+        const ImportEntry *IE = nullptr;
+        for (const auto &kv : importByName) {
+          if (line.find(kv.first.substr(8)) != std::string::npos) { // strip "#import"
+            IE = kv.second;
+            break;
+          }
+        }
+        if (!IE) {
+          // Try matching by any substring of the line containing a known filename
+          for (const auto &entry : Imports) {
+            std::string fname = llvm::sys::path::filename(entry.FilePath).str();
+            if (line.find(fname) != std::string::npos) {
+              IE = &entry;
+              break;
+            }
+          }
+        }
+
+        if (IE) {
+          const RewriteBuffer &HBuf = Rewrite.getEditBuffer(IE->FID);
+          Spliced.append("/* begin: ");
+          Spliced.append(IE->FilePath);
+          Spliced.append(" */\n");
+          Spliced.append(HBuf.begin(), HBuf.end());
+          Spliced.append("\n/* end: ");
+          Spliced.append(IE->FilePath);
+          Spliced.append(" */\n");
+        }
+        // else: untracked #import, drop it
+
+        pos = (lineEnd < Result.size()) ? lineEnd + 1 : Result.size();
+      }
+      Result = std::move(Spliced);
+    }
+    // @mulle-objc@ inline header rewriting <
+
     *OutFile << Result;
 
     // Emit load info and constructor
@@ -502,6 +574,17 @@ private:
 void RewriteMulleObjC::HandleTopLevelSingleDecl(Decl *D) {
   if (!D || D->isInvalidDecl()) return;
   if (SM->isInSystemHeader(D->getLocation())) return;
+
+  // @mulle-objc@ inline header rewriting >
+  bool isMainFile = (SM->getFileID(D->getLocation()) == SM->getMainFileID());
+  // @implementation in a header is an error (would generate duplicate load structs)
+  if (!isMainFile && D->getKind() == Decl::ObjCImplementation) {
+    Diags.Report(D->getLocation(), Diags.getCustomDiagID(
+        DiagnosticsEngine::Error,
+        "--mulle-objc-emit-c: @implementation in imported header is not supported"));
+    return;
+  }
+  // @mulle-objc@ inline header rewriting <
 
   switch (D->getKind()) {
   case Decl::ObjCInterface: {
@@ -724,7 +807,9 @@ void RewriteMulleObjC::RewriteInterfaceDecl(ObjCInterfaceDecl *D) {
      << "typedef struct { " << Guard << " } OBJC_CLASS_" << Name << ";";
   // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef <
 
-  SourceRange R(D->getAtStartLoc(), D->getEndLoc().getLocWithOffset(3));
+  SourceLocation EndLoc = Lexer::getLocForEndOfToken(
+      D->getAtEndRange().getEnd(), 0, *SM, LangOpts);
+  SourceRange R(D->getAtStartLoc(), EndLoc.getLocWithOffset(-1));
   ReplaceText(R, S);
   EmittedIvarStructs.insert(Name);
 }
