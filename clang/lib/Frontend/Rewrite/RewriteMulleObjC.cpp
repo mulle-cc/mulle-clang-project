@@ -290,43 +290,47 @@ public:
       LOS << "static struct {\n"
           << "  unsigned int n_supers;\n"
           << "  struct _mulle_objc_super supers[" << LoadSupers.size() << "];\n"
-          << "} OBJC_SUPER_LOADS __attribute__((used, section(\".data.objc.objc_load_info\"))) = {\n"
-          << "  " << LoadSupers.size() << ",\n  {\n";
+          << "} OBJC_SUPER_LOADS __attribute__((used, section(\".data.objc.objc_load_info\"))) =\n{\n"
+          << "   .n_supers = " << LoadSupers.size() << ",\n"
+          << "   .supers   =\n   {\n";
       for (auto &SE : LoadSupers) {
-        LOS << "    { (mulle_objc_superid_t) 0x";
+        LOS << "      { .superid  = (mulle_objc_superid_t) 0x";
         LOS.write_hex(SE.superid);
-        LOS << "U, \"" << SE.name << "\","
-            << " (mulle_objc_classid_t) 0x";
+        LOS << "U,\n        .name     = \"" << SE.name << "\",\n"
+            << "        .classid  = (mulle_objc_classid_t) 0x";
         LOS.write_hex(SE.classid);
-        LOS << "U,"
-            << " (mulle_objc_methodid_t) 0x";
+        LOS << "U,\n        .methodid = (mulle_objc_methodid_t) 0x";
         LOS.write_hex(SE.methodid);
         LOS << "UL },\n";
       }
-      LOS << "  }\n};\n";
+      LOS << "   }\n};\n";
     }
 
     if (HasObjCContent) {
     LOS << "static struct _mulle_objc_loadinfo OBJC_IMAGE_INFO"
-        << " __attribute__((used, section(\".data.objc.objc_load_info\"))) = {\n"
-        << "  { MULLE_OBJC_RUNTIME_LOAD_VERSION, MULLE_OBJC_RUNTIME_VERSION, 0, 0,\n"
-        << "    0\n"
+        << " __attribute__((used, section(\".data.objc.objc_load_info\"))) =\n{\n"
+        << "   .version =\n   {\n"
+        << "      .load      = MULLE_OBJC_RUNTIME_LOAD_VERSION,\n"
+        << "      .runtime   = MULLE_OBJC_RUNTIME_VERSION,\n"
+        << "      .foundation = 0,\n"
+        << "      .user      = 0,\n"
+        << "      .bits      = 0\n"
         << "#ifdef __MULLE_OBJC_NO_TPS__\n"
-        << "    | _mulle_objc_loadinfo_notaggedptrs\n"
+        << "                   | _mulle_objc_loadinfo_notaggedptrs\n"
         << "#endif\n"
         << "#ifdef __MULLE_OBJC_NO_FCS__\n"
-        << "    | _mulle_objc_loadinfo_nofastcalls\n"
+        << "                   | _mulle_objc_loadinfo_nofastcalls\n"
         << "#endif\n"
         << "#ifdef __MULLE_OBJC_TAO__\n"
-        << "    | _mulle_objc_loadinfo_threadaffineobjects\n"
+        << "                   | _mulle_objc_loadinfo_threadaffineobjects\n"
         << "#endif\n"
-        << "  },\n"
-        << "  0,\n"  // loaduniverse
-        << "  " << (LoadClasses.empty()    ? "0" : "(struct _mulle_objc_loadclasslist *)&OBJC_CLASS_LOADS") << ",\n"
-        << "  " << (LoadCategories.empty() ? "0" : "(struct _mulle_objc_loadcategorylist *)&OBJC_CATEGORY_LOADS") << ",\n"
-        << "  " << (LoadSupers.empty()     ? "0" : "(struct _mulle_objc_superlist *)&OBJC_SUPER_LOADS") << ",\n"
-        << "  " << (NSStringPtrs.empty() ? "0" : "(struct _mulle_objc_loadstringlist *)&OBJC_STATICSTRING_LOADS") << ",\n"
-        << "  " << (LoadClasses.empty() ? "0" : "(struct _mulle_objc_loadhashedstringlist *)&OBJC_HASHNAME_LOADS") << "\n"
+        << "   },\n"
+        << "   .loaduniverse         = 0,\n"
+        << "   .loadclasslist        = " << (LoadClasses.empty()    ? "0" : "(struct _mulle_objc_loadclasslist *)&OBJC_CLASS_LOADS") << ",\n"
+        << "   .loadcategorylist     = " << (LoadCategories.empty() ? "0" : "(struct _mulle_objc_loadcategorylist *)&OBJC_CATEGORY_LOADS") << ",\n"
+        << "   .loadsuperlist        = " << (LoadSupers.empty()     ? "0" : "(struct _mulle_objc_superlist *)&OBJC_SUPER_LOADS") << ",\n"
+        << "   .loadstringlist       = " << (NSStringPtrs.empty()   ? "0" : "(struct _mulle_objc_loadstringlist *)&OBJC_STATICSTRING_LOADS") << ",\n"
+        << "   .loadhashedstringlist = " << (LoadClasses.empty()    ? "0" : "(struct _mulle_objc_loadhashedstringlist *)&OBJC_HASHNAME_LOADS") << "\n"
         << "};\n";
 
     LOS << "\nstatic void __attribute__((constructor))\n"
@@ -1676,13 +1680,14 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
      << "  unsigned int n_loadclasses;\n"
      << "  struct _mulle_objc_loadclass *loadclasses[" << ClassVarNames.size() << "];\n"
      << "} OBJC_CLASS_LOADS"
-     << " __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n"
-     << "  " << ClassVarNames.size() << ",\n  {";
+     << " __attribute__((used,section(\".data.objc.objc_load_info\"))) =\n{\n"
+     << "   .n_loadclasses = " << ClassVarNames.size() << ",\n"
+     << "   .loadclasses   =\n   {";
   for (unsigned i = 0; i < ClassVarNames.size(); ++i) {
     if (i) OS << ",";
-    OS << "\n    &" << ClassVarNames[i];
+    OS << "\n      &" << ClassVarNames[i];
   }
-  OS << "\n  }\n};\n";
+  OS << "\n   }\n};\n";
 
   return Out;
 }
@@ -1867,13 +1872,14 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
      << "  unsigned int n_loadcategories;\n"
      << "  struct _mulle_objc_loadcategory *loadcategories[" << CatVarNames.size() << "];\n"
      << "} OBJC_CATEGORY_LOADS"
-     << " __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n"
-     << "  " << CatVarNames.size() << ",\n  {";
+     << " __attribute__((used,section(\".data.objc.objc_load_info\"))) =\n{\n"
+     << "   .n_loadcategories = " << CatVarNames.size() << ",\n"
+     << "   .loadcategories   =\n   {";
   for (unsigned i = 0; i < CatVarNames.size(); ++i) {
     if (i) OS << ",";
-    OS << "\n    &" << CatVarNames[i];
+    OS << "\n      &" << CatVarNames[i];
   }
-  OS << "\n  }\n};\n";
+  OS << "\n   }\n};\n";
   return Out;
 }
 
@@ -1915,14 +1921,15 @@ std::string RewriteMulleObjC::EmitHashNameList() {
      << "  unsigned int n_loadentries;\n"
      << "  struct _mulle_objc_loadhashedstring loadentries[" << entries.size() << "];\n"
      << "} OBJC_HASHNAME_LOADS"
-     << " __attribute__((used,section(\".data.objc.objc_load_info\"))) = {\n"
-     << "  " << entries.size() << ",\n  {\n";
+     << " __attribute__((used,section(\".data.objc.objc_load_info\"))) =\n{\n"
+     << "   .n_loadentries = " << entries.size() << ",\n"
+     << "   .loadentries   =\n   {\n";
   for (auto &[h, s] : entries) {
-    OS << "    { (mulle_objc_uniqueid_t) 0x";
+    OS << "      { .uniqueid = (mulle_objc_uniqueid_t) 0x";
     OS.write_hex(h);
-    OS << "U, \"" << s << "\" },\n";
+    OS << "U, .string = \"" << s << "\" },\n";
   }
-  OS << "  }\n};\n";
+  OS << "   }\n};\n";
   return Out;
 }
 
