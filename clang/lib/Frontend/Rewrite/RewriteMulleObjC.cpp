@@ -1027,6 +1027,22 @@ std::string RewriteMulleObjC::PrintType(QualType T) {
       return "void **";
   }
   // @mulle-objc@ use OBJC_CLASS_ prefix for ObjC class pointer types <
+  // Anonymous struct/union with no typedef name — emit inline definition
+  // @mulle-objc@ anonymous struct/union ivar support >
+  if (auto *RT = T->getAs<RecordType>()) {
+    RecordDecl *RD = RT->getDecl();
+    // Only inline-expand if truly anonymous (no identifier AND no typedef name)
+    if (!RD->getIdentifier() && !RD->getTypedefNameForAnonDecl()) {
+      std::string S;
+      llvm::raw_string_ostream OS(S);
+      OS << (RD->isUnion() ? "union" : "struct") << " { ";
+      for (auto *FD : RD->fields())
+        OS << PrintType(FD->getType()) << " " << FD->getNameAsString() << "; ";
+      OS << "}";
+      return OS.str();
+    }
+  }
+  // @mulle-objc@ anonymous struct/union ivar support <
   // Everything else: use clang's printer
   std::string S;
   llvm::raw_string_ostream OS(S);
