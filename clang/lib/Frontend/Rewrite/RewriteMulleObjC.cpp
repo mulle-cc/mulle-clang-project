@@ -52,6 +52,9 @@ class RewriteMulleObjC : public ASTConsumer {
   struct SuperEntry { uint32_t superid; std::string name; uint32_t classid; uint32_t methodid; };
   std::vector<SuperEntry>     LoadSupers; // collected [super msg] calls
   bool                        HasObjCContent = false; // any ObjC seen?
+  // @mulle-objc@ autoreleasepool rewrite >
+  bool                        NeedsAutoreleasePool = false;
+  // @mulle-objc@ autoreleasepool rewrite <
 
 public:
   RewriteMulleObjC(const std::string &InFile,
@@ -178,6 +181,52 @@ public:
         "#define NSFastEnumerationState NSFastEnumerationState\n"
         "#endif\n");
     }
+
+    // @mulle-objc@ autoreleasepool rewrite >
+    // Emit pool push helper if @autoreleasepool was used.
+    // NSAutoreleasePool.h can't be included in plain C, so we emit the
+    // required struct and inline function directly.
+    if (NeedsAutoreleasePool) {
+      size_t pos = Result.rfind("\n#include");
+      if (pos != std::string::npos)
+        pos = Result.find('\n', pos + 1) + 1;
+      else
+        pos = 0;
+      Result.insert(pos,
+        "struct _mulle_objc_poolconfiguration\n"
+        "{\n"
+        "   void  (*autoreleaseObject)( struct _mulle_objc_poolconfiguration *, void *);\n"
+        "   void  (*autoreleaseObjects)( struct _mulle_objc_poolconfiguration *, void **, unsigned long, unsigned long);\n"
+        "   void  *tail;\n"
+        "   void  *poolClass;\n"
+        "   void  *(*push)( struct _mulle_objc_poolconfiguration *);\n"
+        "   void  (*pop)( struct _mulle_objc_poolconfiguration *, void *pool);\n"
+        "   int   releasing;\n"
+        "   int   trace;\n"
+        "   unsigned int maxObjects;\n"
+        "   void  *object_map;\n"
+        "   void  *_object_map[2];\n"
+        "};\n"
+        "struct _mulle_objc_threadfoundationinfo\n"
+        "{\n"
+        "   struct _mulle_objc_poolconfiguration poolconfig;\n"
+        "   void *instance_allocator;\n"
+        "};\n"
+        "extern struct _mulle_objc_threadfoundationinfo *\n"
+        "   mulle_objc_thread_get_threadfoundationinfo( struct _mulle_objc_universe *);\n"
+        "static inline void *_MulleAutoreleasePoolPush( mulle_objc_universeid_t universeid)\n"
+        "{\n"
+        "   struct _mulle_objc_universe              *universe;\n"
+        "   struct _mulle_objc_threadfoundationinfo  *foundation;\n"
+        "   struct _mulle_objc_poolconfiguration     *config;\n"
+        "   universe   = mulle_objc_global_get_universe_inline( universeid);\n"
+        "   if( !universe) return( NULL);\n"
+        "   foundation = mulle_objc_thread_get_threadfoundationinfo( universe);\n"
+        "   config     = &foundation->poolconfig;\n"
+        "   return( (*config->push)( config));\n"
+        "}\n");
+    }
+    // @mulle-objc@ autoreleasepool rewrite <
 
     // Insert call-function macros after the last #include — only if ObjC was used.
     // These select inline vs non-inline variants based on optimization level,
@@ -350,6 +399,9 @@ private:
   void RewriteDeclStmt(DeclStmt *S);
   void RewriteTryStmt(ObjCAtTryStmt *S);
   void RewriteThrowStmt(ObjCAtThrowStmt *S);
+  // @mulle-objc@ autoreleasepool rewrite >
+  void RewriteAutoreleasePoolStmt(ObjCAutoreleasePoolStmt *S);
+  // @mulle-objc@ autoreleasepool rewrite <
   void RewriteForCollectionStmt(ObjCForCollectionStmt *S);
 
   // ObjC declaration handlers
@@ -514,8 +566,10 @@ void RewriteMulleObjC::RewriteStmt(Stmt *S) {
     Context->getObjCEncodingForType(EE->getEncodedType(), enc);
     ReplaceText(EE->getSourceRange(), "\"" + enc + "\"");
   }
+  // @mulle-objc@ autoreleasepool rewrite >
   else if (auto *AP = dyn_cast<ObjCAutoreleasePoolStmt>(S))
-    Rewrite.ReplaceText(AP->getAtLoc(), 16, "/* @autoreleasepool */");
+    RewriteAutoreleasePoolStmt(AP);
+  // @mulle-objc@ autoreleasepool rewrite <
   else if (auto *DS = dyn_cast<DeclStmt>(S))
     RewriteDeclStmt(DS);
   else if (auto *CE = dyn_cast<CStyleCastExpr>(S)) {
@@ -1076,6 +1130,35 @@ void RewriteMulleObjC::RewriteForCollectionStmt(ObjCForCollectionStmt *S) {
 
   ReplaceText(S->getSourceRange(), R);
 }
+
+// @mulle-objc@ autoreleasepool rewrite >
+void RewriteMulleObjC::RewriteAutoreleasePoolStmt(ObjCAutoreleasePoolStmt *S)
+{
+   NeedsAutoreleasePool = true;
+   std::string universeName = LangOpts.ObjCUniverseName;
+   uint32_t    universeHash = universeName.empty() ? 0
+                              : MulleObjCUniqueIdHashForString(universeName);
+   uint32_t    releaseHash  = MulleObjCUniqueIdHashForString("release");
+
+   std::string hashHex;
+   llvm::raw_string_ostream HS(hashHex);
+   HS << "0x"; HS.write_hex(universeHash); HS << "U";
+
+   std::string relHex;
+   llvm::raw_string_ostream RS(relHex);
+   RS << "0x"; RS.write_hex(releaseHash); RS << "U";
+
+   // Replace "@autoreleasepool" (16 chars) with pool push
+   std::string Open = "{ void *_pool = _MulleAutoreleasePoolPush(" + hashHex + ");";
+   Rewrite.ReplaceText(S->getAtLoc(), 16, Open);
+
+   // Replace closing '}' of the compound body with pop + '}'
+   CompoundStmt *Body = cast<CompoundStmt>(S->getSubStmt());
+   std::string Close = "mulle_objc_object_call_c(_pool, (mulle_objc_methodid_t) "
+                       + relHex + ", NULL); } }";
+   Rewrite.ReplaceText(Body->getRBracLoc(), 1, Close);
+}
+// @mulle-objc@ autoreleasepool rewrite <
 
 void RewriteMulleObjC::RewriteTryStmt(ObjCAtTryStmt *S) {
   std::string excVar = "_exc_" + std::to_string(TryCount++);
