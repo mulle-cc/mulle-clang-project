@@ -100,7 +100,18 @@ public:
       return;
     }
 
-    // Only track imports from main file or from other #import'd files
+    // Only track imports from main file or from other #import'd files.
+    // Angled imports (#import <Foo/Foo.h>) are framework/library headers — drop.
+    // mulle-sde umbrella shims in system include paths (import.h,
+    // import-private.h) are replaced by the runtime header, not inlined.
+    if (IsAngled) return;
+    if (SM.isInSystemHeader(HashLoc)) return;
+    StringRef base = llvm::sys::path::filename(StringRef(File->getName()));
+    if ((base == "import.h" || base == "import-private.h") &&
+        SM.isInSystemHeader(SM.getLocForStartOfFile(
+            SM.getOrCreateFileID(*File, FileType))))
+      return;
+
     if (fromFID == MainFID || ImportedFIDs.count(fromFID))
       Pending_.push_back({ HashLoc, std::string(File->getName()), IsAngled, fromFID });
   }
@@ -410,7 +421,6 @@ public:
       SpliceImports = [&](const std::string &Text,
                           const std::vector<ImportEntry> &Entries) -> std::string
       {
-        if (Entries.empty()) return Text;
         std::string Spliced;
         Spliced.reserve(Text.size() * 2);
         size_t pos = 0;
@@ -471,18 +481,18 @@ public:
               }
               if (hasConditional) {
                 Diags.Report(IE->HashLoc, Diags.getCustomDiagID(
-                    DiagnosticsEngine::Error,
+                    DiagnosticsEngine::Warning,
                     "--mulle-objc-emit-c: conditional compilation around ObjC "
-                    "declarations in #import'd header '%0' is not supported; "
-                    "use #ifdef __OBJC__ to guard ObjC declarations"))
+                    "declarations in #import'd header '%0'; output may differ "
+                    "if compiled with different preprocessor flags"))
                     << llvm::sys::path::filename(IE->FilePath);
-              } else {
+              }
+              {
                 const RewriteBuffer &HBuf = Rewrite.getEditBuffer(IE->FID);
                 std::string HContent(HBuf.begin(), HBuf.end());
                 HContent = SpliceImports(HContent, IE->Children);
-                Spliced.append("/* begin: "); Spliced.append(IE->FilePath); Spliced.append(" */\n");
                 Spliced.append(HContent);
-                Spliced.append("\n/* end: "); Spliced.append(IE->FilePath); Spliced.append(" */\n");
+                Spliced.append("\n");
               }
             }
             // @mulle-objc@ conditional compilation check <
@@ -490,9 +500,8 @@ public:
               const RewriteBuffer &HBuf = Rewrite.getEditBuffer(IE->FID);
               std::string HContent(HBuf.begin(), HBuf.end());
               HContent = SpliceImports(HContent, IE->Children);
-              Spliced.append("/* begin: "); Spliced.append(IE->FilePath); Spliced.append(" */\n");
               Spliced.append(HContent);
-              Spliced.append("\n/* end: "); Spliced.append(IE->FilePath); Spliced.append(" */\n");
+              Spliced.append("\n");
             }
           }
           pos = (lineEnd < Text.size()) ? lineEnd + 1 : Text.size();
