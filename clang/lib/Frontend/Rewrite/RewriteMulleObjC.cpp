@@ -110,13 +110,13 @@ public:
       replaceObjCImport("#include \"import.h\"");
       replaceObjCImport("#include \"import-private.h\"");
 
-      // Prepend TPS/FCS/TAO defines before the runtime header so the C output
-      // is self-contained (no need for -D flags when compiling the .c file).
-      // Mirror the actual lang options so the runtime header sees the right values.
-      const std::string runtimeInclude = "#include <mulle-objc-runtime/mulle-objc-runtime.h>";
-      size_t rp = Result.find(runtimeInclude);
-      if (rp != std::string::npos) {
-        // @mulle-objc@ emit correct TPS/FCS/TAO based on lang options >
+      // Prepend TPS/FCS/TAO defines at the very top of the output so the C
+      // output is self-contained regardless of whether the runtime header is
+      // included directly or transitively via a user header.
+      // Mirror the actual lang options. The #ifndef guards make this safe to
+      // emit unconditionally.
+      // @mulle-objc@ emit correct TPS/FCS/TAO based on lang options >
+      {
         std::string tps = LangOpts.ObjCDisableTaggedPointers
             ? "#ifndef __MULLE_OBJC_NO_TPS__\n# define __MULLE_OBJC_NO_TPS__\n#endif\n"
             : "#ifndef __MULLE_OBJC_TPS__\n# define __MULLE_OBJC_TPS__\n#endif\n";
@@ -126,9 +126,9 @@ public:
         std::string tao = LangOpts.ObjCEnableThreadAffineObjects
             ? "#ifndef __MULLE_OBJC_TAO__\n# define __MULLE_OBJC_TAO__\n#endif\n"
             : "#ifndef __MULLE_OBJC_NO_TAO__\n# define __MULLE_OBJC_NO_TAO__\n#endif\n";
-        Result.insert(rp, tps + fcs + tao);
-        // @mulle-objc@ emit correct TPS/FCS/TAO based on lang options <
+        Result.insert(0, tps + fcs + tao);
       }
+      // @mulle-objc@ emit correct TPS/FCS/TAO based on lang options <
     }
 
     // Strip ARC ownership qualifiers — not valid in plain C.
