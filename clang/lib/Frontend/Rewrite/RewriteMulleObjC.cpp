@@ -581,13 +581,33 @@ public:
         << "#ifdef __MULLE_OBJC_TAO__\n"
         << "                   | _mulle_objc_loadinfo_threadaffineobjects\n"
         << "#endif\n"
-        << "   },\n"
-        << "   .loaduniverse         = 0,\n"
-        << "   .loadclasslist        = " << (LoadClasses.empty()    ? "0" : "(struct _mulle_objc_loadclasslist *)&OBJC_CLASS_LOADS") << ",\n"
+        << "   },\n";
+    // @mulle-objc@ loaduniverse >
+    {
+      std::string uname = LangOpts.ObjCUniverseName;
+      if (uname.empty()) {
+        LOS << "   .loaduniverse         = 0,\n";
+      } else {
+        uint32_t uid = MulleObjCUniqueIdHashForString(uname);
+        LOS << "   .loaduniverse         = &(struct _mulle_objc_loaduniverse){\n"
+            << "      .universeid   = (mulle_objc_universeid_t) 0x";
+        LOS.write_hex(uid);
+        LOS << "U,\n"
+            << "      .universename = \"" << uname << "\"\n"
+            << "   },\n";
+      }
+    }
+    // @mulle-objc@ loaduniverse <
+    LOS << "   .loadclasslist        = " << (LoadClasses.empty()    ? "0" : "(struct _mulle_objc_loadclasslist *)&OBJC_CLASS_LOADS") << ",\n"
         << "   .loadcategorylist     = " << (LoadCategories.empty() ? "0" : "(struct _mulle_objc_loadcategorylist *)&OBJC_CATEGORY_LOADS") << ",\n"
         << "   .loadsuperlist        = " << (LoadSupers.empty()     ? "0" : "(struct _mulle_objc_superlist *)&OBJC_SUPER_LOADS") << ",\n"
         << "   .loadstringlist       = " << (NSStringPtrs.empty()   ? "0" : "(struct _mulle_objc_loadstringlist *)&OBJC_STATICSTRING_LOADS") << ",\n"
-        << "   .loadhashedstringlist = " << (LoadClasses.empty()    ? "0" : "(struct _mulle_objc_loadhashedstringlist *)&OBJC_HASHNAME_LOADS") << "\n"
+        << "   .loadhashedstringlist = " << (LoadClasses.empty()    ? "0" : "(struct _mulle_objc_loadhashedstringlist *)&OBJC_HASHNAME_LOADS") << ",\n"
+        // @mulle-objc@ origin >
+        << "#ifndef __OPTIMIZE__\n"
+        << "   .origin               = (char *) __FILE__,\n"
+        << "#endif\n"
+        // @mulle-objc@ origin <
         << "};\n";
 
     LOS << "\nstatic void __attribute__((constructor))\n"
@@ -2035,7 +2055,13 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
        << "   .properties       = " << EmitPropList() << ",\n"
        << "   .protocols        = " << EmitProtoList() << ",\n"
        << "   .protocolclassids = " << EmitProtoClassIds() << ",\n"
+       // @mulle-objc@ origin >
+       << "#ifndef __OPTIMIZE__\n"
+       << "   .origin           = (char *) __FILE__,\n"
+       << "#else\n"
        << "   .origin           = 0\n"
+       << "#endif\n"
+       // @mulle-objc@ origin <
        << "};\n";
   }
 
@@ -2230,7 +2256,13 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
        << "   .properties       = " << EmitCatPropList() << ",\n"
        << "   .protocols        = " << EmitCatProtoList() << ",\n"
        << "   .protocolclassids = " << EmitCatProtoClassIds() << ",\n"
+       // @mulle-objc@ origin >
+       << "#ifndef __OPTIMIZE__\n"
+       << "   .origin           = (char *) __FILE__,\n"
+       << "#else\n"
        << "   .origin           = 0\n"
+       << "#endif\n"
+       // @mulle-objc@ origin <
        << "};\n";
   }
 
