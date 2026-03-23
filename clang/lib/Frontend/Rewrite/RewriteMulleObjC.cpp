@@ -46,15 +46,18 @@ struct ImportEntry {
 
 class MulleImportTracker : public PPCallbacks {
   SourceManager              &SM;
+  DiagnosticsEngine          &Diags;
   FileID                      MainFID;
   std::vector<ImportEntry>   &Imports;
+  // Track which FileIDs are #import'd (not #include'd) from main file
+  std::set<FileID>            ImportedFIDs;
   // Pending import waiting for FileChanged to assign its FileID
-  struct Pending { SourceLocation HashLoc; std::string FilePath; bool IsAngled; };
+  struct Pending { SourceLocation HashLoc; std::string FilePath; bool IsAngled; bool fromMain; };
   std::vector<Pending>        Pending_;
 public:
-  MulleImportTracker(SourceManager &SM, FileID MainFID,
-                     std::vector<ImportEntry> &Imports)
-      : SM(SM), MainFID(MainFID), Imports(Imports) {}
+  MulleImportTracker(SourceManager &SM, DiagnosticsEngine &Diags,
+                     FileID MainFID, std::vector<ImportEntry> &Imports)
+      : SM(SM), Diags(Diags), MainFID(MainFID), Imports(Imports) {}
 
   void InclusionDirective(SourceLocation HashLoc,
                           const Token &IncludeTok,
@@ -68,15 +71,27 @@ public:
                           bool ModuleImported,
                           SrcMgr::CharacteristicKind FileType) override
   {
-    // Only care about #import (not #include) in the main file
-    if (IncludeTok.getIdentifierInfo()->getPPKeywordID() != tok::pp_import)
-      return;
-    if (SM.getFileID(HashLoc) != MainFID)
-      return;
-    if (!File)
-      return;
-    // FileID not yet assigned — record as pending, resolved in FileChanged
-    Pending_.push_back({ HashLoc, std::string(File->getName()), IsAngled });
+    if (!File) return;
+    bool isImport = (IncludeTok.getIdentifierInfo()->getPPKeywordID() == tok::pp_import);
+    if (!isImport) return;
+
+    FileID fromFID = SM.getFileID(HashLoc);
+    bool fromMain = (fromFID == MainFID);
+
+    // #import inside a #include'd (non-main, non-system) header — error
+    if (!fromMain && !SM.isInSystemHeader(HashLoc)) {
+      // Only error if the containing file was #include'd (not #import'd)
+      if (ImportedFIDs.find(fromFID) == ImportedFIDs.end()) {
+        Diags.Report(HashLoc, Diags.getCustomDiagID(
+            DiagnosticsEngine::Error,
+            "--mulle-objc-emit-c: #import inside a #include'd header is not "
+            "supported; use #ifdef __OBJC__ to guard ObjC declarations"));
+        return;
+      }
+    }
+
+    if (fromMain)
+      Pending_.push_back({ HashLoc, std::string(File->getName()), IsAngled, true });
   }
 
   void FileChanged(SourceLocation Loc, FileChangeReason Reason,
@@ -88,9 +103,11 @@ public:
     FileID FID = SM.getFileID(Loc);
     if (FID == MainFID || FID.isInvalid())
       return;
-    // Match the most recently pending import to this FileID
     auto &P = Pending_.back();
-    Imports.push_back({ P.HashLoc, FID, P.FilePath, P.IsAngled });
+    if (P.fromMain) {
+      Imports.push_back({ P.HashLoc, FID, P.FilePath, P.IsAngled });
+      ImportedFIDs.insert(FID);
+    }
     Pending_.pop_back();
   }
 };
@@ -141,7 +158,7 @@ public:
     Rewrite.setSourceMgr(*SM, LangOpts);
     // @mulle-objc@ inline header rewriting >
     PP.addPPCallbacks(std::make_unique<MulleImportTracker>(
-        *SM, SM->getMainFileID(), Imports));
+        *SM, Diags, SM->getMainFileID(), Imports));
     // @mulle-objc@ inline header rewriting <
   }
 
@@ -411,14 +428,25 @@ public:
         }
 
         if (IE) {
-          const RewriteBuffer &HBuf = Rewrite.getEditBuffer(IE->FID);
-          Spliced.append("/* begin: ");
-          Spliced.append(IE->FilePath);
-          Spliced.append(" */\n");
-          Spliced.append(HBuf.begin(), HBuf.end());
-          Spliced.append("\n/* end: ");
-          Spliced.append(IE->FilePath);
-          Spliced.append(" */\n");
+          // Check for #pragma pack in the header — would affect struct layout
+          // but wouldn't survive the rewrite. Error to prevent silent corruption.
+          StringRef raw = SM->getBufferData(IE->FID);
+          if (raw.find("#pragma pack") != StringRef::npos) {
+            Diags.Report(IE->HashLoc, Diags.getCustomDiagID(
+                DiagnosticsEngine::Error,
+                "--mulle-objc-emit-c: #pragma pack in #import'd header '%0' "
+                "is not supported; move struct definitions to a #include'd header"))
+                << llvm::sys::path::filename(IE->FilePath);
+          } else {
+            const RewriteBuffer &HBuf = Rewrite.getEditBuffer(IE->FID);
+            Spliced.append("/* begin: ");
+            Spliced.append(IE->FilePath);
+            Spliced.append(" */\n");
+            Spliced.append(HBuf.begin(), HBuf.end());
+            Spliced.append("\n/* end: ");
+            Spliced.append(IE->FilePath);
+            Spliced.append(" */\n");
+          }
         }
         // else: untracked #import, drop it
 
