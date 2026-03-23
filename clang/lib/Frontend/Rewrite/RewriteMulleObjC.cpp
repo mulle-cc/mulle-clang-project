@@ -36,28 +36,40 @@ extern "C" uint64_t MulleObjCChar7StringEncode64(char *src, size_t len);
 namespace {
 
 // @mulle-objc@ inline header rewriting >
-// Records #import directives from the main file so we can inline-rewrite them.
+// Records #import directives for inline rewriting.
+// Each entry represents one #import and may have child imports (nested #imports).
 struct ImportEntry {
-  SourceLocation HashLoc;   // location of '#' in main file
-  FileID         FID;       // FileID of the imported file (set after FileChanged)
-  std::string    FilePath;  // resolved path
-  bool           IsAngled;  // <foo.h> vs "foo.h"
+  SourceLocation HashLoc;                  // location of '#'
+  FileID         FID;                      // FileID of the imported file
+  std::string    FilePath;                 // resolved path
+  bool           IsAngled;                 // <foo.h> vs "foo.h"
+  std::vector<ImportEntry> Children;       // nested #imports within this file
 };
 
 class MulleImportTracker : public PPCallbacks {
   SourceManager              &SM;
   DiagnosticsEngine          &Diags;
   FileID                      MainFID;
-  std::vector<ImportEntry>   &Imports;
-  // Track which FileIDs are #import'd (not #include'd) from main file
+  std::vector<ImportEntry>   &Imports;     // top-level imports from main file
+  // All imported FileIDs (for #import-inside-#include detection)
   std::set<FileID>            ImportedFIDs;
-  // Pending import waiting for FileChanged to assign its FileID
-  struct Pending { SourceLocation HashLoc; std::string FilePath; bool IsAngled; bool fromMain; };
-  std::vector<Pending>        Pending_;
+  // Stack of (parent FileID → children vector) for building the tree
+  // Top of stack is the current file's import list
+  std::vector<std::pair<FileID, std::vector<ImportEntry>*>> Stack_;
+  // Pending: #import seen but FileChanged not yet fired
+  struct Pending {
+    SourceLocation HashLoc;
+    std::string    FilePath;
+    bool           IsAngled;
+    FileID         ParentFID;
+  };
+  std::vector<Pending> Pending_;
 public:
   MulleImportTracker(SourceManager &SM, DiagnosticsEngine &Diags,
                      FileID MainFID, std::vector<ImportEntry> &Imports)
-      : SM(SM), Diags(Diags), MainFID(MainFID), Imports(Imports) {}
+      : SM(SM), Diags(Diags), MainFID(MainFID), Imports(Imports) {
+    Stack_.push_back({ MainFID, &Imports });
+  }
 
   void InclusionDirective(SourceLocation HashLoc,
                           const Token &IncludeTok,
@@ -76,38 +88,49 @@ public:
     if (!isImport) return;
 
     FileID fromFID = SM.getFileID(HashLoc);
-    bool fromMain = (fromFID == MainFID);
 
-    // #import inside a #include'd (non-main, non-system) header — error
-    if (!fromMain && !SM.isInSystemHeader(HashLoc)) {
-      // Only error if the containing file was #include'd (not #import'd)
-      if (ImportedFIDs.find(fromFID) == ImportedFIDs.end()) {
-        Diags.Report(HashLoc, Diags.getCustomDiagID(
-            DiagnosticsEngine::Error,
-            "--mulle-objc-emit-c: #import inside a #include'd header is not "
-            "supported; use #ifdef __OBJC__ to guard ObjC declarations"));
-        return;
-      }
+    // #import inside a #include'd (non-system) header — error
+    if (!SM.isInSystemHeader(HashLoc) &&
+        fromFID != MainFID &&
+        ImportedFIDs.find(fromFID) == ImportedFIDs.end()) {
+      Diags.Report(HashLoc, Diags.getCustomDiagID(
+          DiagnosticsEngine::Error,
+          "--mulle-objc-emit-c: #import inside a #include'd header is not "
+          "supported; use #ifdef __OBJC__ to guard ObjC declarations"));
+      return;
     }
 
-    if (fromMain)
-      Pending_.push_back({ HashLoc, std::string(File->getName()), IsAngled, true });
+    // Only track imports from main file or from other #import'd files
+    if (fromFID == MainFID || ImportedFIDs.count(fromFID))
+      Pending_.push_back({ HashLoc, std::string(File->getName()), IsAngled, fromFID });
   }
 
   void FileChanged(SourceLocation Loc, FileChangeReason Reason,
                    SrcMgr::CharacteristicKind FileType,
                    FileID PrevFID) override
   {
+    if (Reason == ExitFile) {
+      // Pop stack when leaving a file
+      if (!Stack_.empty() && Stack_.back().first == PrevFID)
+        Stack_.pop_back();
+      return;
+    }
     if (Reason != EnterFile || Pending_.empty())
       return;
     FileID FID = SM.getFileID(Loc);
-    if (FID == MainFID || FID.isInvalid())
-      return;
+    if (FID.isInvalid()) return;
+
+    // Match pending import to this FileID
     auto &P = Pending_.back();
-    if (P.fromMain) {
-      Imports.push_back({ P.HashLoc, FID, P.FilePath, P.IsAngled });
-      ImportedFIDs.insert(FID);
-    }
+    // Find the parent's children list
+    std::vector<ImportEntry> *parentList = &Imports;
+    for (auto &s : Stack_)
+      if (s.first == P.ParentFID) { parentList = s.second; break; }
+
+    parentList->push_back({ P.HashLoc, FID, P.FilePath, P.IsAngled, {} });
+    ImportedFIDs.insert(FID);
+    // Push this file onto the stack so its nested #imports attach to it
+    Stack_.push_back({ FID, &parentList->back().Children });
     Pending_.pop_back();
   }
 };
@@ -380,79 +403,103 @@ public:
     }
 
     // @mulle-objc@ inline header rewriting >
-    // Replace each #import line with the rewritten content of that header.
+    // Recursively splice #import lines with rewritten header content.
     // Done AFTER all post-processing so macros/TPS are only in the main file.
     if (!Imports.empty()) {
-      // Build lookup by filename (quoted and angled forms)
-      std::map<std::string, const ImportEntry *> importByName;
-      for (const auto &IE : Imports) {
-        std::string key = IE.IsAngled
-            ? "#import <" + llvm::sys::path::filename(IE.FilePath).str() + ">"
-            : "#import \"" + llvm::sys::path::filename(IE.FilePath).str() + "\"";
-        importByName[key] = &IE;
-        // Also index by full path form in case filename differs
-        importByName["#import \"" + IE.FilePath + "\""] = &IE;
-      }
-
-      std::string Spliced;
-      Spliced.reserve(Result.size() * 2);
-      size_t pos = 0;
-      while (pos < Result.size()) {
-        size_t imp = Result.find("#import", pos);
-        if (imp == std::string::npos) {
-          Spliced.append(Result, pos, std::string::npos);
-          break;
-        }
-        Spliced.append(Result, pos, imp - pos);
-        size_t lineEnd = Result.find('\n', imp);
-        if (lineEnd == std::string::npos) lineEnd = Result.size();
-        std::string line = Result.substr(imp, lineEnd - imp);
-
-        // Find matching ImportEntry by scanning all entries
-        const ImportEntry *IE = nullptr;
-        for (const auto &kv : importByName) {
-          if (line.find(kv.first.substr(8)) != std::string::npos) { // strip "#import"
-            IE = kv.second;
+      std::function<std::string(const std::string &, const std::vector<ImportEntry> &)>
+      SpliceImports = [&](const std::string &Text,
+                          const std::vector<ImportEntry> &Entries) -> std::string
+      {
+        if (Entries.empty()) return Text;
+        std::string Spliced;
+        Spliced.reserve(Text.size() * 2);
+        size_t pos = 0;
+        while (pos < Text.size()) {
+          size_t imp = Text.find("#import", pos);
+          if (imp == std::string::npos) {
+            Spliced.append(Text, pos, std::string::npos);
             break;
           }
-        }
-        if (!IE) {
-          // Try matching by any substring of the line containing a known filename
-          for (const auto &entry : Imports) {
+          Spliced.append(Text, pos, imp - pos);
+          size_t lineEnd = Text.find('\n', imp);
+          if (lineEnd == std::string::npos) lineEnd = Text.size();
+          std::string line = Text.substr(imp, lineEnd - imp);
+          const ImportEntry *IE = nullptr;
+          for (const auto &entry : Entries) {
             std::string fname = llvm::sys::path::filename(entry.FilePath).str();
-            if (line.find(fname) != std::string::npos) {
-              IE = &entry;
-              break;
+            if (line.find(fname) != std::string::npos) { IE = &entry; break; }
+          }
+          if (IE) {
+            StringRef raw = SM->getBufferData(IE->FID);
+            // Check for #pragma pack
+            if (raw.find("#pragma pack") != StringRef::npos) {
+              Diags.Report(IE->HashLoc, Diags.getCustomDiagID(
+                  DiagnosticsEngine::Error,
+                  "--mulle-objc-emit-c: #pragma pack in #import'd header '%0' "
+                  "is not supported; move struct definitions to a #include'd header"))
+                  << llvm::sys::path::filename(IE->FilePath);
+            }
+            // @mulle-objc@ conditional compilation check >
+            // Check for #if/#ifdef/#ifndef around ObjC declarations.
+            // A standard include guard (#ifndef FOO_H / #define FOO_H / ... / #endif
+            // wrapping the whole file) is exempted.
+            else if (raw.find("@interface") != StringRef::npos ||
+                     raw.find("@protocol")  != StringRef::npos ||
+                     raw.find("@class")     != StringRef::npos) {
+              // Has ObjC — check for non-guard conditionals
+              bool hasConditional = false;
+              size_t p = 0;
+              while ((p = raw.find("#if", p)) != StringRef::npos) {
+                // Skip if it's the include guard: #ifndef at start of file
+                // followed immediately by #define on next line
+                bool isGuard = false;
+                if (raw.substr(p, 7) == "#ifndef") {
+                  // Check if this is at the very start (ignoring whitespace/comments)
+                  StringRef before = raw.substr(0, p);
+                  if (before.find_first_not_of(" \t\r\n") == StringRef::npos) {
+                    // Find the next non-empty line
+                    size_t nl = raw.find('\n', p);
+                    if (nl != StringRef::npos) {
+                      size_t next = raw.find_first_not_of(" \t", nl + 1);
+                      if (next != StringRef::npos && raw.substr(next, 7) == "#define")
+                        isGuard = true;
+                    }
+                  }
+                }
+                if (!isGuard) { hasConditional = true; break; }
+                p += 7;
+              }
+              if (hasConditional) {
+                Diags.Report(IE->HashLoc, Diags.getCustomDiagID(
+                    DiagnosticsEngine::Error,
+                    "--mulle-objc-emit-c: conditional compilation around ObjC "
+                    "declarations in #import'd header '%0' is not supported; "
+                    "use #ifdef __OBJC__ to guard ObjC declarations"))
+                    << llvm::sys::path::filename(IE->FilePath);
+              } else {
+                const RewriteBuffer &HBuf = Rewrite.getEditBuffer(IE->FID);
+                std::string HContent(HBuf.begin(), HBuf.end());
+                HContent = SpliceImports(HContent, IE->Children);
+                Spliced.append("/* begin: "); Spliced.append(IE->FilePath); Spliced.append(" */\n");
+                Spliced.append(HContent);
+                Spliced.append("\n/* end: "); Spliced.append(IE->FilePath); Spliced.append(" */\n");
+              }
+            }
+            // @mulle-objc@ conditional compilation check <
+            else {
+              const RewriteBuffer &HBuf = Rewrite.getEditBuffer(IE->FID);
+              std::string HContent(HBuf.begin(), HBuf.end());
+              HContent = SpliceImports(HContent, IE->Children);
+              Spliced.append("/* begin: "); Spliced.append(IE->FilePath); Spliced.append(" */\n");
+              Spliced.append(HContent);
+              Spliced.append("\n/* end: "); Spliced.append(IE->FilePath); Spliced.append(" */\n");
             }
           }
+          pos = (lineEnd < Text.size()) ? lineEnd + 1 : Text.size();
         }
-
-        if (IE) {
-          // Check for #pragma pack in the header — would affect struct layout
-          // but wouldn't survive the rewrite. Error to prevent silent corruption.
-          StringRef raw = SM->getBufferData(IE->FID);
-          if (raw.find("#pragma pack") != StringRef::npos) {
-            Diags.Report(IE->HashLoc, Diags.getCustomDiagID(
-                DiagnosticsEngine::Error,
-                "--mulle-objc-emit-c: #pragma pack in #import'd header '%0' "
-                "is not supported; move struct definitions to a #include'd header"))
-                << llvm::sys::path::filename(IE->FilePath);
-          } else {
-            const RewriteBuffer &HBuf = Rewrite.getEditBuffer(IE->FID);
-            Spliced.append("/* begin: ");
-            Spliced.append(IE->FilePath);
-            Spliced.append(" */\n");
-            Spliced.append(HBuf.begin(), HBuf.end());
-            Spliced.append("\n/* end: ");
-            Spliced.append(IE->FilePath);
-            Spliced.append(" */\n");
-          }
-        }
-        // else: untracked #import, drop it
-
-        pos = (lineEnd < Result.size()) ? lineEnd + 1 : Result.size();
-      }
-      Result = std::move(Spliced);
+        return Spliced;
+      };
+      Result = SpliceImports(Result, Imports);
     }
     // @mulle-objc@ inline header rewriting <
 
