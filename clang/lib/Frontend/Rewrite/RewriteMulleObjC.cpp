@@ -7,6 +7,7 @@
 
 #include "clang/AST/AST.h"
 #include "clang/AST/ASTConsumer.h"
+#include "clang/AST/Attr.h"
 #include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Lex/Lexer.h"
@@ -622,6 +623,7 @@ private:
 
   // Helpers
   std::string MethodCName(const ObjCMethodDecl *M, const ObjCContainerDecl *CD);
+  uint32_t    MethodBits(const ObjCMethodDecl *M);
   std::string PrintType(QualType T);
   std::string ObjCEncodeType(QualType T);
 
@@ -988,6 +990,42 @@ void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
 // ---------------------------------------------------------------------------
 // Build a C identifier for a method: -[Foo bar:baz:] -> Foo_im_bar_baz_
 // ---------------------------------------------------------------------------
+// @mulle-objc@ method bits >
+uint32_t RewriteMulleObjC::MethodBits(const ObjCMethodDecl *M) {
+  uint32_t bits = 0;
+  bits |= LangOpts.ObjCAllocsAutoreleasedObjects    ? 0x04 : 0x00;
+  bits |= M->isVariadic()                           ? 0x08 : 0x00;
+  bits |= M->hasAttr<ObjCDesignatedInitializerAttr>() ? 0x20 : 0x00;
+  for (auto *A : M->attrs())
+    if (auto *Ann = dyn_cast<AnnotateAttr>(A)) {
+      if      (Ann->getAnnotation() == "objc_user_0") bits |= 0x000800;
+      else if (Ann->getAnnotation() == "objc_user_1") bits |= 0x001000;
+      else if (Ann->getAnnotation() == "objc_user_2") bits |= 0x002000;
+      else if (Ann->getAnnotation() == "objc_user_3") bits |= 0x004000;
+      else if (Ann->getAnnotation() == "objc_user_4") bits |= 0x008000;
+    }
+  int family = M->getMethodFamily();
+  if (family == OMF_None) {
+    Selector sel = M->getSelector();
+    if (sel.isUnarySelector() && !M->getReturnType()->isVoidType()) {
+      family = 32; // getter
+    } else if (M->getReturnType()->isVoidType() && sel.getNumArgs() == 1) {
+      StringRef first = sel.getIdentifierInfoForSlot(0)->getName();
+      auto sw = [](StringRef n, StringRef w) {
+        return n.size() >= w.size() &&
+               (n.size() == w.size() || !isLowercase(n[w.size()])) &&
+               n.starts_with(w);
+      };
+      if      (sw(first, "set")        || sw(first, "mulleSet"))        family = 33;
+      else if (sw(first, "addTo")      || sw(first, "mulleAddTo"))      family = 34;
+      else if (sw(first, "removeFrom") || sw(first, "mulleRemoveFrom")) family = 35;
+    }
+  }
+  bits |= (uint32_t)family << 16;
+  return bits;
+}
+// @mulle-objc@ method bits <
+
 std::string RewriteMulleObjC::MethodCName(const ObjCMethodDecl *M,
                                            const ObjCContainerDecl *CD) {
   std::string S = CD->getNameAsString();
@@ -1818,6 +1856,11 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
     std::sort(IMethods.begin(), IMethods.end(), sortMethods);
     std::sort(CMethods.begin(), CMethods.end(), sortMethods);
 
+    // Helper: compute method descriptor bits (mirrors CGObjCMulleRuntime)
+    // @mulle-objc@ method bits >
+    // (calls MethodBits member function)
+    // @mulle-objc@ method bits <
+
     // Helper: emit ivar list as compound literal (or "0")
     auto EmitIvarList = [&]() -> std::string {
       if (OwnIvars.empty()) return "0";
@@ -1876,8 +1919,10 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
         L.write_hex(selId);
         L << "U,\n"
           << "                           .signature = \"" << methSig << "\",\n"
-          << "                           .name      = \"" << sel << "\",\n"
-          << "                           .bits      = 0x200000 },\n"
+          << "                           .name      = \"" << sel << "\",\n";
+        L << "                           .bits      = 0x";
+        L.write_hex(MethodBits(M));
+        L << " },\n"
           << "           .value      = (mulle_objc_implementation_t) " << cname << " },\n";
       }
       L << "      }\n   }";
@@ -2076,8 +2121,10 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
         L.write_hex(selId);
         L << "U,\n"
           << "                           .signature = \"" << methSig << "\",\n"
-          << "                           .name      = \"" << sel << "\",\n"
-          << "                           .bits      = 0x200000 },\n"
+          << "                           .name      = \"" << sel << "\",\n";
+        L << "                           .bits      = 0x";
+        L.write_hex(MethodBits(M));
+        L << " },\n"
           << "           .value      = (mulle_objc_implementation_t) " << cname << " },\n";
       }
       L << "      }\n   }";
