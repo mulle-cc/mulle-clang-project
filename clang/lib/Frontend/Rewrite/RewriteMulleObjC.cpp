@@ -759,12 +759,14 @@ void RewriteMulleObjC::HandleTopLevelSingleDecl(Decl *D) {
     if (!DD->getDeclContext()->isFileContext()) break;
     SourceLocation AtLoc = DD->getAtLoc();
     if (AtLoc.isInvalid()) break;
-    SourceLocation End = Lexer::findLocationAfterToken(
-        DD->getLocation(), tok::semi, *SM, LangOpts, false);
-    if (End.isInvalid())
-      End = DD->getLocation();
-    unsigned Len = SM->getFileOffset(End) - SM->getFileOffset(AtLoc);
-    Rewrite.ReplaceText(AtLoc, Len, "");
+    // Scan raw buffer from ClassName forward to find ';', handles ClassName(Cat);
+    const char *p = SM->getCharacterData(DD->getLocation());
+    while (*p && *p != ';') ++p;
+    if (*p == ';') ++p;
+    unsigned Len = (SM->getCharacterData(AtLoc) <= p)
+        ? (unsigned)(p - SM->getCharacterData(AtLoc)) : 0;
+    if (Len > 0)
+      Rewrite.ReplaceText(AtLoc, Len, "");
     break;
   }
   // @mulle-objc@ dependency directive <
@@ -1031,7 +1033,7 @@ void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
 
       std::string Buf;
       llvm::raw_string_ostream OS(Buf);
-      OS << "static mulle_objc_dependency_t " << ArrName
+      OS << "static struct _mulle_objc_dependency " << ArrName
          << "[] __attribute__((used)) =\n{\n";
       for (auto *DD : D->dependency_impls()) {
         std::string cid = DD->getClassName()->getName().str();
@@ -1073,12 +1075,14 @@ void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
       unsigned AtOff = SM->getFileOffset(AtLoc);
       // Skip TU-level copies (their AtLoc is outside this @implementation).
       if (AtOff < ImplStartOff || AtOff > ImplEndOff) continue;
-      SourceLocation End = Lexer::findLocationAfterToken(
-          DD->getLocation(), tok::semi, *SM, LangOpts, false);
-      if (End.isInvalid())
-        End = DD->getLocation();
-      unsigned Len = SM->getFileOffset(End) - AtOff;
-      Rewrite.ReplaceText(AtLoc, Len, "");
+      // Scan raw buffer from ClassName forward to find ';', handles ClassName(Cat);
+      const char *p = SM->getCharacterData(DD->getLocation());
+      while (*p && *p != ';') ++p;
+      if (*p == ';') ++p;
+      unsigned Len = (SM->getCharacterData(AtLoc) <= p)
+          ? (unsigned)(p - SM->getCharacterData(AtLoc)) : 0;
+      if (Len > 0)
+        Rewrite.ReplaceText(AtLoc, Len, "");
     }
   }
   // @mulle-objc@ dependency directive <

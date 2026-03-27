@@ -960,7 +960,7 @@ void ASTDeclWriter::VisitCXXDeductionGuideDecl(CXXDeductionGuideDecl *D) {
 }
 
 void ASTDeclWriter::VisitObjCMethodDecl(ObjCMethodDecl *D) {
-  static_assert(DeclContext::NumObjCMethodDeclBits == 38,
+  static_assert(DeclContext::NumObjCMethodDeclBits == 39,
                 "You need to update the serializer after you change the "
                 "ObjCMethodDeclBits");
 

@@ -865,6 +865,7 @@ ObjCMethodDecl::ObjCMethodDecl(
   setSelLocsKind(SelLoc_StandardNoSpace);
   setOverriding(false);
   setHasSkippedBody(false);
+  setSynthesizedDependencies(false); // @mulle-objc@ dependency directive
 
   /// @mulle-objc@ MetaABI: initialize storage of parameter ivars >
   ParamDecl = nullptr;

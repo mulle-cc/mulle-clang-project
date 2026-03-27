@@ -1949,7 +1949,7 @@ protected:
   };
 
   /// Number of inherited and non-inherited bits in ObjCMethodDeclBitfields.
-  enum { NumObjCMethodDeclBits = NumDeclContextBits + 25 };
+  enum { NumObjCMethodDeclBits = NumDeclContextBits + 26 };
 
   /// Stores the bits used by ObjCContainerDecl.
   /// If modified NumObjCContainerDeclBits and the accessor
