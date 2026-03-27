@@ -5661,6 +5661,9 @@ private:
   // @mulle-objc@ method_implementation declaration >
   Decl *ParseObjCMethodImplementation(SourceLocation AtLoc, Decl *ClassDecl);
   // @mulle-objc@ method_implementation declaration <
+  // @mulle-objc@ dependency directive >
+  Decl *ParseObjCDependency(SourceLocation atLoc);
+  // @mulle-objc@ dependency directive <
   DeclGroupPtrTy ParseObjCAtEndDeclaration(SourceRange atEnd);
 
   /// \verbatim

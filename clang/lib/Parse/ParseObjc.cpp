@@ -105,6 +105,11 @@ Parser::ParseObjCAtDirectives(ParsedAttributes &DeclAttrs,
         CurParsedObjCImpl ? CurParsedObjCImpl->Dcl : nullptr);
     break;
   // @mulle-objc@ method_implementation dispatch <
+  // @mulle-objc@ dependency dispatch >
+  case tok::objc_dependency:
+    SingleDecl = ParseObjCDependency(AtLoc);
+    break;
+  // @mulle-objc@ dependency dispatch <
   case tok::objc_import:
     if (getLangOpts().Modules || getLangOpts().DebuggerSupport) {
       Sema::ModuleImportState IS = Sema::ModuleImportState::NotACXX20Module;
@@ -729,6 +734,15 @@ void Parser::ParseObjCInterfaceDeclList(tok::ObjCKeywordKind contextKey,
         allMethods.push_back(D);
       break;
     // @mulle-objc@ method_implementation dispatch <
+
+    // @mulle-objc@ dependency dispatch >
+    case tok::objc_dependency:
+      // @dependency is not valid inside @interface or @protocol;
+      // tokens have already been consumed, just diagnose and skip to ';'.
+      Diag(AtLoc, diag::err_mulle_objc_dependency_in_interface);
+      SkipUntil(tok::semi);
+      break;
+    // @mulle-objc@ dependency dispatch <
 
     case tok::objc_property:
       ObjCDeclSpec OCDS;
@@ -2548,6 +2562,43 @@ Decl *Parser::ParseObjCPropertyDynamic(SourceLocation atLoc) {
   ExpectAndConsume(tok::semi, diag::err_expected_after, "@dynamic");
   return nullptr;
 }
+
+// @mulle-objc@ dependency directive >
+/// ParseObjCDependency - Handle \@dependency ClassName;
+///                    or \@dependency ClassName(CategoryName);
+///
+Decl *Parser::ParseObjCDependency(SourceLocation atLoc) {
+  assert(Tok.isObjCAtKeyword(tok::objc_dependency) &&
+         "ParseObjCDependency(): Expected '@dependency'");
+  ConsumeToken(); // consume 'dependency'
+
+  if (expectIdentifier()) {
+    SkipUntil(tok::semi);
+    return nullptr;
+  }
+  IdentifierInfo *className = Tok.getIdentifierInfo();
+  SourceLocation classLoc = ConsumeToken(); // consume class name
+
+  IdentifierInfo *categoryName = nullptr;
+  if (TryConsumeToken(tok::l_paren)) {
+    if (expectIdentifier()) {
+      SkipUntil(tok::semi);
+      return nullptr;
+    }
+    categoryName = Tok.getIdentifierInfo();
+    ConsumeToken(); // consume category name
+    if (ExpectAndConsume(tok::r_paren)) {
+      SkipUntil(tok::semi);
+      return nullptr;
+    }
+  }
+
+  ExpectAndConsume(tok::semi, diag::err_expected_after, "@dependency");
+  return Actions.ObjC().ActOnDependencyDecl(
+      getCurScope(), atLoc, classLoc, className, categoryName,
+      CurParsedObjCImpl ? CurParsedObjCImpl->Dcl : nullptr);
+}
+// @mulle-objc@ dependency directive <
 
 StmtResult Parser::ParseObjCThrowStmt(SourceLocation atLoc) {
   ExprResult Res;

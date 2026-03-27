@@ -1,0 +1,48 @@
+[0;44m[1mmulle-objc/mulle-objc-developer                                         [0m
+VERSION=21.1.8.1 -> 21.1.8.5
+OLD_CODENAME=bookworm -> bookworm
+OLD_ARCH=amd64 -> amd64
+Dockerfile
+i386/Dockerfile
+dox/RELEASEPLAN.md
+dox/Xcode_7_integration.md
+bin/installer
+cola/description.md.bud
+cola/executables.md.bud
+cola/install.md.bud
+[0;44m[1mMulleFoundation/mulle-foundation-developer                              [0m
+VERSION=21.1.8.1 -> 21.1.8.5
+OLD_CODENAME=bookworm -> bookworm
+OLD_ARCH=amd64 -> amd64
+Dockerfile
+bin/installer
+cola/description.md.bud
+cola/info.md.bud
+cola/install.md.bud
+cola/usage.md.bud
+[0;44m[1mMulleFoundation/foundation-developer                                    [0m
+VERSION=21.1.8.1 -> 21.1.8.5
+OLD_CODENAME=bookworm -> bookworm
+OLD_ARCH=amd64 -> amd64
+Dockerfile
+bin/apt-installer
+bin/dockerhub-push
+bin/installer
+cola/description.md.bud
+cola/executables.md.bud
+cola/install.md.bud
+cola/usage.md.bud
+cola/you-are-here.md.bud
+[0;44m[1mMulleWeb/mulle-web-developer                                            [0m
+VERSION=21.1.8.1 -> 21.1.8.5
+OLD_CODENAME=bookworm -> bookworm
+OLD_ARCH=amd64 -> amd64
+Dockerfile
+dox/legacy-workflow.md
+bin/apt-installer
+bin/installer
+cola/add.md.bud
+cola/description.md.bud
+cola/install.md.bud
+cola/usage.md.bud
+cola/you-are-here.md.bud

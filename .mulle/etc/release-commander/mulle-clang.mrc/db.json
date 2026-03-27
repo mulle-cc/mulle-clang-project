@@ -1,0 +1,102 @@
+{
+  "files": [
+    {
+      "title": "Figure out version to release",
+      "filename": "i-figure_out_versi-a1b2c3d4e5f6.md",
+      "scriptFilename": "s-figure_out_versi-a1b2c3d4e5f6.sh",
+      "uuid": "a1b2c3d4-e5f6-4000-0000-000000000000",
+      "principalTool": "",
+      "status": "done",
+      "skillLevel": "Low"
+    },
+    {
+      "title": "Release mulle-clang compiler",
+      "filename": "i-release_mullecla-d519668af8fa.md",
+      "scriptFilename": "s-release_mullecla-d519668af8fa.sh",
+      "uuid": "d519668a-f8fa-44c7-ac0f-06b67d367e53",
+      "principalTool": "",
+      "status": "done",
+      "skillLevel": "Low",
+      "backgroundColor": "#FFCF9F"
+    },
+    {
+      "title": "Create a debian VM if needed",
+      "filename": "i-create_a_vm_for_-bb5a1bc46d58.md",
+      "scriptFilename": "s-create_a_vm_for_-bb5a1bc46d58.sh",
+      "uuid": "bb5a1bc4-6d58-44d6-9c09-dd6e5acfbdf5",
+      "principalTool": "",
+      "status": "done",
+      "skillLevel": "Low"
+    },
+    {
+      "title": "Prepare mulle-clang-cpack and commit",
+      "filename": "i-prepare_for_mull-8708711f3369.md",
+      "scriptFilename": "s-prepare_for_mull-8708711f3369.sh",
+      "uuid": "8708711f-3369-4406-b2b7-4ba01b31091b",
+      "principalTool": "",
+      "status": "done",
+      "skillLevel": "Low"
+    },
+    {
+      "title": "Create mulle-clang-project x86_64 debian package",
+      "filename": "i-create_mulleobjc-f66cc8f0570b.md",
+      "scriptFilename": "s-create_mulleobjc-f66cc8f0570b.sh",
+      "uuid": "f66cc8f0-570b-452c-a355-6eafd7aa97b3",
+      "principalTool": "",
+      "status": "done",
+      "skillLevel": "Low"
+    },
+    {
+      "title": "Upload debian package to release",
+      "filename": "i-upload_debian_pa-bb720d437457.md",
+      "scriptFilename": "s-upload_debian_pa-bb720d437457.sh",
+      "uuid": "bb720d43-7457-4f30-84ad-b743094f7006",
+      "principalTool": "",
+      "status": "done",
+      "skillLevel": "Low"
+    },
+    {
+      "title": "Edit homebrew bottle formula  (macos)",
+      "filename": "i-create_homebrew_-a356163a177b.md",
+      "scriptFilename": "s-create_homebrew_-a356163a177b.sh",
+      "uuid": "a356163a-177b-43c0-af0c-9787dbe609ee",
+      "principalTool": "",
+      "status": "done",
+      "skillLevel": "Low"
+    },
+    {
+      "title": "Brew the bottle (macos)",
+      "filename": "i-create_homebrew_-wdorn7e8sql.md",
+      "scriptFilename": "s-create_homebrew_-wdorn7e8sql.sh",
+      "uuid": "wdorn7e8sql",
+      "principalTool": "",
+      "status": "done",
+      "skillLevel": "Low"
+    },
+    {
+      "title": "Upload homebrew bottle to prerelease (macos)",
+      "filename": "i-upload_debian_pa-40x6z8gw161.md",
+      "scriptFilename": "s-upload_debian_pa-40x6z8gw161.sh",
+      "uuid": "40x6z8gw161",
+      "principalTool": "",
+      "status": "done",
+      "skillLevel": "Low"
+    },
+    {
+      "title": "Edit github-ci project with mulle-clang URL",
+      "filename": "i-edit_githubci_pr-bbf5b1d62ddd.md",
+      "scriptFilename": "s-edit_githubci_pr-bbf5b1d62ddd.sh",
+      "uuid": "bbf5b1d6-2ddd-43bc-b6e5-5895425f921c",
+      "principalTool": "",
+      "status": "done",
+      "skillLevel": "Low"
+    }
+  ],
+  "environmentVariables": {
+    "MULLE_CLANG_PROJECT_TAG": "21.1.8.5",
+    "PWD": "/home/src/srcO",
+    "MULLE_OBJC_RUNTIME_LOAD_VERSION": "18"
+  },
+  "images": [],
+  "fontSize": 16
+}

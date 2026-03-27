@@ -1291,6 +1291,9 @@ enum DeclCode {
   /// A ObjCPropertyImplDecl record.
   DECL_OBJC_PROPERTY_IMPL,
 
+  /// A ObjCDependencyDecl record. @mulle-objc@
+  DECL_OBJC_DEPENDENCY,
+
   /// A FieldDecl record.
   DECL_FIELD,
 

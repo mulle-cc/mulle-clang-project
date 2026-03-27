@@ -48,6 +48,7 @@ class CXXCtorInitializer;
 class Expr;
 class ObjCCategoryDecl;
 class ObjCCategoryImplDecl;
+class ObjCDependencyDecl; // @mulle-objc@ dependency directive
 class ObjCImplementationDecl;
 class ObjCInterfaceDecl;
 class ObjCIvarDecl;
@@ -484,6 +485,16 @@ public:
   void setSynthesizedAccessorStub(bool isSynthesizedAccessorStub) {
     ObjCMethodDeclBits.IsSynthesizedAccessorStub = isSynthesizedAccessorStub;
   }
+
+  // @mulle-objc@ dependency directive >
+  bool isSynthesizedDependencies() const {
+    return ObjCMethodDeclBits.IsSynthesizedDependencies;
+  }
+
+  void setSynthesizedDependencies(bool V) {
+    ObjCMethodDeclBits.IsSynthesizedDependencies = V;
+  }
+  // @mulle-objc@ dependency directive <
 
   bool isDefined() const { return ObjCMethodDeclBits.IsDefined; }
   void setDefined(bool isDefined) { ObjCMethodDeclBits.IsDefined = isDefined; }
@@ -2663,6 +2674,26 @@ public:
     return propimpl_iterator(decls_end());
   }
 
+  // @mulle-objc@ dependency directive >
+  /// dependency_impls - Iterate over the @dependency decls inside this
+  /// implementation, in declaration order.
+  using depimpl_iterator = specific_decl_iterator<ObjCDependencyDecl>;
+  using depimpl_range =
+      llvm::iterator_range<specific_decl_iterator<ObjCDependencyDecl>>;
+
+  depimpl_range dependency_impls() const {
+    return depimpl_range(depimpl_begin(), depimpl_end());
+  }
+
+  depimpl_iterator depimpl_begin() const {
+    return depimpl_iterator(decls_begin());
+  }
+
+  depimpl_iterator depimpl_end() const {
+    return depimpl_iterator(decls_end());
+  }
+  // @mulle-objc@ dependency directive <
+
   static bool classof(const Decl *D) { return classofKind(D->getKind()); }
 
   static bool classofKind(Kind K) {
@@ -2942,6 +2973,41 @@ public:
   static bool classof(const Decl *D) { return classofKind(D->getKind()); }
   static bool classofKind(Kind K) { return K == ObjCCompatibleAlias; }
 };
+
+// @mulle-objc@ dependency directive >
+/// ObjCDependencyDecl - Represents a single @dependency ClassName; or
+/// @dependency ClassName(CategoryName); directive.
+class ObjCDependencyDecl : public Decl {
+  IdentifierInfo *ClassName;
+  IdentifierInfo *CategoryName; // null if no category
+  SourceLocation AtLoc;         // location of '@'
+
+  ObjCDependencyDecl(DeclContext *DC, SourceLocation AtLoc,
+                     SourceLocation ClassLoc,
+                     IdentifierInfo *ClassName,
+                     IdentifierInfo *CategoryName)
+      : Decl(ObjCDependency, DC, ClassLoc), ClassName(ClassName),
+        CategoryName(CategoryName), AtLoc(AtLoc) {}
+
+  friend class ASTDeclReader;
+
+public:
+  static ObjCDependencyDecl *Create(ASTContext &C, DeclContext *DC,
+                                    SourceLocation AtLoc,
+                                    SourceLocation ClassLoc,
+                                    IdentifierInfo *ClassName,
+                                    IdentifierInfo *CategoryName);
+
+  static ObjCDependencyDecl *CreateDeserialized(ASTContext &C, GlobalDeclID ID);
+
+  IdentifierInfo *getClassName()    const { return ClassName; }
+  IdentifierInfo *getCategoryName() const { return CategoryName; }
+  SourceLocation  getAtLoc()        const { return AtLoc; }
+
+  static bool classof(const Decl *D) { return classofKind(D->getKind()); }
+  static bool classofKind(Kind K) { return K == ObjCDependency; }
+};
+// @mulle-objc@ dependency directive <
 
 /// ObjCPropertyImplDecl - Represents implementation declaration of a property
 /// in a class or category implementation block. For example:

@@ -751,6 +751,23 @@ void RewriteMulleObjC::HandleTopLevelSingleDecl(Decl *D) {
     Rewrite.ReplaceText(AtLoc, q - p, S);
     break;
   }
+  // @mulle-objc@ dependency directive >
+  case Decl::ObjCDependency: {
+    // Erase file-scope @dependency directives only — impl-scope ones are
+    // erased later in RewriteImplementationDecl.
+    auto *DD = cast<ObjCDependencyDecl>(D);
+    if (!DD->getDeclContext()->isFileContext()) break;
+    SourceLocation AtLoc = DD->getAtLoc();
+    if (AtLoc.isInvalid()) break;
+    SourceLocation End = Lexer::findLocationAfterToken(
+        DD->getLocation(), tok::semi, *SM, LangOpts, false);
+    if (End.isInvalid())
+      End = DD->getLocation();
+    unsigned Len = SM->getFileOffset(End) - SM->getFileOffset(AtLoc);
+    Rewrite.ReplaceText(AtLoc, Len, "");
+    break;
+  }
+  // @mulle-objc@ dependency directive <
   case Decl::Record: {
     auto *RD = cast<RecordDecl>(D);
     if (!RD->isThisDeclarationADefinition()) break;
@@ -1003,9 +1020,68 @@ void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
       else
         FOS << "  self->" << IVarName << " = *(" << IVarType << " *)_param;\n  return NULL;\n}\n";
       Rewrite.InsertTextBefore(D->getAtStartLoc(), Fn);
+    // @mulle-objc@ dependency directive >
+    } else if (M->isSynthesizedDependencies()) {
+      // Emit static dependency array and C stub before the @implementation.
+      std::string ClassName = D->getClassInterface()->getNameAsString();
+      std::string SelfTypeName = "OBJC_CLASS_" + ClassName;
+      std::string ArrName = ClassName + "_dependencies";
+      std::string FnName  = ClassName + "_cm_dependencies";
+      std::string ObjCName = "+[" + ClassName + " dependencies]";
+
+      std::string Buf;
+      llvm::raw_string_ostream OS(Buf);
+      OS << "static mulle_objc_dependency_t " << ArrName
+         << "[] __attribute__((used)) =\n{\n";
+      for (auto *DD : D->dependency_impls()) {
+        std::string cid = DD->getClassName()->getName().str();
+        uint32_t classHash = MulleObjCUniqueIdHashForString(cid);
+        OS << "   { (mulle_objc_classid_t) 0x";
+        OS.write_hex(classHash);
+        OS << "U, ";
+        if (IdentifierInfo *CatII = DD->getCategoryName()) {
+          uint32_t catHash = MulleObjCUniqueIdHashForString(
+              CatII->getName().str());
+          OS << "(mulle_objc_categoryid_t) 0x";
+          OS.write_hex(catHash);
+          OS << "U";
+        } else {
+          OS << "MULLE_OBJC_NO_CATEGORYID";
+        }
+        OS << " },\n";
+      }
+      OS << "   { MULLE_OBJC_NO_CLASSID, MULLE_OBJC_NO_CATEGORYID }\n};\n";
+      OS << "static void *\n" << FnName
+         << "(" << SelfTypeName << " *self, mulle_objc_methodid_t _cmd, void *_param)"
+         << " __asm__(\"" << ObjCName << "\");\n"
+         << "static void *\n" << FnName
+         << "(" << SelfTypeName << " *self, mulle_objc_methodid_t _cmd, void *_param)\n"
+         << "{\n   return " << ArrName << ";\n}\n";
+      Rewrite.InsertTextBefore(D->getAtStartLoc(), Buf);
+    // @mulle-objc@ dependency directive <
     } else if (M->hasBody())
       RewriteMethodDecl(M, D);
   }
+
+  // @mulle-objc@ dependency directive: erase impl-scope @dependency directives >
+  {
+    unsigned ImplStartOff = SM->getFileOffset(D->getAtStartLoc());
+    unsigned ImplEndOff   = SM->getFileOffset(D->getEndLoc());
+    for (auto *DD : D->dependency_impls()) {
+      SourceLocation AtLoc = DD->getAtLoc();
+      if (AtLoc.isInvalid()) continue;
+      unsigned AtOff = SM->getFileOffset(AtLoc);
+      // Skip TU-level copies (their AtLoc is outside this @implementation).
+      if (AtOff < ImplStartOff || AtOff > ImplEndOff) continue;
+      SourceLocation End = Lexer::findLocationAfterToken(
+          DD->getLocation(), tok::semi, *SM, LangOpts, false);
+      if (End.isInvalid())
+        End = DD->getLocation();
+      unsigned Len = SM->getFileOffset(End) - AtOff;
+      Rewrite.ReplaceText(AtLoc, Len, "");
+    }
+  }
+  // @mulle-objc@ dependency directive <
 
   // @synthesize: erase (accessor already emitted above); @dynamic: no-op comment
   for (auto *PI : D->property_impls()) {

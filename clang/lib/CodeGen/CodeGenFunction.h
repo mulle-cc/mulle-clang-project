@@ -71,6 +71,7 @@ class ObjCInterfaceDecl;
 class ObjCIvarDecl;
 class ObjCMethodDecl;
 class ObjCImplementationDecl;
+class ObjCImplDecl; // @mulle-objc@ dependency directive
 class ObjCPropertyImplDecl;
 class TargetInfo;
 class VarDecl;
@@ -2314,6 +2315,12 @@ public:
                                         llvm::FunctionCallee propertyFn);
 
   // @mulle-objc@ new property attributes container <
+
+  // @mulle-objc@ dependency directive >
+  /// GenerateObjCDependencies - Synthesize the +dependencies method for an
+  /// @implementation that has @dependency directives.
+  void GenerateObjCDependencies(ObjCImplDecl *IMP, const ObjCMethodDecl *MD);
+  // @mulle-objc@ dependency directive <
 
   // @mulle-objc@ ObjC properties: helper function
   void emitObjCSetterBodyStatement( ObjCIvarRefExpr &ivarRef, QualType argType, Expr *expr);

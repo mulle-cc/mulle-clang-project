@@ -1026,6 +1026,22 @@ public:
                               SourceLocation PropertyIvarLoc,
                               ObjCPropertyQueryKind QueryKind);
 
+  // @mulle-objc@ dependency directive >
+  /// TU-level @dependency list — accumulated for the whole translation unit,
+  /// never reset.  Every @implementation in this TU will get these entries.
+  SmallVector<ObjCDependencyDecl *, 4> TUDependencies;
+
+  /// Per-@implementation @dependency list — reset at the start of each
+  /// @implementation.
+  SmallVector<ObjCDependencyDecl *, 4> ImplDependencies;
+
+  Decl *ActOnDependencyDecl(Scope *S, SourceLocation AtLoc,
+                             SourceLocation ClassLoc,
+                             IdentifierInfo *ClassName,
+                             IdentifierInfo *CategoryName,
+                             Decl *ImplDecl);
+  // @mulle-objc@ dependency directive <
+
   /// Called by ActOnProperty to handle \@property declarations in
   /// class extensions.
   ObjCPropertyDecl *HandlePropertyInClassExtension(

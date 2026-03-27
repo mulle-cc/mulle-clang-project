@@ -7352,16 +7352,40 @@ void CodeGenModule::EmitTopLevelDecl(Decl *D) {
     break;
   }
 
-  case Decl::ObjCCategoryImpl:
+  case Decl::ObjCCategoryImpl: {
     // Categories have properties but don't support synthesize so we
     // can ignore them here.
+    // @mulle-objc@ dependency directive >
+    // Must generate +dependencies before GenerateCategory so the method
+    // is in MethodDefinitions when emitMethodConstant looks it up.
+    {
+      auto *CatDecl = cast<ObjCCategoryImplDecl>(D);
+      Selector DepSel = getContext().Selectors.getNullarySelector(
+          &getContext().Idents.get("dependencies"));
+      if (auto *DepMD = CatDecl->getMethod(DepSel, /*isInstance=*/false))
+        if (DepMD->isSynthesizedDependencies())
+          CodeGenFunction(*this).GenerateObjCDependencies(CatDecl, DepMD);
+    }
+    // @mulle-objc@ dependency directive <
     ObjCRuntime->GenerateCategory(cast<ObjCCategoryImplDecl>(D));
     break;
+  }
 
   case Decl::ObjCImplementation: {
     auto *OMD = cast<ObjCImplementationDecl>(D);
     EmitObjCPropertyImplementations(OMD);
     EmitObjCIvarInitializations(OMD);
+    // @mulle-objc@ dependency directive >
+    // Must generate +dependencies before GenerateClass so the method
+    // is in MethodDefinitions when emitMethodConstant looks it up.
+    {
+      Selector DepSel = getContext().Selectors.getNullarySelector(
+          &getContext().Idents.get("dependencies"));
+      if (auto *DepMD = OMD->getMethod(DepSel, /*isInstance=*/false))
+        if (DepMD->isSynthesizedDependencies())
+          CodeGenFunction(*this).GenerateObjCDependencies(OMD, DepMD);
+    }
+    // @mulle-objc@ dependency directive <
     ObjCRuntime->GenerateClass(OMD);
     // Emit global variable debug information.
     if (CGDebugInfo *DI = getModuleDebugInfo())

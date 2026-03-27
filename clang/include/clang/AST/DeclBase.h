@@ -1940,10 +1940,16 @@ protected:
     /// Indicates if the method was a definition but its body was skipped.
     LLVM_PREFERRED_TYPE(bool)
     uint64_t HasSkippedBody : 1;
+
+    // @mulle-objc@ dependency directive >
+    /// True if this method is a synthesized +dependencies stub.
+    LLVM_PREFERRED_TYPE(bool)
+    uint64_t IsSynthesizedDependencies : 1;
+    // @mulle-objc@ dependency directive <
   };
 
   /// Number of inherited and non-inherited bits in ObjCMethodDeclBitfields.
-  enum { NumObjCMethodDeclBits = NumDeclContextBits + 24 };
+  enum { NumObjCMethodDeclBits = NumDeclContextBits + 25 };
 
   /// Stores the bits used by ObjCContainerDecl.
   /// If modified NumObjCContainerDeclBits and the accessor

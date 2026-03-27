@@ -2367,6 +2367,9 @@ ObjCCategoryImplDecl *SemaObjC::ActOnStartCategoryImplementation(
 
   CheckObjCDeclScope(CDecl);
   ActOnObjCContainerStartDefinition(CDecl);
+  // @mulle-objc@ dependency directive >
+  ImplDependencies.clear();
+  // @mulle-objc@ dependency directive <
   return CDecl;
 }
 
@@ -2502,6 +2505,9 @@ ObjCImplementationDecl *SemaObjC::ActOnStartClassImplementation(
   }
 
   ActOnObjCContainerStartDefinition(IMPDecl);
+  // @mulle-objc@ dependency directive >
+  ImplDependencies.clear();
+  // @mulle-objc@ dependency directive <
   return IMPDecl;
 }
 
@@ -4434,6 +4440,30 @@ static void DiagnoseCategoryDirectMembersProtocolConformance(
                                                    PDecl->protocols());
 }
 
+// @mulle-objc@ dependency directive >
+Decl *SemaObjC::ActOnDependencyDecl(Scope *S, SourceLocation AtLoc,
+                                    SourceLocation ClassLoc,
+                                    IdentifierInfo *ClassName,
+                                    IdentifierInfo *CategoryName,
+                                    Decl *ImplDecl) {
+  ASTContext &Context = getASTContext();
+  if (ImplDecl) {
+    // Inside @implementation — store on the impl decl's context.
+    auto *ImpDecl = cast<ObjCImplDecl>(ImplDecl);
+    ObjCDependencyDecl *DD = ObjCDependencyDecl::Create(
+        Context, ImpDecl, AtLoc, ClassLoc, ClassName, CategoryName);
+    ImpDecl->addDecl(DD);
+    ImplDependencies.push_back(DD);
+    return DD;
+  }
+  // File scope — store in the TU list.
+  ObjCDependencyDecl *DD = ObjCDependencyDecl::Create(
+      Context, SemaRef.CurContext, AtLoc, ClassLoc, ClassName, CategoryName);
+  TUDependencies.push_back(DD);
+  return DD;
+}
+// @mulle-objc@ dependency directive <
+
 // Note: For class/category implementations, allMethods is always null.
 Decl *SemaObjC::ActOnAtEnd(Scope *S, SourceRange AtEnd,
                            ArrayRef<Decl *> allMethods,
@@ -4672,6 +4702,47 @@ Decl *SemaObjC::ActOnAtEnd(Scope *S, SourceRange AtEnd,
       Diag(IntfDecl->getLocation(), diag::err_class_stub_subclassing_mismatch);
   }
   DiagnoseVariableSizedIvars(SemaRef, OCD);
+
+  // @mulle-objc@ dependency synthesis >
+  // Synthesize +dependencies for this @implementation if any @dependency
+  // directives are present (either impl-level or TU-level).
+  if (ObjCImplDecl *ImpDecl = dyn_cast<ObjCImplDecl>(ClassDecl)) {
+    bool hasImplDeps = ImpDecl->depimpl_begin() != ImpDecl->depimpl_end();
+    bool hasTUDeps   = !TUDependencies.empty();
+    if (hasImplDeps || hasTUDeps) {
+      // Append TU-level dependency decls into this impl so CodeGen can see
+      // all entries via dependency_impls() in impl-first, TU-second order.
+      for (ObjCDependencyDecl *TUD : TUDependencies) {
+        ObjCDependencyDecl *Copy = ObjCDependencyDecl::Create(
+            Context, ImpDecl, TUD->getAtLoc(), TUD->getLocation(),
+            TUD->getClassName(), TUD->getCategoryName());
+        ImpDecl->addDecl(Copy);
+      }
+      Selector DepSel = Context.Selectors.getNullarySelector(
+          &Context.Idents.get("dependencies"));
+      if (ImpDecl->getMethod(DepSel, /*isInstance=*/false)) {
+        // Manual +dependencies exists — warn and leave it in place.
+        Diag(ImpDecl->getLocation(),
+             diag::warn_mulle_objc_dependency_manual_method);
+      } else {
+        // Synthesize +dependencies.
+        ObjCMethodDecl *MD = ObjCMethodDecl::Create(
+            Context,
+            ImpDecl->getLocation(), ImpDecl->getAtEndRange().getEnd(),
+            DepSel, Context.VoidPtrTy, /*ReturnTInfo=*/nullptr,
+            ImpDecl,
+            /*isInstance=*/false, /*isVariadic=*/false,
+            /*isPropertyAccessor=*/false,
+            /*isSynthesizedAccessorStub=*/false,
+            /*isImplicitlyDeclared=*/false, /*isDefined=*/false,
+            ObjCImplementationControl::Required,
+            /*HasRelatedResultType=*/false);
+        MD->setSynthesizedDependencies(true);
+        ImpDecl->addDecl(MD);
+      }
+    }
+  }
+  // @mulle-objc@ dependency synthesis <
   if (isInterfaceDeclKind) {
     // Reject invalid vardecls.
     for (unsigned i = 0, e = allTUVars.size(); i != e; i++) {

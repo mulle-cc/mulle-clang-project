@@ -2521,6 +2521,69 @@ void CodeGenFunction::GenerateObjCCtorDtorMethod(ObjCImplementationDecl *IMP,
   FinishFunction();
 }
 
+// @mulle-objc@ dependency directive >
+extern "C" {
+  extern uint32_t MulleObjCUniqueIdHashForString(std::string s);
+}
+/// GenerateObjCDependencies - Synthesize the +dependencies method for an
+/// @implementation that has @dependency directives.
+///
+/// Emits (equivalent to):
+///   static mulle_objc_dependency_t deps[] = {
+///     { classid(A), catid(A) }, ...
+///     { 0, 0 }  // terminator
+///   };
+///   return deps;
+///
+void CodeGenFunction::GenerateObjCDependencies(ObjCImplDecl *IMP,
+                                               const ObjCMethodDecl *MD) {
+  llvm::LLVMContext &VMContext = CGM.getLLVMContext();
+  llvm::Type *Int32Ty = llvm::Type::getInt32Ty(VMContext);
+
+  // Each dependency entry is { uint32_t classid; uint32_t categoryid; }
+  llvm::StructType *DepEntryTy =
+      llvm::StructType::get(VMContext, {Int32Ty, Int32Ty});
+
+  SmallVector<llvm::Constant *, 8> Entries;
+  for (auto *DD : IMP->dependency_impls()) {
+    uint32_t ClassId = MulleObjCUniqueIdHashForString(
+        DD->getClassName()->getName().str());
+    uint32_t CatId = DD->getCategoryName()
+        ? MulleObjCUniqueIdHashForString(
+              DD->getCategoryName()->getName().str())
+        : 0u;
+    Entries.push_back(llvm::ConstantStruct::get(DepEntryTy, {
+        llvm::ConstantInt::get(Int32Ty, ClassId),
+        llvm::ConstantInt::get(Int32Ty, CatId)
+    }));
+  }
+  // Terminator: { MULLE_OBJC_NO_CLASSID, MULLE_OBJC_NO_CATEGORYID } = { 0, 0 }
+  Entries.push_back(llvm::ConstantStruct::get(DepEntryTy, {
+      llvm::ConstantInt::get(Int32Ty, 0),
+      llvm::ConstantInt::get(Int32Ty, 0)
+  }));
+
+  llvm::ArrayType *ArrTy = llvm::ArrayType::get(DepEntryTy, Entries.size());
+  llvm::Constant *Init = llvm::ConstantArray::get(ArrTy, Entries);
+
+  // Create a private global holding the static dependency table.
+  std::string GVName = "_mulle_objc_dependencies_" + IMP->getNameAsString();
+  auto *GV = new llvm::GlobalVariable(
+      CGM.getModule(), ArrTy, /*isConstant=*/true,
+      llvm::GlobalValue::PrivateLinkage, Init, GVName);
+  GV->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
+
+  // Generate the method body: return pointer to the table.
+  auto *MDMutable = const_cast<ObjCMethodDecl *>(MD);
+  MDMutable->createImplicitParams(CGM.getContext(), IMP->getClassInterface());
+  StartObjCMethod(MDMutable, IMP->getClassInterface());
+
+  llvm::Value *Ptr = Builder.CreateBitCast(GV, CGM.Int8PtrTy);
+  EmitReturnOfRValue(RValue::get(Ptr), MD->getReturnType());
+  FinishFunction(MD->getEndLoc());
+}
+// @mulle-objc@ dependency directive <
+
 llvm::Value *CodeGenFunction::LoadObjCSelf() {
   VarDecl *Self = cast<ObjCMethodDecl>(CurFuncDecl)->getSelfDecl();
   DeclRefExpr DRE(getContext(), Self,

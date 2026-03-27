@@ -2512,3 +2512,24 @@ SourceRange ObjCPropertyImplDecl::getSourceRange() const {
 
   return SourceRange(AtLoc, EndLoc);
 }
+
+// @mulle-objc@ dependency directive >
+//===----------------------------------------------------------------------===//
+// ObjCDependencyDecl
+//===----------------------------------------------------------------------===//
+
+ObjCDependencyDecl *ObjCDependencyDecl::Create(ASTContext &C, DeclContext *DC,
+                                               SourceLocation AtLoc,
+                                               SourceLocation ClassLoc,
+                                               IdentifierInfo *ClassName,
+                                               IdentifierInfo *CategoryName) {
+  return new (C, DC) ObjCDependencyDecl(DC, AtLoc, ClassLoc, ClassName,
+                                        CategoryName);
+}
+
+ObjCDependencyDecl *
+ObjCDependencyDecl::CreateDeserialized(ASTContext &C, GlobalDeclID ID) {
+  return new (C, ID) ObjCDependencyDecl(nullptr, SourceLocation(),
+                                        SourceLocation(), nullptr, nullptr);
+}
+// @mulle-objc@ dependency directive <

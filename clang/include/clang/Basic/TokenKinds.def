@@ -866,6 +866,10 @@ OBJC_AT_KEYWORD(protocolimplementation)
 OBJC_AT_KEYWORD(method_implementation)
 // @mulle-objc@ method_implementation keyword <
 
+// @mulle-objc@ dependency keyword >
+OBJC_AT_KEYWORD(dependency)
+// @mulle-objc@ dependency keyword <
+
 //===----------------------------------------------------------------------===//
 // Notable identifiers.
 //===----------------------------------------------------------------------===//

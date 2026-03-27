@@ -1,0 +1,5 @@
+MULLE_CLANG_PROJECT_TAG=21.1.8.5
+mulle clang version 21.1.8 (git@github.com:mulle-cc/mulle-clang-project.git 9d413204031982fb3b4cce9f9cfaaffc6349ee8b)
+Target: x86_64-unknown-linux-gnu
+Thread model: posix
+InstalledDir: /opt/mulle-clang-project/21.1.8.5/bin

@@ -168,6 +168,7 @@ namespace clang {
     void VisitObjCCompatibleAliasDecl(ObjCCompatibleAliasDecl *D);
     void VisitObjCPropertyDecl(ObjCPropertyDecl *D);
     void VisitObjCPropertyImplDecl(ObjCPropertyImplDecl *D);
+    void VisitObjCDependencyDecl(ObjCDependencyDecl *D); // @mulle-objc@
     void VisitOMPThreadPrivateDecl(OMPThreadPrivateDecl *D);
     void VisitOMPAllocateDecl(OMPAllocateDecl *D);
     void VisitOMPRequiresDecl(OMPRequiresDecl *D);
@@ -959,7 +960,7 @@ void ASTDeclWriter::VisitCXXDeductionGuideDecl(CXXDeductionGuideDecl *D) {
 }
 
 void ASTDeclWriter::VisitObjCMethodDecl(ObjCMethodDecl *D) {
-  static_assert(DeclContext::NumObjCMethodDeclBits == 37,
+  static_assert(DeclContext::NumObjCMethodDeclBits == 38,
                 "You need to update the serializer after you change the "
                 "ObjCMethodDeclBits");
 
@@ -977,6 +978,7 @@ void ASTDeclWriter::VisitObjCMethodDecl(ObjCMethodDecl *D) {
   Record.push_back(D->isVariadic());
   Record.push_back(D->isPropertyAccessor());
   Record.push_back(D->isSynthesizedAccessorStub());
+  Record.push_back(D->isSynthesizedDependencies());
   Record.push_back(D->isDefined());
   Record.push_back(D->isOverriding());
   Record.push_back(D->hasSkippedBody());
@@ -1212,6 +1214,16 @@ void ASTDeclWriter::VisitObjCPropertyImplDecl(ObjCPropertyImplDecl *D) {
   Record.AddStmt(D->getSetterCXXAssignment());
   Code = serialization::DECL_OBJC_PROPERTY_IMPL;
 }
+
+// @mulle-objc@ dependency directive >
+void ASTDeclWriter::VisitObjCDependencyDecl(ObjCDependencyDecl *D) {
+  VisitDecl(D);
+  Record.AddSourceLocation(D->getAtLoc());
+  Record.AddIdentifierRef(D->getClassName());
+  Record.AddIdentifierRef(D->getCategoryName());
+  Code = serialization::DECL_OBJC_DEPENDENCY;
+}
+// @mulle-objc@ dependency directive <
 
 void ASTDeclWriter::VisitFieldDecl(FieldDecl *D) {
   VisitDeclaratorDecl(D);

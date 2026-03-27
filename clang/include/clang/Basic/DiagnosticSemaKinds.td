@@ -8214,6 +8214,14 @@ def err_mulle_objc_universename_not_an_identifier: Error<
 def err_mulle_dynamic_property_synthesize  : Error<
   "%0 is a dynamic property, that can not be synthesized">;
 
+// @mulle-objc@ dependency directive >
+def warn_mulle_objc_dependency_manual_method : Warning<
+  "@dependency directives ignored: +dependencies is defined manually">,
+  InGroup<ObjCProtocolMethodImpl>;
+def err_mulle_objc_dependency_in_interface : Error<
+  "@dependency is not valid inside @interface or @protocol">;
+// @mulle-objc@ dependency directive <
+
 // @mulle-objc@ compiler: error message definitions end <
 
 // @mulle-objc@ mulle_confined_loop diagnostics >
