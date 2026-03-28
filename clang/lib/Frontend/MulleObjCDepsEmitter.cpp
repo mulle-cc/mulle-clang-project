@@ -86,6 +86,32 @@ public:
       return;
     }
 
+    // Leading comment: show the source path relative to the common ancestor
+    // of the input and output directory, so consumers see e.g. "src/main.m".
+    // Walk up from Dir until the relative input path has at least one
+    // directory component (i.e. more context than just the bare filename).
+    if (!InputPath.empty()) {
+      std::string relInput;
+      llvm::SmallString<256> Base(Dir);
+      for (;;) {
+        llvm::sys::path::remove_filename(Base);
+        if (Base.empty() || Base == "/")
+          break;
+        StringRef baseRef(Base);
+        if (InputPath.starts_with(baseRef) &&
+            InputPath.size() > baseRef.size() &&
+            InputPath[baseRef.size()] == '/') {
+          std::string rel = InputPath.drop_front(baseRef.size() + 1).str();
+          relInput = rel; // keep updating; last wins (deepest w/ dir component)
+          if (!llvm::sys::path::parent_path(rel).empty())
+            break; // found a rel path with a directory part — done
+        }
+      }
+      if (relInput.empty())
+        relInput = llvm::sys::path::filename(InputPath).str();
+      OS << "// " << relInput << "\n";
+    }
+
     for (const Entry &E : Entries) {
       std::string cid = hexId(MulleObjCUniqueIdHashForString(E.ClassName));
       if (E.CategoryName.empty()) {
