@@ -3305,6 +3305,13 @@ static bool ParseFrontendArgs(FrontendOptions &Opts, ArgList &Args,
 
   Opts.DashX = DashX;
 
+  // @mulle-objc@ --mulle-objc-emit-deps >
+  if (const Arg *A = Args.getLastArg(OPT_mulle_objc_emit_deps)) {
+    Opts.MulleObjCEmitDeps = true;
+    Opts.MulleObjCEmitDepsDir = A->getValue(); // empty when bare flag
+  }
+  // @mulle-objc@ --mulle-objc-emit-deps <
+
   return Diags.getNumErrors() == NumErrorsBefore;
 }
 

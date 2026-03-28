@@ -446,6 +446,13 @@ public:
   /// The output file, if any.
   std::string OutputFile;
 
+  // @mulle-objc@ --mulle-objc-emit-deps >
+  /// True when --mulle-objc-emit-deps[=<dir>] was passed.
+  bool MulleObjCEmitDeps = false;
+  /// Output directory for .deps.inc files. Empty means "use -o output directory".
+  std::string MulleObjCEmitDepsDir;
+  // @mulle-objc@ --mulle-objc-emit-deps <
+
   /// If given, the new suffix for fix-it rewritten files.
   std::string FixItSuffix;
 

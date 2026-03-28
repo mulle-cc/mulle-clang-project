@@ -1,0 +1,113 @@
+// @mulle-objc@ --mulle-objc-emit-deps implementation >
+//===--- MulleObjCDepsEmitter.cpp - .deps.inc sidecar writer --------------===//
+//
+// Emits a <basename>.deps.inc file for each compiled translation unit when
+// --mulle-objc-emit-deps[=<dir>] is set. Works with any frontend action
+// (normal compile, rewrite, syntax-only, etc.) via CreateWrappedASTConsumer.
+//
+// Output format: one array-element initializer per @implementation, suitable
+// for #include inside a struct initializer, matching the objc-deps.inc
+// convention used by mulle-objc build infrastructure.
+//===----------------------------------------------------------------------===//
+
+#include "clang/AST/ASTConsumer.h"
+#include "clang/AST/DeclObjC.h"
+#include "clang/Frontend/CompilerInstance.h"
+#include "clang/Frontend/FrontendDiagnostic.h"
+#include "clang/Frontend/FrontendOptions.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Path.h"
+#include "llvm/Support/raw_ostream.h"
+#include <string>
+#include <vector>
+
+extern "C" uint32_t MulleObjCUniqueIdHashForString(std::string s);
+
+namespace clang {
+
+/// Format a uint32_t as an 8-digit lowercase hex string.
+static std::string hexId(uint32_t v) {
+  char buf[9];
+  snprintf(buf, sizeof(buf), "%08x", v);
+  return buf;
+}
+
+/// ASTConsumer that collects all @implementation decls and writes a
+/// .deps.inc sidecar file in HandleTranslationUnit.
+class MulleObjCDepsEmitter : public ASTConsumer {
+  CompilerInstance &CI;
+
+  struct Entry {
+    std::string ClassName;
+    std::string CategoryName; // empty for plain class / protocolclass impls
+  };
+  std::vector<Entry> Entries;
+
+public:
+  explicit MulleObjCDepsEmitter(CompilerInstance &CI) : CI(CI) {}
+
+  bool HandleTopLevelDecl(DeclGroupRef DG) override {
+    for (Decl *D : DG) {
+      if (auto *Impl = dyn_cast<ObjCImplementationDecl>(D)) {
+        Entries.push_back({Impl->getClassInterface()->getNameAsString(), ""});
+      } else if (auto *Cat = dyn_cast<ObjCCategoryImplDecl>(D)) {
+        Entries.push_back({Cat->getClassInterface()->getNameAsString(),
+                           Cat->getNameAsString()});
+      }
+    }
+    return true;
+  }
+
+  void HandleTranslationUnit(ASTContext &) override {
+    // Determine output directory: explicit dir > output file dir > "."
+    const FrontendOptions &FOpts = CI.getFrontendOpts();
+    std::string Dir = FOpts.MulleObjCEmitDepsDir;
+    if (Dir.empty()) {
+      if (!FOpts.OutputFile.empty())
+        Dir = llvm::sys::path::parent_path(FOpts.OutputFile).str();
+      if (Dir.empty())
+        Dir = ".";
+    }
+
+    // Build output path: <dir>/<source-basename>.deps.inc
+    StringRef InputPath;
+    if (!FOpts.Inputs.empty())
+      InputPath = FOpts.Inputs[0].getFile();
+    llvm::SmallString<256> OutPath(Dir);
+    llvm::sys::path::append(OutPath,
+        llvm::sys::path::stem(InputPath.empty() ? "output" : InputPath));
+    OutPath += ".deps.inc";
+
+    std::error_code EC;
+    llvm::raw_fd_ostream OS(OutPath, EC, llvm::sys::fs::OF_Text);
+    if (EC) {
+      CI.getDiagnostics().Report(diag::err_fe_unable_to_open_output)
+          << OutPath << EC.message();
+      return;
+    }
+
+    for (const Entry &E : Entries) {
+      std::string cid = hexId(MulleObjCUniqueIdHashForString(E.ClassName));
+      if (E.CategoryName.empty()) {
+        OS << "      { @selector( " << E.ClassName
+           << "), MULLE_OBJC_NO_CATEGORYID },      // "
+           << cid << ";" << E.ClassName << ";;\n";
+      } else {
+        std::string catid = hexId(MulleObjCUniqueIdHashForString(E.CategoryName));
+        OS << "      { @selector( " << E.ClassName
+           << "), @selector( " << E.CategoryName << ") },      // "
+           << cid << ";" << E.ClassName << ";"
+           << catid << ";" << E.CategoryName << "\n";
+      }
+    }
+    // Empty TU: file intentionally left empty (zero bytes).
+  }
+};
+
+std::unique_ptr<ASTConsumer>
+CreateMulleObjCDepsEmitter(CompilerInstance &CI) {
+  return std::make_unique<MulleObjCDepsEmitter>(CI);
+}
+
+} // namespace clang
+// @mulle-objc@ --mulle-objc-emit-deps implementation <

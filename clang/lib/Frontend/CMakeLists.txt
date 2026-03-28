@@ -29,6 +29,7 @@ add_clang_library(clangFrontend
   LayoutOverrideSource.cpp
   LogDiagnosticPrinter.cpp
   ModuleDependencyCollector.cpp
+  MulleObjCDepsEmitter.cpp
   MultiplexConsumer.cpp
   PrecompiledPreamble.cpp
   PrintPreprocessedOutput.cpp

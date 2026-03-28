@@ -6036,6 +6036,16 @@ def mulle_objc_emit_c : Flag<["--"], "mulle-objc-emit-c">, Flags<[NoXarchOption]
   Alias<rewrite_mulle_objc>,
   HelpText<"Emit Objective-C source as plain C for mulle-objc runtime (output to stdout if no -o given)">, Group<Action_Group>;
 // @mulle-objc@ --mulle-objc-emit-c flag <
+// @mulle-objc@ --mulle-objc-emit-deps flag >
+def mulle_objc_emit_deps : Joined<["--"], "mulle-objc-emit-deps=">,
+  Flags<[NoXarchOption]>, Visibility<[ClangOption, CC1Option]>,
+  HelpText<"Write a .deps.inc sidecar file listing @implementation blocks; "
+           "argument is the output directory (omit or use empty to use the -o directory)">;
+def mulle_objc_emit_deps_bare : Flag<["--"], "mulle-objc-emit-deps">,
+  Flags<[NoXarchOption]>, Visibility<[ClangOption, CC1Option]>,
+  Alias<mulle_objc_emit_deps>, AliasArgs<[""]>,
+  HelpText<"Write a .deps.inc sidecar file into the -o output directory">;
+// @mulle-objc@ --mulle-objc-emit-deps flag <
 def rewrite_legacy_objc : Flag<["-"], "rewrite-legacy-objc">,
   Flags<[NoXarchOption]>,
   HelpText<"Rewrite Legacy Objective-C source to C++">;

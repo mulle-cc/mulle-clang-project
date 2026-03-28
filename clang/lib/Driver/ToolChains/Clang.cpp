@@ -4281,6 +4281,12 @@ static void RenderObjCOptions(const ToolChain &TC, const Driver &D,
       //Args.ClaimAllArgs(options::OPT_fobjc_universename_EQ);
       Args.ClaimAllArgs(options::OPT_fno_objc_classcall_use_self);
   }
+  // @mulle-objc@ forward --mulle-objc-emit-deps to cc1 (works for any ObjC runtime) >
+  if (const Arg *A = Args.getLastArg(options::OPT_mulle_objc_emit_deps)) {
+      StringRef Val = A->getValue();
+      CmdArgs.push_back(Args.MakeArgString("--mulle-objc-emit-deps=" + Val));
+  }
+  // @mulle-objc@ forward --mulle-objc-emit-deps to cc1 <
   // @mulle-objc@ arguments <
 
   // -fobjc-infer-related-result-type is the default, except in the Objective-C
