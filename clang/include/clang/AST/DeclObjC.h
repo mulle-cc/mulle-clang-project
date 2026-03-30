@@ -501,13 +501,13 @@ public:
 
   // @mulle-objc@ method_implementation: alias accessors >
   bool isAlias() const { return !AliasTarget.isNull(); }
-  bool isMethodAlias() const { return AliasTarget.is<ObjCMethodDecl *>(); }
-  bool isFunctionAlias() const { return AliasTarget.is<FunctionDecl *>(); }
+  bool isMethodAlias() const { return isa<ObjCMethodDecl *>(AliasTarget); }
+  bool isFunctionAlias() const { return isa<FunctionDecl *>(AliasTarget); }
   ObjCMethodDecl *getAliasMethod() const {
-    return AliasTarget.dyn_cast<ObjCMethodDecl *>();
+    return dyn_cast<ObjCMethodDecl *>(AliasTarget);
   }
   FunctionDecl *getAliasFunction() const {
-    return AliasTarget.dyn_cast<FunctionDecl *>();
+    return dyn_cast<FunctionDecl *>(AliasTarget);
   }
   void setAliasTarget(ObjCMethodDecl *M) { AliasTarget = M; }
   void setAliasTarget(FunctionDecl *F) { AliasTarget = F; }

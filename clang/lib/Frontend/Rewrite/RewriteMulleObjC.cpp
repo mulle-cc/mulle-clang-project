@@ -252,7 +252,7 @@ public:
     {
       size_t p = 0;
       while ((p = Result.find("id ", p)) != std::string::npos) {
-        bool atWordBoundary = (p == 0 || !isalnum((unsigned char)Result[p-1]) && Result[p-1] != '_');
+        bool atWordBoundary = (p == 0 || (!isalnum((unsigned char)Result[p-1]) && Result[p-1] != '_'));
         if (atWordBoundary)
           Result.replace(p, 3, "void *");
         else
@@ -797,6 +797,8 @@ void RewriteMulleObjC::HandleTopLevelSingleDecl(Decl *D) {
     }
     break;
   }
+  default:
+    break;
   }
 }
 

@@ -433,6 +433,9 @@ bool serialization::isRedeclarableDeclKind(unsigned Kind) {
   case Decl::LinkageSpec:
   case Decl::Export:
   case Decl::ObjCPropertyImpl:
+  // @mulle-objc@ dependency directive >
+  case Decl::ObjCDependency:
+  // @mulle-objc@ dependency directive <
   case Decl::PragmaComment:
   case Decl::PragmaDetectMismatch:
   case Decl::FileScopeAsm:

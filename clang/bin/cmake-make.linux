@@ -91,7 +91,7 @@ do
       ;;
 
       llvm-nm|llvm-cov)
-         ${INSTALL_SUDO} mv "$bin" "${bin/llvm-/mulle-}" || exit 1
+         ${INSTALL_SUDO} mv "$bin" "mulle-${bin#llvm-}" || exit 1
       ;;
 
       analyze-build*|scan-build*|clangd|clangd-indexer)

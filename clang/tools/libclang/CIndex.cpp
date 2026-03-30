@@ -7269,6 +7269,9 @@ CXCursor clang_getCursorDefinition(CXCursor C) {
   case Decl::LinkageSpec:
   case Decl::Export:
   case Decl::ObjCPropertyImpl:
+  // @mulle-objc@ dependency directive >
+  case Decl::ObjCDependency:
+  // @mulle-objc@ dependency directive <
   case Decl::FileScopeAsm:
   case Decl::TopLevelStmt:
   case Decl::StaticAssert:
