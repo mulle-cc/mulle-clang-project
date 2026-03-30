@@ -406,11 +406,12 @@ void SemaObjC::ActOnStartOfObjCMethodDef(Scope *FnBodyScope, Decl *D) {
       SemaRef.PushOnScopeChains(MDecl->getParamDecl(), FnBodyScope);
       // @mulle-objc@ MetaABI shadow: create local shadow VarDecls for debugger >
       // Emit  <type> a = _param->a;  for each field so debugger can 'print a'
-      // For voidptr-compatible single-field params (e.g. struct tiny),
-      // _param holds the packed value, not a pointer — unpack via
-      // *(FieldType *)&_param instead of _param->field.
       if( RecordDecl *RD = MDecl->getParamRecord())
       {
+         // @mulle-objc@ MetaABI shadow: voidptr-packed struct unpack >
+         // For a single-field param whose type is a small non-float struct
+         // (fits in void*, voidptr-compatible per the runtime macro), _param
+         // holds the packed value — unpack via *(FieldType *)&_param.
          bool isVoidPtrPacked = false;
          if( std::distance( RD->field_begin(), RD->field_end()) == 1)
          {
@@ -423,6 +424,7 @@ void SemaObjC::ActOnStartOfObjCMethodDef(Scope *FnBodyScope, Decl *D) {
                 !FT->hasFloatingRepresentation())
                isVoidPtrPacked = true;
          }
+         // @mulle-objc@ MetaABI shadow: voidptr-packed struct unpack <
 
          for( auto *FD : RD->fields())
          {
@@ -432,6 +434,7 @@ void SemaObjC::ActOnStartOfObjCMethodDef(Scope *FnBodyScope, Decl *D) {
                                                FD->getIdentifier(), FD->getType(),
                                                Context.getTrivialTypeSourceInfo( FD->getType()),
                                                SC_None);
+            // @mulle-objc@ MetaABI shadow: voidptr-packed struct unpack >
             if( isVoidPtrPacked)
             {
                // _param is the packed value: *(FieldType *)&_param
@@ -459,6 +462,7 @@ void SemaObjC::ActOnStartOfObjCMethodDef(Scope *FnBodyScope, Decl *D) {
                }
             }
             else
+            // @mulle-objc@ MetaABI shadow: voidptr-packed struct unpack <
             {
                ExprResult Init = SemaRef.GetMulle_paramFieldExpr( FD, FnBodyScope, SourceLocation());
                if( !Init.isInvalid())
