@@ -2252,7 +2252,7 @@ public:
   }
 
   /// @mulle-objc@ : MetaABI Helper >
-  bool   typeNeedsMetaABIAlloca( QualType type);
+  bool   typeNeedsMetaABIAlloca( QualType type, bool isParam = false);
   /// @mulle-objc@ : MetaABI Helper <
 
   /// Emit the Objective-CC type encoding for the given type \p T into

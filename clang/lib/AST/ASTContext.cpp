@@ -9083,7 +9083,7 @@ void ASTContext::getObjCEncodingForType(QualType T, std::string& S,
 // 1. if FP it's in _param,
 // 2. if __alignof__(x) > __alignof__( void *), it's in _param
 // 3. if sizeof(x) >sizeof( void *), it's in _param
-bool   ASTContext::typeNeedsMetaABIAlloca( QualType type)
+bool   ASTContext::typeNeedsMetaABIAlloca( QualType type, bool isParam)
 {
    if( type->isIncompleteType())
    {
@@ -9097,12 +9097,30 @@ bool   ASTContext::typeNeedsMetaABIAlloca( QualType type)
    // should log this, as this is unusual
    if( getTypeAlign( type) > getTypeAlign( VoidPtrTy))
       return( true);
-   if( type->isFloatingType())
-      return( true);
-   if( type->isUnionType())
-      return( true);
-   if( type->isStructureOrClassType())
-      return( true);
+   // @mulle-objc@ MetaABI voidptr-packed param fix >
+   // For params: struct/union types that fit in void* are packed by value —
+   // no alloca needed. Float types still need alloca (FP register issues).
+   // For return types, keep existing behaviour.
+   if( !isParam)
+   {
+      if( type->isFloatingType())
+         return( true);
+      if( type->isUnionType())
+         return( true);
+      if( type->isStructureOrClassType())
+         return( true);
+   }
+   else
+   {
+      // float/union/struct that fit in void* are packed by value by the runtime
+      // if( type->isFloatingType())
+      //    return( true);
+      // if( type->isUnionType())
+      //    return( true);
+      // if( type->isStructureOrClassType())
+      //    return( true);
+   }
+   // @mulle-objc@ MetaABI voidptr-packed param fix <
 
    return( false);
 }

@@ -409,21 +409,9 @@ void SemaObjC::ActOnStartOfObjCMethodDef(Scope *FnBodyScope, Decl *D) {
       if( RecordDecl *RD = MDecl->getParamRecord())
       {
          // @mulle-objc@ MetaABI shadow: voidptr-packed struct unpack >
-         // For a single-field param whose type is a small non-float struct
-         // (fits in void*, voidptr-compatible per the runtime macro), _param
-         // holds the packed value — unpack via *(FieldType *)&_param.
-         bool isVoidPtrPacked = false;
-         if( std::distance( RD->field_begin(), RD->field_end()) == 1)
-         {
-            FieldDecl *OnlyField = *RD->field_begin();
-            QualType FT = OnlyField->getType();
-            if( FT->isStructureOrClassType() &&
-                !FT->isUnionType() &&
-                Context.getTypeSize( FT) <= Context.getTypeSize( Context.VoidPtrTy) &&
-                Context.getTypeAlign( FT) <= Context.getTypeAlign( Context.VoidPtrTy) &&
-                !FT->hasFloatingRepresentation())
-               isVoidPtrPacked = true;
-         }
+         // isMetaABIVoidPointerParam() is true only when the caller packs by value.
+         QualType RecTy = Context.getTagDeclType( RD);
+         bool isVoidPtrPacked = MDecl->isMetaABIVoidPointerParam();
          // @mulle-objc@ MetaABI shadow: voidptr-packed struct unpack <
 
          for( auto *FD : RD->fields())
@@ -437,28 +425,33 @@ void SemaObjC::ActOnStartOfObjCMethodDef(Scope *FnBodyScope, Decl *D) {
             // @mulle-objc@ MetaABI shadow: voidptr-packed struct unpack >
             if( isVoidPtrPacked)
             {
-               // _param is the packed value: *(FieldType *)&_param
+               // _param holds the packed value — cast &_param to RecTy* then ->field
                ExprResult ParamRef = SemaRef.GetMulle_paramExpr( FnBodyScope, SourceLocation(), "_param");
                if( !ParamRef.isInvalid())
                {
-                  QualType PtrToField = Context.getPointerType( FD->getType());
+                  QualType PtrToRec = Context.getPointerType( RecTy);
                   Expr *AddrOf = UnaryOperator::Create( Context, ParamRef.get(),
                                                         UO_AddrOf,
                                                         Context.getPointerType( ParamRef.get()->getType()),
                                                         VK_PRValue, OK_Ordinary,
                                                         SourceLocation(), false,
                                                         FPOptionsOverride());
-                  Expr *Cast = CStyleCastExpr::Create( Context, PtrToField,
+                  Expr *Cast = CStyleCastExpr::Create( Context, PtrToRec,
                                                        VK_PRValue, CK_BitCast,
                                                        AddrOf, nullptr, FPOptionsOverride(),
-                                                       Context.getTrivialTypeSourceInfo( PtrToField),
+                                                       Context.getTrivialTypeSourceInfo( PtrToRec),
                                                        SourceLocation(), SourceLocation());
-                  Expr *Deref = UnaryOperator::Create( Context, Cast,
-                                                       UO_Deref, FD->getType(),
-                                                       VK_LValue, OK_Ordinary,
-                                                       SourceLocation(), false,
-                                                       FPOptionsOverride());
-                  Shadow->setInit( Deref);
+                  DeclarationNameInfo memberNameInfo( FD->getDeclName(), SourceLocation());
+                  DeclAccessPair fakeFoundDecl = DeclAccessPair::make( FD, FD->getAccess());
+                  ExprResult CastLV = SemaRef.DefaultLvalueConversion( Cast);
+                  Expr *Member = MemberExpr::Create( Context, CastLV.get(),
+                                                     true, SourceLocation(),
+                                                     CXXScopeSpec().getWithLocInContext( Context),
+                                                     SourceLocation(),
+                                                     FD, fakeFoundDecl, memberNameInfo,
+                                                     nullptr, FD->getType(),
+                                                     VK_LValue, OK_Ordinary, NOUR_None);
+                  Shadow->setInit( Member);
                }
             }
             else
@@ -497,6 +490,46 @@ void SemaObjC::ActOnStartOfObjCMethodDef(Scope *FnBodyScope, Decl *D) {
      }
      // @mulle-objc@ MetaABI: Remove Parameters from Scope <
   }
+
+   // @mulle-objc@ MetaABI shadow: voidptr-packed param field shadows >
+   // For MetaABIVoidPtrParam methods with a struct param, the caller packs
+   // the value into void*. ParmVarDecl v is on scope with the unpacked value.
+   // Create field shadows v.field for debugger convenience.
+   if( !hasMetaABIParam &&
+       getLangOpts().ObjCRuntime.hasMulleMetaABI() &&
+       MDecl->isMetaABIVoidPointerParam() &&
+       MDecl->param_size() == 1)
+   {
+      ParmVarDecl *PVD = *MDecl->param_begin();
+      if( const RecordType *RT = PVD->getType()->getAs<RecordType>())
+      {
+         RecordDecl *RD = RT->getDecl();
+         Expr *ParamRef = SemaRef.BuildDeclRefExpr( PVD, PVD->getType(),
+                                                    VK_LValue, SourceLocation());
+         for( auto *FD : RD->fields())
+         {
+            if( !FD->getIdentifier()) continue;
+            VarDecl *Shadow = VarDecl::Create( Context, MDecl,
+                                               SourceLocation(), SourceLocation(),
+                                               FD->getIdentifier(), FD->getType(),
+                                               Context.getTrivialTypeSourceInfo( FD->getType()),
+                                               SC_None);
+            DeclarationNameInfo memberNameInfo( FD->getDeclName(), SourceLocation());
+            DeclAccessPair fakeFoundDecl = DeclAccessPair::make( FD, FD->getAccess());
+            Expr *Member = MemberExpr::Create( Context, ParamRef,
+                                               false, SourceLocation(),
+                                               CXXScopeSpec().getWithLocInContext( Context),
+                                               SourceLocation(),
+                                               FD, fakeFoundDecl, memberNameInfo,
+                                               nullptr, FD->getType(),
+                                               VK_LValue, OK_Ordinary, NOUR_None);
+            Shadow->setInit( Member);
+            Shadow->setImplicit( true);
+            SemaRef.PushOnScopeChains( Shadow, FnBodyScope);
+         }
+      }
+   }
+   // @mulle-objc@ MetaABI shadow: voidptr-packed param field shadows <
 
   //
   // @mulle-objc@ AAM:  check that family is compatible >
@@ -5389,7 +5422,7 @@ unsigned int   SemaObjC::metaABIDescription( SmallVector<ParmVarDecl*, 16> &Para
       if( Params[ 0]->getType()->isIncompleteType( 0))
          return( MetaABIParamAsStruct);
 
-      if( Context.typeNeedsMetaABIAlloca( Params[ 0]->getType()))
+      if( Context.typeNeedsMetaABIAlloca( Params[ 0]->getType(), /*isParam=*/true))
          desc |= MetaABIParamAsStruct;
       else
          desc |= MetaABIVoidPtrParam;

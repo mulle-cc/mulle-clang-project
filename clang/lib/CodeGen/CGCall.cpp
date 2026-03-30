@@ -3451,6 +3451,19 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
                 V = Builder.CreatePtrToInt( V, ConvertType( getContext().getUIntPtrType()));
                 V = Builder.CreateIntCast( V, LTy, true);
               }
+              // @mulle-objc@ MetaABI: voidptr-packed struct/float unpack >
+              // For MetaABIVoidPtrParam with struct/float: void* holds packed bytes.
+              // Store the pointer value into a void*-sized alloca, then load as LTy.
+              else if( V->getType()->isPointerTy() && !LTy->isPointerTy())
+              {
+                Address TmpAlloca = CreateTempAlloca( CGM.VoidPtrTy,
+                                                      getContext().getTypeAlignInChars( getContext().VoidPtrTy),
+                                                      "_param.tmp");
+                Builder.CreateStore( V, TmpAlloca);
+                Address TmpAsLTy = TmpAlloca.withElementType( LTy);
+                V = Builder.CreateLoad( TmpAsLTy);
+              }
+              // @mulle-objc@ MetaABI: voidptr-packed struct/float unpack <
             }
           }
           // @mulle-objc@ MetaABI: function argument _param, cast from void pointer to uintptr_t (methods only)
