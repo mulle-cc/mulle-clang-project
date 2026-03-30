@@ -63,7 +63,7 @@
 #include "llvm/Support/Compiler.h"
 
 
-#define COMPATIBLE_MULLE_OBJC_RUNTIME_LOAD_VERSION  18
+#define COMPATIBLE_MULLE_OBJC_RUNTIME_LOAD_VERSION  19
 
 
 using namespace clang;
