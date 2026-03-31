@@ -4319,6 +4319,8 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
     }
     if (Args.hasArg(OPT_mulle_objc_no_asm_names))
        Opts.ObjCNoAsmNames = 1;
+    if (Args.hasArg(OPT_fobjc_encode_no_offsets))
+       Opts.ObjCEncodeNoOffsets = 1;
     // @mulle-objc@: handle AAM and TPS and TAO options <
 
     if (Args.hasArg(OPT_fobjc_gc_only))

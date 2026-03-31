@@ -323,6 +323,7 @@ LANGOPT(ObjCAllocsAutoreleasedObjects , 1, 0, NotCompatible, "Objective-C object
 LANGOPT(ObjCClasscallUseSelf , 2, 0, NotCompatible, "Objective-C method code assumes self is valid before [Class call]")
 LANGOPT(ObjCInlineMethodCalls , 3, 0, NotCompatible, "Objective-C use inline method call")
 LANGOPT(ObjCNoAsmNames       , 1, 0, NotCompatible, "Objective-C suppress __asm__ symbol aliases in rewriter output")
+LANGOPT(ObjCEncodeNoOffsets  , 1, 0, NotCompatible, "Objective-C omit byte offsets from method type encodings")
 LANGOPT(ObjCReuseParam , 2, 0, NotCompatible, "Objective-C method code can reuse _param space")
 // @mulle-objc@ options <
 LANGOPT(ObjCWeakRuntime     , 1, 0, NotCompatible, "__weak support in the ARC runtime")

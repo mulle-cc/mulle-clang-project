@@ -8867,6 +8867,25 @@ std::string ASTContext::getObjCEncodingForMethodDecl(const ObjCMethodDecl *Decl,
            "getObjCEncodingForMethodDecl - Incomplete param type");
     ParmOffset += sz;
   }
+  // @mulle-objc@ -fobjc-encode-no-offsets >
+  if (LangOpts.ObjCEncodeNoOffsets) {
+    S += "@:";
+    for (ObjCMethodDecl::param_const_iterator PI = Decl->param_begin(),
+         E = Decl->sel_param_end(); PI != E; ++PI) {
+      const ParmVarDecl *PVDecl = *PI;
+      QualType PType = PVDecl->getOriginalType();
+      if (const auto *AT =
+              dyn_cast<ArrayType>(PType->getCanonicalTypeInternal())) {
+        if (!isa<ConstantArrayType>(AT))
+          PType = PVDecl->getType();
+      } else if (PType->isFunctionType())
+        PType = PVDecl->getType();
+      getObjCEncodingForMethodParameter(PVDecl->getObjCDeclQualifier(),
+                                        PType, S, Extended);
+    }
+    return S;
+  }
+  // @mulle-objc@ -fobjc-encode-no-offsets <
   S += charUnitsToString(ParmOffset);
   S += "@0:";
   S += charUnitsToString(PtrSize);
@@ -8890,7 +8909,6 @@ std::string ASTContext::getObjCEncodingForMethodDecl(const ObjCMethodDecl *Decl,
     S += charUnitsToString(ParmOffset);
     ParmOffset += getObjCEncodingTypeSize(PType);
   }
-
   return S;
 }
 
