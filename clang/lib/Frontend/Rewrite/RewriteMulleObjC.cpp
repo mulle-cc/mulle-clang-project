@@ -405,6 +405,14 @@ public:
       }
       // @mulle-objc@ full 5-level inline support + forceLevel emits direct calls <
 
+      // @mulle-objc@ --mulle-objc-portable-call: include metaabi-call header >
+      if (LangOpts.ObjCPortableCall)
+        macros = "#include <mulle-objc-runtime/mulle-metaabi-call.h>\n"
+                 "#pragma clang diagnostic ignored \"-Wint-conversion\"\n"
+                 "#pragma clang diagnostic ignored \"-Wgnu-alignof-expression\"\n"
+                 + macros;
+      // @mulle-objc@ --mulle-objc-portable-call: include metaabi-call header <
+
       size_t pos = Result.rfind("\n#include");
       if (pos != std::string::npos)
         pos = Result.find('\n', pos + 1) + 1;
@@ -1779,6 +1787,20 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
   unsigned NumArgs = E->getNumArgs();
 
   if (isAggregateReturn) {
+    // @mulle-objc@ --mulle-objc-portable-call: aggregate return via mulle_metaabi_object_call >
+    if (LangOpts.ObjCPortableCall && !isSuper) {
+      static unsigned PortAggCount = 0;
+      std::string rName = "_mulle_r" + std::to_string(PortAggCount++);
+      std::string retType = PrintType(RetTy);
+      OS << "({ " << retType << " " << rName << "; mulle_metaabi_object_call( &" << rName
+         << ", " << Receiver << ", " << HashStr;
+      for (unsigned i = 0; i < NumArgs; ++i)
+        OS << ", " << Rewrite.getRewrittenText(E->getArg(i)->getSourceRange());
+      OS << "); " << rName << "; })";
+      ReplaceText(E->getSourceRange(), OS.str());
+      return;
+    }
+    // @mulle-objc@ --mulle-objc-portable-call: aggregate return via mulle_metaabi_object_call <
     // Build: ({ union { struct { args... } v; void *space; RetType rval; } _p = { .v = { args } };
     //          mulle_objc_object_call_c(recv, sel, &_p); _p.rval; })
     static unsigned AggCount = 0;
@@ -1813,6 +1835,40 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
     ReplaceText(E->getSourceRange(), OS.str());
     return;
   }
+
+  // @mulle-objc@ --mulle-objc-portable-call >
+  if (LangOpts.ObjCPortableCall && !isSuper) {
+    // Emit: ({ <RetType> _rval; mulle_metaabi_object_call( &_rval, obj, sel, args...); _rval; })
+    // For void: mulle_metaabi_object_call( , obj, sel, args...)
+    // For ObjC/pointer returns: use void* to avoid macro type mismatch
+    static unsigned PortCount = 0;
+    std::string rName = "_mulle_r" + std::to_string(PortCount++);
+    bool isVoid = RetTy->isVoidType();
+    bool isPtr  = RetTy->isPointerType() || RetTy->isObjCObjectPointerType();
+    std::string rType = isPtr ? "void *" : PrintType(RetTy);
+
+    OS << "({ ";
+    if (!isVoid)
+      OS << rType << " " << rName << "; ";
+    OS << "mulle_metaabi_object_call( ";
+    if (isVoid)
+      OS << ", ";
+    else
+      OS << "&" << rName << ", ";
+    OS << Receiver << ", " << HashStr;
+    for (unsigned i = 0; i < NumArgs; ++i)
+      OS << ", " << Rewrite.getRewrittenText(E->getArg(i)->getSourceRange());
+    OS << "); ";
+    if (!isVoid) {
+      if (isPtr && !RetTy->isVoidPointerType())
+        OS << "(" << PrintType(RetTy) << ") ";
+      OS << rName << "; ";
+    }
+    OS << "})";
+    ReplaceText(E->getSourceRange(), OS.str());
+    return;
+  }
+  // @mulle-objc@ --mulle-objc-portable-call <
 
   auto buildCall = [&](const std::string &param) {
     if (isSuper)

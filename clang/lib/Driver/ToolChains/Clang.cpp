@@ -4290,6 +4290,8 @@ static void RenderObjCOptions(const ToolChain &TC, const Driver &D,
       CmdArgs.push_back("--mulle-objc-no-asm-names");
   if (Args.hasArg(options::OPT_fobjc_encode_no_offsets))
       CmdArgs.push_back("-fobjc-encode-no-offsets");
+  if (Args.hasArg(options::OPT_mulle_objc_portable_call))
+      CmdArgs.push_back("--mulle-objc-portable-call");
   // @mulle-objc@ forward --mulle-objc-emit-deps to cc1 <
   // @mulle-objc@ arguments <
 

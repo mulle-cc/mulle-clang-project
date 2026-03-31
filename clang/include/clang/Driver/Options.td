@@ -6046,6 +6046,11 @@ def fobjc_encode_no_offsets : Flag<["-"], "fobjc-encode-no-offsets">, Flags<[NoX
   Visibility<[ClangOption, CC1Option]>,
   HelpText<"Omit byte offsets from ObjC method type encodings (produces portable signatures)">;
 // @mulle-objc@ -fobjc-encode-no-offsets flag <
+// @mulle-objc@ --mulle-objc-portable-call flag >
+def mulle_objc_portable_call : Flag<["--"], "mulle-objc-portable-call">, Flags<[NoXarchOption]>,
+  Visibility<[ClangOption, CC1Option]>,
+  HelpText<"Emit mulle_metaabi_object_call macro calls in --mulle-objc-emit-c output (portable across architectures)">;
+// @mulle-objc@ --mulle-objc-portable-call flag <
 // @mulle-objc@ --mulle-objc-emit-deps flag >
 def mulle_objc_emit_deps : Joined<["--"], "mulle-objc-emit-deps=">,
   Flags<[NoXarchOption]>, Visibility<[ClangOption, CC1Option]>,
