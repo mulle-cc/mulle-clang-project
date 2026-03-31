@@ -407,10 +407,7 @@ public:
 
       // @mulle-objc@ --mulle-objc-portable-call: include metaabi-call header >
       if (LangOpts.ObjCPortableCall)
-        macros = "#include <mulle-objc-runtime/mulle-metaabi-call.h>\n"
-                 "#pragma clang diagnostic ignored \"-Wint-conversion\"\n"
-                 "#pragma clang diagnostic ignored \"-Wgnu-alignof-expression\"\n"
-                 + macros;
+        macros = "#include <mulle-objc-runtime/mulle-metaabi-call.h>\n" + macros;
       // @mulle-objc@ --mulle-objc-portable-call: include metaabi-call header <
 
       size_t pos = Result.rfind("\n#include");
@@ -1845,7 +1842,9 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
     std::string rName = "_mulle_r" + std::to_string(PortCount++);
     bool isVoid = RetTy->isVoidType();
     bool isPtr  = RetTy->isPointerType() || RetTy->isObjCObjectPointerType();
-    std::string rType = isPtr ? "void *" : PrintType(RetTy);
+    // Use intptr_t for pointer returns — the macro assigns intptr_t to the rval
+    // via mulle_metaabi_zero_fp/_Generic, so void* would cause -Wint-conversion
+    std::string rType = isPtr ? "intptr_t" : PrintType(RetTy);
 
     OS << "({ ";
     if (!isVoid)
@@ -1860,7 +1859,7 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
       OS << ", " << Rewrite.getRewrittenText(E->getArg(i)->getSourceRange());
     OS << "); ";
     if (!isVoid) {
-      if (isPtr && !RetTy->isVoidPointerType())
+      if (isPtr)
         OS << "(" << PrintType(RetTy) << ") ";
       OS << rName << "; ";
     }
