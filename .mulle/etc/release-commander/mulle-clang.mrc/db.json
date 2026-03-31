@@ -93,9 +93,9 @@
     }
   ],
   "environmentVariables": {
-    "MULLE_CLANG_PROJECT_TAG": "21.1.8.5",
+    "MULLE_CLANG_PROJECT_TAG": "21.1.8.7",
     "PWD": "/home/src/srcO",
-    "MULLE_OBJC_RUNTIME_LOAD_VERSION": "18"
+    "MULLE_OBJC_RUNTIME_LOAD_VERSION": "19"
   },
   "images": [],
   "fontSize": 16

@@ -1358,13 +1358,10 @@ void RewriteMulleObjC::RewriteCategoryImplDecl(ObjCCategoryImplDecl *D) {
     unsigned Len = SM->getFileOffset(EraseEnd) - SM->getFileOffset(D->getAtStartLoc());
     Rewrite.ReplaceText(D->getAtStartLoc(), Len, "");
   } else {
-    SourceLocation ImplEnd = Lexer::getLocForEndOfToken(D->getLocation(), 0, *SM, LangOpts);
-    // skip past ')' of category name
-    ImplEnd = Lexer::findLocationAfterToken(ImplEnd, tok::r_paren, *SM, LangOpts, true);
-    if (ImplEnd.isValid()) {
-      unsigned Len = SM->getFileOffset(ImplEnd) - SM->getFileOffset(D->getAtStartLoc());
-      Rewrite.ReplaceText(D->getAtStartLoc(), Len, "");
-    }
+    // Empty category impl — erase everything from @implementation to @end inclusive
+    unsigned Len = SM->getFileOffset(D->getEndLoc()) + 4 - SM->getFileOffset(D->getAtStartLoc());
+    Rewrite.ReplaceText(D->getAtStartLoc(), Len, "");
+    return; // @end already erased above
   }
   // Erase @end
   Rewrite.ReplaceText(D->getEndLoc(), 4, "");
@@ -1870,7 +1867,16 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
   } else if (NumArgs == 1) {
     QualType ArgTy = E->getArg(0)->getType();
     std::string ArgText = Rewrite.getRewrittenText(E->getArg(0)->getSourceRange());
-    buildCall("&(" + PrintType(ArgTy) + "){ " + ArgText + " }");
+    if (ArgTy->isRecordType()) {
+      // Struct/union: use a named temp to avoid compound-literal field-init confusion
+      static unsigned TmpCount = 0;
+      std::string tmpName = "_mulle_p" + std::to_string(TmpCount++);
+      OS << "({ " << PrintType(ArgTy) << " " << tmpName << " = " << ArgText << "; ";
+      buildCall("&" + tmpName);
+      OS << "; })";
+    } else {
+      buildCall("&(" + PrintType(ArgTy) + "){ " + ArgText + " }");
+    }
   } else {
     // Use a named temp variable to avoid macro argument comma confusion.
     static unsigned TmpCount = 0;
@@ -1997,7 +2003,7 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
       if (OwnIvars.empty()) return "0";
       std::string S;
       llvm::raw_string_ostream L(S);
-      L << "&(struct { unsigned int n_ivars; struct _mulle_objc_ivar ivars["
+      L << "(struct _mulle_objc_ivarlist *) &(struct { unsigned int n_ivars; struct _mulle_objc_ivar ivars["
         << OwnIvars.size() << "]; }){\n"
         << "      .n_ivars = " << OwnIvars.size() << ",\n"
         << "      .ivars   =\n      {\n";
@@ -2027,7 +2033,7 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
       if (Methods.empty()) return "0";
       std::string S;
       llvm::raw_string_ostream L(S);
-      L << "&(struct { unsigned int n_methods; struct _mulle_objc_loadcategory *loadcategory;"
+      L << "(struct _mulle_objc_methodlist *) &(struct { unsigned int n_methods; struct _mulle_objc_loadcategory *loadcategory;"
            " struct _mulle_objc_method methods[" << Methods.size() << "]; }){\n"
         << "      .n_methods    = " << Methods.size() << ",\n"
         << "      .loadcategory = ";
@@ -2066,7 +2072,7 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
       if (Protos.empty()) return "0";
       std::string S;
       llvm::raw_string_ostream L(S);
-      L << "&(struct { unsigned int n_protocols; struct _mulle_objc_protocol protocols["
+      L << "(struct _mulle_objc_protocollist *) &(struct { unsigned int n_protocols; struct _mulle_objc_protocol protocols["
         << Protos.size() << "]; }){\n"
         << "      .n_protocols = " << Protos.size() << ",\n"
         << "      .protocols   =\n      {\n";
@@ -2113,7 +2119,7 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
       if (Props.empty()) return "0";
       std::string S;
       llvm::raw_string_ostream L(S);
-      L << "&(struct { unsigned int n_properties; struct _mulle_objc_property properties["
+      L << "(struct _mulle_objc_propertylist *) &(struct { unsigned int n_properties; struct _mulle_objc_property properties["
         << Props.size() << "]; }){\n"
         << "      .n_properties = " << Props.size() << ",\n"
         << "      .properties   =\n      {\n";
@@ -2235,7 +2241,7 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
       if (Methods.empty()) return "0";
       std::string S;
       llvm::raw_string_ostream L(S);
-      L << "&(struct { unsigned int n_methods; struct _mulle_objc_loadcategory *loadcategory;"
+      L << "(struct _mulle_objc_methodlist *) &(struct { unsigned int n_methods; struct _mulle_objc_loadcategory *loadcategory;"
            " struct _mulle_objc_method methods[" << Methods.size() << "]; }){\n"
         << "      .n_methods    = " << Methods.size() << ",\n"
         << "      .loadcategory = ";
@@ -2276,7 +2282,7 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
       if (Protos.empty()) return "0";
       std::string S;
       llvm::raw_string_ostream L(S);
-      L << "&(struct { unsigned int n_protocols; struct _mulle_objc_protocol protocols["
+      L << "(struct _mulle_objc_protocollist *) &(struct { unsigned int n_protocols; struct _mulle_objc_protocol protocols["
         << Protos.size() << "]; }){\n"
         << "      .n_protocols = " << Protos.size() << ",\n"
         << "      .protocols   =\n      {\n";
@@ -2322,7 +2328,7 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
       if (CatProps.empty()) return "0";
       std::string S;
       llvm::raw_string_ostream L(S);
-      L << "&(struct { unsigned int n_properties; struct _mulle_objc_property properties["
+      L << "(struct _mulle_objc_propertylist *) &(struct { unsigned int n_properties; struct _mulle_objc_property properties["
         << CatProps.size() << "]; }){\n"
         << "      .n_properties = " << CatProps.size() << ",\n"
         << "      .properties   =\n      {\n";

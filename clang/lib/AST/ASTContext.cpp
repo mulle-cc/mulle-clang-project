@@ -9112,9 +9112,10 @@ bool   ASTContext::typeNeedsMetaABIAlloca( QualType type, bool isParam)
    }
    else
    {
-      // float/union/struct that fit in void* are packed by value by the runtime
-      // if( type->isFloatingType())
-      //    return( true);
+      // float/double must be struct-packed (store-forwarding stall on voidptr union pun)
+      if( type->isFloatingType())
+         return( true);
+      // struct/union that fit in void* are packed by value by the runtime
       // if( type->isUnionType())
       //    return( true);
       // if( type->isStructureOrClassType())
