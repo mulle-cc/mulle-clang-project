@@ -6036,6 +6036,11 @@ def mulle_objc_emit_c : Flag<["--"], "mulle-objc-emit-c">, Flags<[NoXarchOption]
   Alias<rewrite_mulle_objc>,
   HelpText<"Emit Objective-C source as plain C for mulle-objc runtime (output to stdout if no -o given)">, Group<Action_Group>;
 // @mulle-objc@ --mulle-objc-emit-c flag <
+// @mulle-objc@ --mulle-objc-no-asm-names flag >
+def mulle_objc_no_asm_names : Flag<["--"], "mulle-objc-no-asm-names">, Flags<[NoXarchOption]>,
+  Visibility<[ClangOption, CC1Option]>,
+  HelpText<"Suppress __asm__ symbol aliases in --mulle-objc-emit-c output (improves portability)">;
+// @mulle-objc@ --mulle-objc-no-asm-names flag <
 // @mulle-objc@ --mulle-objc-emit-deps flag >
 def mulle_objc_emit_deps : Joined<["--"], "mulle-objc-emit-deps=">,
   Flags<[NoXarchOption]>, Visibility<[ClangOption, CC1Option]>,

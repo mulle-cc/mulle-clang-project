@@ -1015,7 +1015,8 @@ void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
       std::string SelfTypeName = "OBJC_CLASS_" + ClassName;
       FOS << "static void *\n" << CName
           << "(" << SelfTypeName << " *self, mulle_objc_methodid_t _cmd, void *_param)"
-          << " __asm__(\"" << ObjCName << "\");\n"
+          << (LangOpts.ObjCNoAsmNames ? "" : " __asm__(\"\\\"" + ObjCName + "\\\"\")")
+          << ";\n"
           << "static void *\n" << CName
           << "(" << SelfTypeName << " *self, mulle_objc_methodid_t _cmd, void *_param)\n{\n";
       // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef <
@@ -1057,7 +1058,8 @@ void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
       OS << "   { MULLE_OBJC_NO_CLASSID, MULLE_OBJC_NO_CATEGORYID }\n};\n";
       OS << "static void *\n" << FnName
          << "(" << SelfTypeName << " *self, mulle_objc_methodid_t _cmd, void *_param)"
-         << " __asm__(\"" << ObjCName << "\");\n"
+         << (LangOpts.ObjCNoAsmNames ? "" : " __asm__(\"\\\"" + ObjCName + "\\\"\")")
+         << ";\n"
          << "static void *\n" << FnName
          << "(" << SelfTypeName << " *self, mulle_objc_methodid_t _cmd, void *_param)\n"
          << "{\n   return " << ArrName << ";\n}\n";
@@ -1296,7 +1298,8 @@ void RewriteMulleObjC::RewriteMethodDecl(ObjCMethodDecl *M,
   llvm::raw_string_ostream SigOS(Sig);
   SigOS << "static void *" << CName
         << "(" << SelfType << "self, mulle_objc_methodid_t _cmd, " << ParamType << "_param)"
-        << " __asm__(\"" << ObjCName << "\");\n"
+        << (LangOpts.ObjCNoAsmNames ? "" : " __asm__(\"\\\"" + ObjCName + "\\\"\")")
+        << ";\n"
         << "static void *" << CName
         << "(" << SelfType << "self, mulle_objc_methodid_t _cmd, " << ParamType << "_param)\n";
 
@@ -2150,7 +2153,7 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
 
     // --- loadclass struct (all sub-structs inlined as compound literals) ---
     OS << "static struct _mulle_objc_loadclass " << VarBase
-       << " __asm__(\"" << VarAsmName << "\")"
+       << (LangOpts.ObjCNoAsmNames ? "" : " __asm__(\"\\\"" + VarAsmName + "\\\"\")")
        << " __attribute__((used,section(\".data.objc.objc_load_info\"))) =\n{\n"
        << "   .classid          = (mulle_objc_classid_t) 0x"; OS.write_hex(classId);
     OS << "U,\n"
@@ -2358,7 +2361,7 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
     };
 
     OS << "static struct _mulle_objc_loadcategory " << VarBase
-       << " __asm__(\"" << VarAsmName << "\")"
+       << (LangOpts.ObjCNoAsmNames ? "" : " __asm__(\"\\\"" + VarAsmName + "\\\"\")")
        << " __attribute__((used,section(\".data.objc.objc_load_info\"))) =\n{\n"
        << "   .categoryid       = (mulle_objc_categoryid_t) 0x"; OS.write_hex(catId);
     OS << "U,\n"

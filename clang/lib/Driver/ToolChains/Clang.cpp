@@ -4286,6 +4286,8 @@ static void RenderObjCOptions(const ToolChain &TC, const Driver &D,
       StringRef Val = A->getValue();
       CmdArgs.push_back(Args.MakeArgString("--mulle-objc-emit-deps=" + Val));
   }
+  if (Args.hasArg(options::OPT_mulle_objc_no_asm_names))
+      CmdArgs.push_back("--mulle-objc-no-asm-names");
   // @mulle-objc@ forward --mulle-objc-emit-deps to cc1 <
   // @mulle-objc@ arguments <
 
