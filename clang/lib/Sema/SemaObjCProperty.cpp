@@ -2770,7 +2770,7 @@ ObjCMethodDecl  *SemaObjC::CreatePropertyNonGetterMethod( ObjCContainerDecl *CD,
    //
    if( SemaRef.Context.getLangOpts().ObjCRuntime.hasMulleMetaABI())
    {
-      if( Context.typeNeedsMetaABIAlloca( property->getType()))
+      if( Context.typeNeedsMetaABIAlloca( property->getType(), /*isParam=*/true))
       {
          SmallVector<ParmVarDecl*, 16> Params;
          Params.push_back(Argument);

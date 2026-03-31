@@ -4459,7 +4459,7 @@ bool   CGObjCMulleRuntime::metaABIForwardAsStruct( llvm::ArrayRef<const Expr*> &
       if( type->isIncompleteType( 0))  // hm can't be
          llvm_unreachable( "incomplete type at call site?");
 
-      return( CGM.getContext().typeNeedsMetaABIAlloca( type));
+      return( CGM.getContext().typeNeedsMetaABIAlloca( type, /*isParam=*/true));
 
    default :
       return( true);

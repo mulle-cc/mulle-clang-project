@@ -699,7 +699,7 @@ CodeGenTypes::arrangeUnprototypedObjCMessageSend(QualType returnType,
          break;
      case 3 :
      case 4 :
-        if( Context.typeNeedsMetaABIAlloca( argTypes[ 2]))
+        if( Context.typeNeedsMetaABIAlloca( argTypes[ 2], /*isParam=*/true))
            llvm_unreachable( "called a non-metaABI compatible method w/o a prototype");
         argTys.push_back( Context.getCanonicalParamType( Context.VoidPtrTy));
         if( argTypes.size() == 4)  // superid
@@ -3451,19 +3451,6 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
                 V = Builder.CreatePtrToInt( V, ConvertType( getContext().getUIntPtrType()));
                 V = Builder.CreateIntCast( V, LTy, true);
               }
-              // @mulle-objc@ MetaABI: voidptr-packed struct/float unpack >
-              // For MetaABIVoidPtrParam with struct/float: void* holds packed bytes.
-              // Store the pointer value into a void*-sized alloca, then load as LTy.
-              else if( V->getType()->isPointerTy() && !LTy->isPointerTy())
-              {
-                Address TmpAlloca = CreateTempAlloca( CGM.VoidPtrTy,
-                                                      getContext().getTypeAlignInChars( getContext().VoidPtrTy),
-                                                      "_param.tmp");
-                Builder.CreateStore( V, TmpAlloca);
-                Address TmpAsLTy = TmpAlloca.withElementType( LTy);
-                V = Builder.CreateLoad( TmpAsLTy);
-              }
-              // @mulle-objc@ MetaABI: voidptr-packed struct/float unpack <
             }
           }
           // @mulle-objc@ MetaABI: function argument _param, cast from void pointer to uintptr_t (methods only)
@@ -5723,13 +5710,25 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
 
           if( CD)
             MD = dyn_cast<ObjCMethodDecl>( CD);
-          if( MD && ! MD->getParamDecl())
+          if( MD && (! MD->getParamDecl() || MD->isMetaABIVoidPointerParam()))
     	    {
                    // promote all non pointers to uintptr_t and make them pointers
             if( ! V->getType()->isPointerTy())
             {
-              V = Builder.CreateSExt( V, ConvertType( getContext().getUIntPtrType()));
-              V = Builder.CreateIntToPtr( V, ArgInfo.getCoerceToType());
+              if( V->getType()->isIntegerTy())
+              {
+                V = Builder.CreateSExt( V, ConvertType( getContext().getUIntPtrType()));
+                V = Builder.CreateIntToPtr( V, ArgInfo.getCoerceToType());
+              }
+              else
+              {
+                // float/double/struct: bitcast through memory (union-style pack)
+                // store value to alloca, load back as void*
+                Address Tmp = CreateMemTemp( I->Ty, "metaabi.voidptr.pack");
+                Builder.CreateStore( V, Tmp);
+                Address CastTmp = Tmp.withElementType( ConvertType( getContext().VoidPtrTy));
+                V = Builder.CreateLoad( CastTmp, "metaabi.voidptr.val");
+              }
             }
     	    }
       	}

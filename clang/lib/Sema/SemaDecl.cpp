@@ -16607,7 +16607,7 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
       assert(MD == getCurMethodDecl() && "Method parsing confused");
       // @mulle-objc@ MetaABI shadow: prepend shadow DeclStmts to body >
       if (getLangOpts().ObjCRuntime.hasMulleMetaABI() &&
-          MD->getParamRecord() && Body) {
+          (MD->getParamRecord() || MD->isMetaABIVoidPointerParam()) && Body) {
         if (auto *CS = dyn_cast<CompoundStmt>(Body)) {
           SmallVector<Stmt *, 8> Stmts;
           for (auto *D : MD->decls()) {

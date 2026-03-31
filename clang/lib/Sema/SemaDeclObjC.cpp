@@ -465,6 +465,41 @@ void SemaObjC::ActOnStartOfObjCMethodDef(Scope *FnBodyScope, Decl *D) {
             SemaRef.PushOnScopeChains( Shadow, FnBodyScope);
          }
       }
+      else if( MDecl->isMetaABIVoidPointerParam() && MDecl->param_size() == 1)
+      {
+         // @mulle-objc@ MetaABI shadow: voidptr-packed single param unpack >
+         // _param is void* holding the packed value. Create a shadow for the
+         // true-typed param: <type> v = *(<type>*)&_param;
+         ParmVarDecl *PVD = *MDecl->param_begin();
+         QualType ParamTy = PVD->getType();
+         VarDecl *Shadow = VarDecl::Create( Context, MDecl,
+                                            SourceLocation(), SourceLocation(),
+                                            PVD->getIdentifier(), ParamTy,
+                                            Context.getTrivialTypeSourceInfo( ParamTy),
+                                            SC_None);
+         ExprResult ParamRef = SemaRef.GetMulle_paramExpr( FnBodyScope, SourceLocation(), "_param");
+         if( !ParamRef.isInvalid())
+         {
+            QualType PtrToTy = Context.getPointerType( ParamTy);
+            Expr *AddrOf = UnaryOperator::Create( Context, ParamRef.get(),
+                                                  UO_AddrOf,
+                                                  Context.getPointerType( ParamRef.get()->getType()),
+                                                  VK_PRValue, OK_Ordinary,
+                                                  SourceLocation(), false,
+                                                  FPOptionsOverride());
+            Expr *Cast = CStyleCastExpr::Create( Context, PtrToTy,
+                                                 VK_PRValue, CK_BitCast,
+                                                 AddrOf, nullptr, FPOptionsOverride(),
+                                                 Context.getTrivialTypeSourceInfo( PtrToTy),
+                                                 SourceLocation(), SourceLocation());
+            ExprResult Deref = SemaRef.CreateBuiltinUnaryOp( SourceLocation(), UO_Deref, Cast);
+            if( !Deref.isInvalid())
+               Shadow->setInit( Deref.get());
+         }
+         Shadow->setImplicit( true);
+         SemaRef.PushOnScopeChains( Shadow, FnBodyScope);
+         // @mulle-objc@ MetaABI shadow: voidptr-packed single param unpack <
+      }
       // @mulle-objc@ MetaABI shadow: create local shadow VarDecls for debugger <
    }
    // @mulle-objc@ MetaABI: save scope for later retrieval in ActonMethod <
@@ -490,46 +525,6 @@ void SemaObjC::ActOnStartOfObjCMethodDef(Scope *FnBodyScope, Decl *D) {
      }
      // @mulle-objc@ MetaABI: Remove Parameters from Scope <
   }
-
-   // @mulle-objc@ MetaABI shadow: voidptr-packed param field shadows >
-   // For MetaABIVoidPtrParam methods with a struct param, the caller packs
-   // the value into void*. ParmVarDecl v is on scope with the unpacked value.
-   // Create field shadows v.field for debugger convenience.
-   if( !hasMetaABIParam &&
-       getLangOpts().ObjCRuntime.hasMulleMetaABI() &&
-       MDecl->isMetaABIVoidPointerParam() &&
-       MDecl->param_size() == 1)
-   {
-      ParmVarDecl *PVD = *MDecl->param_begin();
-      if( const RecordType *RT = PVD->getType()->getAs<RecordType>())
-      {
-         RecordDecl *RD = RT->getDecl();
-         Expr *ParamRef = SemaRef.BuildDeclRefExpr( PVD, PVD->getType(),
-                                                    VK_LValue, SourceLocation());
-         for( auto *FD : RD->fields())
-         {
-            if( !FD->getIdentifier()) continue;
-            VarDecl *Shadow = VarDecl::Create( Context, MDecl,
-                                               SourceLocation(), SourceLocation(),
-                                               FD->getIdentifier(), FD->getType(),
-                                               Context.getTrivialTypeSourceInfo( FD->getType()),
-                                               SC_None);
-            DeclarationNameInfo memberNameInfo( FD->getDeclName(), SourceLocation());
-            DeclAccessPair fakeFoundDecl = DeclAccessPair::make( FD, FD->getAccess());
-            Expr *Member = MemberExpr::Create( Context, ParamRef,
-                                               false, SourceLocation(),
-                                               CXXScopeSpec().getWithLocInContext( Context),
-                                               SourceLocation(),
-                                               FD, fakeFoundDecl, memberNameInfo,
-                                               nullptr, FD->getType(),
-                                               VK_LValue, OK_Ordinary, NOUR_None);
-            Shadow->setInit( Member);
-            Shadow->setImplicit( true);
-            SemaRef.PushOnScopeChains( Shadow, FnBodyScope);
-         }
-      }
-   }
-   // @mulle-objc@ MetaABI shadow: voidptr-packed param field shadows <
 
   //
   // @mulle-objc@ AAM:  check that family is compatible >
@@ -5628,6 +5623,18 @@ Decl *SemaObjC::ActOnMethodDeclaration(
         if( II != nullptr)
            SemaRef.IdResolver.AddDecl(Param);
         ObjCMethod->setMetaABIVoidPointerParam( true);
+
+        // @mulle-objc@ MetaABI shadow: create void* _param for voidptr-packed >
+        // Create _param as void* so backend sees void*->void* (no reg conflict).
+        // The true param value is unpacked from _param in ActOnStartOfObjCMethodDef.
+        ImplicitParamDecl *ParamDecl = ImplicitParamDecl::Create( Context,
+                                                                   ObjCMethod,
+                                                                   MethodLoc,
+                                                                   &Context.Idents.get("_param"),
+                                                                   Context.VoidPtrTy,
+                                                                   ImplicitParamKind::Other);
+        ObjCMethod->setParamDecl( ParamDecl);
+        // @mulle-objc@ MetaABI shadow: create void* _param for voidptr-packed <
      }
      else
         if( desc)
