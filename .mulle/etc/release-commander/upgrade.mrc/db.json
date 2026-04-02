@@ -37,6 +37,15 @@
             "skillLevel": "Low"
         },
         {
+            "title": "Update README.md with new version and features",
+            "filename": "i-update_readme-0004b.md",
+            "scriptFilename": "s-update_readme-0004b.sh",
+            "uuid": "00000001-0000-4000-0000-00000000004b",
+            "principalTool": "",
+            "status": "done",
+            "skillLevel": "Medium"
+        },
+        {
             "title": "Build and test",
             "filename": "i-build_and_test-0005.md",
             "scriptFilename": "s-build_and_test-0005.sh",
