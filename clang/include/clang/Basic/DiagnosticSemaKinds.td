@@ -8283,6 +8283,12 @@ def warn_mulle_method_impl_instance_class_mismatch : Warning<
 def warn_mulle_method_impl_lhs_not_in_interface : Warning<
   "@method_implementation '%0' not declared in @interface">,
   InGroup<MulleMethodImplementation>;
+def warn_mulle_method_impl_in_other_category : Warning<
+  "method %0 is already declared in category %1; "
+  "add '@dependency %2(%1)' to suppress this warning">,
+  InGroup<MulleMethodImplementation>;
+def note_mulle_method_impl_no_category_interface : Note<
+  "no @interface %0(%1) found; check for a category name typo">;
 // @mulle-objc@ method_implementation diagnostics <
 
 // @mulle-objc@ compiler: error message definitions end2 <

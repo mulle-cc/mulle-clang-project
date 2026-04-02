@@ -4541,6 +4541,79 @@ Decl *SemaObjC::ActOnDependencyDecl(Scope *S, SourceLocation AtLoc,
 }
 // @mulle-objc@ dependency directive <
 
+// @mulle-objc@ warn category method redeclaration >
+/// Warn if a method implemented in a category is already declared in another
+/// category of the same class, unless:
+///   - the other category name contains "forward", "future", or "prototype"
+///   - the impl has a @dependency for that category
+static void DiagnoseCategoryMethodRedeclaration(SemaObjC &S,
+                                                ObjCCategoryImplDecl *CatImpl,
+                                                ObjCInterfaceDecl *IDecl)
+{
+   IdentifierInfo *ImplCatName = CatImpl->getIdentifier();
+
+   // Build set of category names covered by @dependency in this impl
+   llvm::SmallPtrSet<IdentifierInfo *, 4> DependencyCategories;
+   for (auto *Dep : CatImpl->dependency_impls())
+      if (Dep->getCategoryName())
+         DependencyCategories.insert(Dep->getCategoryName());
+
+   for (const auto *Method : CatImpl->methods())
+   {
+      Selector Sel = Method->getSelector();
+      bool     IsInstance = Method->isInstanceMethod();
+
+      for (const auto *Cat : IDecl->known_categories())
+      {
+         IdentifierInfo *CatName = Cat->getIdentifier();
+         if (!CatName || CatName == ImplCatName)
+            continue;
+
+         if (!Cat->getMethod(Sel, IsInstance))
+            continue;
+
+         // Never warn for +dependencies — it's synthesized by @dependency
+         if (!IsInstance && Sel.isUnarySelector() &&
+             Sel.getNameForSlot(0) == "dependencies")
+            continue;
+
+         // Suppress if other category name contains forward/future/prototype
+         StringRef N = CatName->getName();
+         if (N.contains_insensitive("forward") ||
+             N.contains_insensitive("future")  ||
+             N.contains_insensitive("prototype"))
+            continue;
+
+         // Suppress if @dependency covers this category
+         if (DependencyCategories.count(CatName))
+            continue;
+
+         S.Diag(Method->getLocation(),
+                diag::warn_mulle_method_impl_in_other_category)
+            << Method->getDeclName()
+            << CatName
+            << IDecl->getIdentifier();
+         S.Diag(Cat->getMethod(Sel, IsInstance)->getLocation(),
+                diag::note_previous_declaration);
+         // If this impl has no matching @interface, hint at possible typo
+         if (ObjCCategoryDecl *ImplCat = IDecl->FindCategoryDeclaration(ImplCatName)) {
+            if (ImplCat->isImplicit())
+               S.Diag(CatImpl->getLocation(),
+                      diag::note_mulle_method_impl_no_category_interface)
+                  << IDecl->getIdentifier()
+                  << ImplCatName;
+         } else {
+            S.Diag(CatImpl->getLocation(),
+                   diag::note_mulle_method_impl_no_category_interface)
+               << IDecl->getIdentifier()
+               << ImplCatName;
+         }
+         break; // one warning per method is enough
+      }
+   }
+}
+// @mulle-objc@ warn category method redeclaration <
+
 // Note: For class/category implementations, allMethods is always null.
 Decl *SemaObjC::ActOnAtEnd(Scope *S, SourceRange AtEnd,
                            ArrayRef<Decl *> allMethods,
@@ -4764,6 +4837,7 @@ Decl *SemaObjC::ActOnAtEnd(Scope *S, SourceRange AtEnd,
             = IDecl->FindCategoryDeclaration(CatImplClass->getIdentifier())) {
         ImplMethodsVsClassMethods(S, CatImplClass, Cat);
       }
+      DiagnoseCategoryMethodRedeclaration(*this, CatImplClass, IDecl);
     }
   } else if (const auto *IntfDecl = dyn_cast<ObjCInterfaceDecl>(ClassDecl)) {
     if (const ObjCInterfaceDecl *Super = IntfDecl->getSuperClass()) {
