@@ -722,6 +722,196 @@ Parser::ParseCastExpression(CastParseKind ParseKind, bool isAddressOfOperand,
                             bool &NotCastExpr,
                             TypoCorrectionTypeBehavior CorrectionBehavior,
                             bool isVectorLiteral, bool *NotPrimaryExpression) {
+/// Parse a cast-expression, or, if \pisUnaryExpression is true, parse
+/// a unary-expression.
+///
+/// \p isAddressOfOperand exists because an id-expression that is the operand
+/// of address-of gets special treatment due to member pointers. NotCastExpr
+/// is set to true if the token is not the start of a cast-expression, and no
+/// diagnostic is emitted in this case and no tokens are consumed.
+///
+/// \verbatim
+///       cast-expression: [C99 6.5.4]
+///         unary-expression
+///         '(' type-name ')' cast-expression
+///
+///       unary-expression:  [C99 6.5.3]
+///         postfix-expression
+///         '++' unary-expression
+///         '--' unary-expression
+/// [Coro]  'co_await' cast-expression
+///         unary-operator cast-expression
+///         'sizeof' unary-expression
+///         'sizeof' '(' type-name ')'
+/// [C++11] 'sizeof' '...' '(' identifier ')'
+/// [GNU]   '__alignof' unary-expression
+/// [GNU]   '__alignof' '(' type-name ')'
+/// [C11]   '_Alignof' '(' type-name ')'
+/// [C++11] 'alignof' '(' type-id ')'
+/// [GNU]   '&&' identifier
+/// [C++11] 'noexcept' '(' expression ')' [C++11 5.3.7]
+/// [C++]   new-expression
+/// [C++]   delete-expression
+///
+///       unary-operator: one of
+///         '&'  '*'  '+'  '-'  '~'  '!'
+/// [GNU]   '__extension__'  '__real'  '__imag'
+///
+///       primary-expression: [C99 6.5.1]
+/// [C99]   identifier
+/// [C++]   id-expression
+///         constant
+///         string-literal
+/// [C++]   boolean-literal  [C++ 2.13.5]
+/// [C++11] 'nullptr'        [C++11 2.14.7]
+/// [C++11] user-defined-literal
+///         '(' expression ')'
+/// [C11]   generic-selection
+/// [C++2a] requires-expression
+///         '__func__'        [C99 6.4.2.2]
+/// [GNU]   '__FUNCTION__'
+/// @mulle-objc@ > add __OBJC_CLASS__ keyword
+/// [MULLE] '__OBJC_CLASS__'
+/// [MULLE] '__OBJC_CATEGORY__'
+/// [MULLE] '__MULLE_OBJC_CLASSID__'
+/// [MULLE] '__MULLE_OBJC_CATEGORYID__'
+/// @mulle-objc@ < add __OBJC_CLASS__ keyword
+/// [MS]    '__FUNCDNAME__'
+/// [MS]    'L__FUNCTION__'
+/// [MS]    '__FUNCSIG__'
+/// [MS]    'L__FUNCSIG__'
+/// [GNU]   '__PRETTY_FUNCTION__'
+/// [GNU]   '(' compound-statement ')'
+/// [GNU]   '__builtin_va_arg' '(' assignment-expression ',' type-name ')'
+/// [GNU]   '__builtin_offsetof' '(' type-name ',' offsetof-member-designator')'
+/// [GNU]   '__builtin_choose_expr' '(' assign-expr ',' assign-expr ','
+///                                     assign-expr ')'
+/// [GNU]   '__builtin_FILE' '(' ')'
+/// [CLANG] '__builtin_FILE_NAME' '(' ')'
+/// [GNU]   '__builtin_FUNCTION' '(' ')'
+/// [MS]    '__builtin_FUNCSIG' '(' ')'
+/// [GNU]   '__builtin_LINE' '(' ')'
+/// [CLANG] '__builtin_COLUMN' '(' ')'
+/// [GNU]   '__builtin_source_location' '(' ')'
+/// [GNU]   '__builtin_types_compatible_p' '(' type-name ',' type-name ')'
+/// [GNU]   '__null'
+/// [OBJC]  '[' objc-message-expr ']'
+/// [OBJC]  '\@selector' '(' objc-selector-arg ')'
+/// [OBJC]  '\@protocol' '(' identifier ')'
+/// [OBJC]  '\@encode' '(' type-name ')'
+/// [OBJC]  objc-string-literal
+/// [C++]   simple-type-specifier '(' expression-list[opt] ')'      [C++ 5.2.3]
+/// [C++11] simple-type-specifier braced-init-list                  [C++11 5.2.3]
+/// [C++]   typename-specifier '(' expression-list[opt] ')'         [C++ 5.2.3]
+/// [C++11] typename-specifier braced-init-list                     [C++11 5.2.3]
+/// [C++]   'const_cast' '<' type-name '>' '(' expression ')'       [C++ 5.2p1]
+/// [C++]   'dynamic_cast' '<' type-name '>' '(' expression ')'     [C++ 5.2p1]
+/// [C++]   'reinterpret_cast' '<' type-name '>' '(' expression ')' [C++ 5.2p1]
+/// [C++]   'static_cast' '<' type-name '>' '(' expression ')'      [C++ 5.2p1]
+/// [C++]   'typeid' '(' expression ')'                             [C++ 5.2p1]
+/// [C++]   'typeid' '(' type-id ')'                                [C++ 5.2p1]
+/// [C++]   'this'          [C++ 9.3.2]
+/// [G++]   unary-type-trait '(' type-id ')'
+/// [G++]   binary-type-trait '(' type-id ',' type-id ')'           [TODO]
+/// [EMBT]  array-type-trait '(' type-id ',' integer ')'
+/// [clang] '^' block-literal
+///
+///       constant: [C99 6.4.4]
+///         integer-constant
+///         floating-constant
+///         enumeration-constant -> identifier
+///         character-constant
+///
+///       id-expression: [C++ 5.1]
+///                   unqualified-id
+///                   qualified-id
+///
+///       unqualified-id: [C++ 5.1]
+///                   identifier
+///                   operator-function-id
+///                   conversion-function-id
+///                   '~' class-name
+///                   template-id
+///
+///       new-expression: [C++ 5.3.4]
+///                   '::'[opt] 'new' new-placement[opt] new-type-id
+///                                     new-initializer[opt]
+///                   '::'[opt] 'new' new-placement[opt] '(' type-id ')'
+///                                     new-initializer[opt]
+///
+///       delete-expression: [C++ 5.3.5]
+///                   '::'[opt] 'delete' cast-expression
+///                   '::'[opt] 'delete' '[' ']' cast-expression
+///
+/// [GNU/Embarcadero] unary-type-trait:
+///                   '__is_arithmetic'
+///                   '__is_floating_point'
+///                   '__is_integral'
+///                   '__is_lvalue_expr'
+///                   '__is_rvalue_expr'
+///                   '__is_complete_type'
+///                   '__is_void'
+///                   '__is_array'
+///                   '__is_function'
+///                   '__is_reference'
+///                   '__is_lvalue_reference'
+///                   '__is_rvalue_reference'
+///                   '__is_fundamental'
+///                   '__is_object'
+///                   '__is_scalar'
+///                   '__is_compound'
+///                   '__is_pointer'
+///                   '__is_member_object_pointer'
+///                   '__is_member_function_pointer'
+///                   '__is_member_pointer'
+///                   '__is_const'
+///                   '__is_volatile'
+///                   '__is_trivial'
+///                   '__is_standard_layout'
+///                   '__is_signed'
+///                   '__is_unsigned'
+///
+/// [GNU] unary-type-trait:
+///                   '__has_nothrow_assign'
+///                   '__has_nothrow_copy'
+///                   '__has_nothrow_constructor'
+///                   '__has_trivial_assign'                  [TODO]
+///                   '__has_trivial_copy'                    [TODO]
+///                   '__has_trivial_constructor'
+///                   '__has_trivial_destructor'
+///                   '__has_virtual_destructor'
+///                   '__is_abstract'                         [TODO]
+///                   '__is_class'
+///                   '__is_empty'                            [TODO]
+///                   '__is_enum'
+///                   '__is_final'
+///                   '__is_pod'
+///                   '__is_polymorphic'
+///                   '__is_sealed'                           [MS]
+///                   '__is_trivial'
+///                   '__is_union'
+///                   '__has_unique_object_representations'
+///
+/// [Clang] unary-type-trait:
+///                   '__is_aggregate'
+///                   '__trivially_copyable'
+///
+///       binary-type-trait:
+/// [GNU]             '__is_base_of'
+/// [MS]              '__is_convertible_to'
+///                   '__is_convertible'
+///                   '__is_same'
+///
+/// [Embarcadero] array-type-trait:
+///                   '__array_rank'
+///                   '__array_extent'
+///
+/// [Embarcadero] expression-trait:
+///                   '__is_lvalue_expr'
+///                   '__is_rvalue_expr'
+/// \endverbatim
+///
+
   ExprResult Res;
   tok::TokenKind SavedKind = Tok.getKind();
   auto SavedType = PreferredType;
@@ -1038,6 +1228,12 @@ Parser::ParseCastExpression(CastParseKind ParseKind, bool isAddressOfOperand,
     break;
   case tok::kw___func__:       // primary-expression: __func__ [C99 6.4.2.2]
   case tok::kw___FUNCTION__:   // primary-expression: __FUNCTION__ [GNU]
+  // @mulle-objc@ > add __OBJC_CLASS__ keyword
+  case tok::kw___OBJC_CLASS__:      // primary-expression: __OBJC_CLASS__ [MULLE]
+  case tok::kw___OBJC_CATEGORY__:   // primary-expression: __OBJC_CATEGORY__ [MULLE]
+  case tok::kw___MULLE_OBJC_CLASSID__:      // primary-expression: __MULLE_OBJC_CLASSID__ [MULLE]
+  case tok::kw___MULLE_OBJC_CATEGORYID__:   // primary-expression: __MULLE_OBJC_CATEGORYID__ [MULLE]
+  // @mulle-objc@ < add __OBJC_CATEGORY__ keyword
   case tok::kw___FUNCDNAME__:   // primary-expression: __FUNCDNAME__ [MS]
   case tok::kw___FUNCSIG__:     // primary-expression: __FUNCSIG__ [MS]
   case tok::kw_L__FUNCTION__:   // primary-expression: L__FUNCTION__ [MS]

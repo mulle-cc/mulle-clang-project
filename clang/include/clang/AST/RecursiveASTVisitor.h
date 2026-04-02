@@ -1737,6 +1737,10 @@ DEF_TRAVERSE_DECL(ExportDecl, {})
 DEF_TRAVERSE_DECL(ObjCPropertyImplDecl, {// FIXME: implement this
                                         })
 
+// @mulle-objc@ dependency directive >
+DEF_TRAVERSE_DECL(ObjCDependencyDecl, {})
+// @mulle-objc@ dependency directive <
+
 DEF_TRAVERSE_DECL(StaticAssertDecl, {
   TRY_TO(TraverseStmt(D->getAssertExpr()));
   TRY_TO(TraverseStmt(D->getMessage()));

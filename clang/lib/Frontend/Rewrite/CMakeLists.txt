@@ -9,6 +9,7 @@ add_clang_library(clangRewriteFrontend
   InclusionRewriter.cpp
   RewriteMacros.cpp
   RewriteModernObjC.cpp
+  RewriteMulleObjC.cpp
   RewriteObjC.cpp
   RewriteTest.cpp
 

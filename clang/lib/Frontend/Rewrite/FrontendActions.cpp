@@ -158,6 +158,18 @@ bool FixItRecompile::BeginInvocation(CompilerInstance &CI) {
   return true;
 }
 
+std::unique_ptr<ASTConsumer>
+RewriteMulleObjCAction::CreateASTConsumer(CompilerInstance &CI,
+                                          StringRef InFile) {
+  if (std::unique_ptr<raw_ostream> OS =
+          CI.createDefaultOutputFile(false, InFile, "c"))
+    return CreateMulleObjCRewriter(std::string(InFile), std::move(OS),
+                                   CI.getDiagnostics(), CI.getLangOpts(),
+                                   CI.getDiagnosticOpts().NoRewriteMacros,
+                                   CI.getPreprocessor());
+  return nullptr;
+}
+
 #if CLANG_ENABLE_OBJC_REWRITER
 
 std::unique_ptr<ASTConsumer>

@@ -280,7 +280,11 @@ public:
       SourceLocation ProtocolLoc, Decl *const *ProtoRefNames,
       unsigned NumProtoRefs, const SourceLocation *ProtoLocs,
       SourceLocation EndProtoLoc, const ParsedAttributesView &AttrList,
-      SkipBodyInfo *SkipBody);
+      SkipBodyInfo *SkipBody,
+      // @mulle-objc@ protocolclass param >
+      bool IsProtocolClass = false
+      // @mulle-objc@ protocolclass param <
+      );
 
   ObjCCategoryDecl *ActOnStartCategoryInterface(
       SourceLocation AtInterfaceLoc, const IdentifierInfo *ClassName,
@@ -309,6 +313,31 @@ public:
   ActOnForwardProtocolDeclaration(SourceLocation AtProtoclLoc,
                                   ArrayRef<IdentifierLoc> IdentList,
                                   const ParsedAttributesView &attrList);
+
+  // @mulle-objc@ protocolclass sema declarations >
+  DeclGroupPtrTy
+  ActOnProtocolClassForwardDeclaration(SourceLocation AtLoc,
+                                       ArrayRef<IdentifierLoc> IdentList,
+                                       const ParsedAttributesView &AttrList);
+
+  ObjCImplementationDecl *ActOnStartProtocolImplementation(
+      SourceLocation AtLoc, const IdentifierInfo *ClassName,
+      SourceLocation ClassLoc, const ParsedAttributesView &Attrs);
+  // @mulle-objc@ protocolclass sema declarations <
+
+  // @mulle-objc@ method_implementation sema declaration >
+  Decl *ActOnMethodImplementationAlias(
+      SourceLocation AtLoc,
+      bool NewIsInstance,
+      Selector NewSel,
+      SourceLocation NewSelLoc,
+      bool RHSIsMethod,
+      bool RHSIsInstance,
+      Selector RHSSel,
+      IdentifierInfo *RHSFunc,
+      SourceLocation RHSLoc,
+      Decl *ClassDecl);
+  // @mulle-objc@ method_implementation sema declaration <
 
   void FindProtocolDeclaration(bool WarnOnDeclarations, bool ForObjCContainer,
                                ArrayRef<IdentifierLoc> ProtocolId,
@@ -354,6 +383,32 @@ public:
   ParmVarDecl *ActOnMethodParmDeclaration(Scope *S, ObjCArgInfo &ArgInfo,
                                           int ParamIndex,
                                           bool MethodDefinition);
+
+  // @mulle-objc@ >> specific methods for parameters
+  int   CheckSelectorForAAM( Selector Sel,
+                             ObjCMethodDecl *Method,
+                             QualType ReceiverType,
+                             SourceLocation SelLoc,
+                             SourceRange RecRange);
+  bool CheckMulleObjCFunctionDefined( Scope *S, SourceLocation Loc, StringRef Name);
+
+  void   SetMulleObjCParam( ObjCMethodDecl *ObjCMethod,
+                            Selector Sel,
+                            SmallVector<ParmVarDecl*, 16> *Params,
+                            QualType resultType,
+                            unsigned int abiDesc,
+                            SourceLocation   Loc);
+                                          
+  enum MetaABIDescription
+  {
+    MetaABIVoidPtrRval   = 0x0,
+    MetaABIVoidPtrParam  = 0x1,
+    MetaABIRvalAsStruct  = 0x2,
+    MetaABIParamAsStruct = 0x4
+  }; 
+  unsigned int   metaABIDescription( SmallVector<ParmVarDecl*, 16> &Params,
+                                     QualType resultType);
+  // @mulle-objc@ << specific methods for parameters
 
   Decl *ActOnMethodDeclaration(
       Scope *S,
@@ -943,9 +998,24 @@ public:
   /// \param property The property declaration being processed
   void ProcessPropertyDecl(ObjCPropertyDecl *property);
 
+// @mulle-objc >> adder + remover
+  void  VerifyPropertyNonGetterMethod( ObjCPropertyDecl *property,
+                                       ObjCMethodDecl *method,
+                                       std::string name);
+
+  ObjCMethodDecl  *CreatePropertyNonGetterMethod( ObjCContainerDecl *CD,
+                                                  ObjCPropertyDecl *property,
+                                                  Selector Selector,
+                                                  bool isSetter);
+// @mulle-objc << adder + remover
+
   Decl *ActOnProperty(Scope *S, SourceLocation AtLoc, SourceLocation LParenLoc,
                       FieldDeclarator &FD, ObjCDeclSpec &ODS,
                       Selector GetterSel, Selector SetterSel,
+// @mulle-objc >> adder + remover
+                      Selector AdderSel, 
+                      Selector RemoverSel, 
+// @mulle-objc << adder + remover
                       tok::ObjCKeywordKind MethodImplKind,
                       DeclContext *lexicalDC = nullptr);
 
@@ -956,12 +1026,33 @@ public:
                               SourceLocation PropertyIvarLoc,
                               ObjCPropertyQueryKind QueryKind);
 
+  // @mulle-objc@ dependency directive >
+  /// TU-level @dependency list — accumulated for the whole translation unit,
+  /// never reset.  Every @implementation in this TU will get these entries.
+  SmallVector<ObjCDependencyDecl *, 4> TUDependencies;
+
+  /// Per-@implementation @dependency list — reset at the start of each
+  /// @implementation.
+  SmallVector<ObjCDependencyDecl *, 4> ImplDependencies;
+
+  Decl *ActOnDependencyDecl(Scope *S, SourceLocation AtLoc,
+                             SourceLocation ClassLoc,
+                             IdentifierInfo *ClassName,
+                             IdentifierInfo *CategoryName,
+                             Decl *ImplDecl);
+  // @mulle-objc@ dependency directive <
+
   /// Called by ActOnProperty to handle \@property declarations in
   /// class extensions.
   ObjCPropertyDecl *HandlePropertyInClassExtension(
       Scope *S, SourceLocation AtLoc, SourceLocation LParenLoc,
       FieldDeclarator &FD, Selector GetterSel, SourceLocation GetterNameLoc,
-      Selector SetterSel, SourceLocation SetterNameLoc, const bool isReadWrite,
+      Selector SetterSel, SourceLocation SetterNameLoc, 
+// @mulle-objc >> adder + remover
+      Selector AdderSel, SourceLocation AdderNameLoc,
+      Selector RemoverSel, SourceLocation RemoverNameLoc,
+// @mulle-objc << adder + remover
+      const bool isReadWrite,
       unsigned &Attributes, const unsigned AttributesAsWritten, QualType T,
       TypeSourceInfo *TSI, tok::ObjCKeywordKind MethodImplKind);
 
@@ -972,6 +1063,10 @@ public:
                      SourceLocation LParenLoc, FieldDeclarator &FD,
                      Selector GetterSel, SourceLocation GetterNameLoc,
                      Selector SetterSel, SourceLocation SetterNameLoc,
+// @mulle-objc >> adder + remover
+                     Selector AdderSel, SourceLocation AdderNameLoc,
+                     Selector RemoverSel, SourceLocation RemoverNameLoc,
+// @mulle-objc << adder + remover
                      const bool isReadWrite, const unsigned Attributes,
                      const unsigned AttributesAsWritten, QualType T,
                      TypeSourceInfo *TSI, tok::ObjCKeywordKind MethodImplKind,

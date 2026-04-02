@@ -26,6 +26,7 @@
 #include "clang/AST/TypeLoc.h"
 #include "clang/AST/TypeOrdering.h"
 #include "clang/Basic/TargetInfo.h"
+#include "clang/Basic/Builtins.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/Initialization.h"
@@ -640,6 +641,87 @@ StmtResult Sema::BuildAttributedStmt(SourceLocation AttrsLoc,
       }
       setFunctionHasMustTail();
     }
+    // @mulle-objc@ Check mulle_confined_loop constraints >
+    if (A->getKind() == attr::MulleConfinedLoop) {
+      // Get the loop/compound body
+      const Stmt *Body = nullptr;
+      if (const auto *DS = dyn_cast<DoStmt>(SubStmt))
+        Body = DS->getBody();
+      else if (const auto *WS = dyn_cast<WhileStmt>(SubStmt))
+        Body = WS->getBody();
+      else if (const auto *FS = dyn_cast<ForStmt>(SubStmt))
+        Body = FS->getBody();
+
+      if (Body) {
+        // Collect labels defined inside the body
+        llvm::SmallPtrSet<LabelDecl *, 4> InternalLabels;
+        std::function<void(const Stmt *)> CollectLabels = [&](const Stmt *S) {
+          if (!S) return;
+          if (const auto *LS = dyn_cast<LabelStmt>(S))
+            InternalLabels.insert(LS->getDecl());
+          for (const Stmt *Child : S->children())
+            CollectLabels(Child);
+        };
+        CollectLabels(Body);
+
+        // Walk body checking for escaping statements
+        std::function<void(const Stmt *, int)> CheckStmt = [&](const Stmt *S, int nestedLoopDepth) {
+          if (!S) return;
+
+          if (const auto *AS = dyn_cast<AttributedStmt>(S)) {
+            // If nested mulle_confined_loop, recurse into its body with incremented
+            // depth to catch mulle_confined_return nesting violations, but skip
+            // bare return errors (the inner loop's own check handles those)
+            for (const auto *Attr : AS->getAttrs()) {
+              if (Attr->getKind() == attr::MulleConfinedLoop) {
+                for (const Stmt *Child : S->children())
+                  CheckStmt(Child, nestedLoopDepth + 1);
+                return;
+              }
+            }
+            // Check if this is a mulle_confined_return wrapping a return stmt
+            for (const auto *Attr : AS->getAttrs()) {
+              if (Attr->getKind() == attr::MulleConfinedReturn &&
+                  isa<ReturnStmt>(AS->getSubStmt())) {
+                if (nestedLoopDepth > 0)
+                  Diag(AS->getBeginLoc(), diag::err_mulle_confined_return_in_nested_loop);
+                // else: OK at top level
+                return;
+              }
+            }
+            // Other attributed stmt - recurse normally
+            for (const Stmt *Child : S->children())
+              CheckStmt(Child, nestedLoopDepth);
+            return;
+          }
+
+          if (const auto *RS = dyn_cast<ReturnStmt>(S)) {
+            // Only error on bare return at depth 0 - inner confined loops
+            // report their own bare return errors
+            if (nestedLoopDepth == 0)
+              Diag(RS->getReturnLoc(), diag::err_mulle_confined_loop_has_return);
+          } else if (const auto *GS = dyn_cast<GotoStmt>(S)) {
+            if (!InternalLabels.count(GS->getLabel()))
+              Diag(GS->getGotoLoc(), diag::err_mulle_confined_loop_has_goto_outside);
+          } else if (isa<IndirectGotoStmt>(S)) {
+            Diag(S->getBeginLoc(), diag::warn_mulle_confined_loop_has_indirect_goto);
+          } else if (isa<ObjCAtThrowStmt>(S)) {
+            Diag(S->getBeginLoc(), diag::warn_mulle_confined_loop_has_throw);
+          } else if (const auto *CE = dyn_cast<CallExpr>(S)) {
+            if (const auto *FD = CE->getDirectCallee()) {
+              unsigned BI = FD->getBuiltinID();
+              if (BI == Builtin::BIlongjmp || BI == Builtin::BI_longjmp ||
+                  BI == Builtin::BIsiglongjmp || BI == Builtin::BI__builtin_longjmp)
+                Diag(CE->getBeginLoc(), diag::warn_mulle_confined_loop_has_longjmp);
+            }
+          }
+          for (const Stmt *Child : S->children())
+            CheckStmt(Child, nestedLoopDepth);
+        };
+        CheckStmt(Body, 0);
+      }
+    }
+    // @mulle-objc@ Check mulle_confined_loop constraints <
   }
 
   return AttributedStmt::Create(Context, AttrsLoc, Attrs, SubStmt);

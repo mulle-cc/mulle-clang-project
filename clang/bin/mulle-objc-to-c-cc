@@ -1,0 +1,46 @@
+#!/bin/sh
+# mulle-objc-to-c-cc: drop-in for mulle-clang in mulle-sde.
+# .m/.mm files are rewritten to C first, then compiled normally.
+# All other invocations pass through unchanged.
+#
+# Setup in a mulle-sde project:
+#   mulle-sde definition set CC /path/to/mulle-objc-to-c-cc
+
+CLANG="${CLANG:-/home/src/srcL/mulle-clang-21.1.8/build/bin/clang}"
+C_DEFINES="-D__MULLE_OBJC_TPS__ -D__MULLE_OBJC_FCS__ -D__MULLE_OBJC_TAO__"
+
+# Split args into: objc input files vs everything else
+# Also strip -o (we control output), -MD/-MF/-MT (dep tracking handled separately)
+objc_inputs=""
+other_args=""
+output=""
+dep_args=""
+has_objc=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    *.m|*.mm) objc_inputs="$objc_inputs $1"; has_objc=1; shift ;;
+    -o)       output="$2"; shift 2 ;;
+    -o*)      output="${1#-o}"; shift ;;
+    -MF)      dep_args="$dep_args -MF $2"; shift 2 ;;
+    -MT)      dep_args="$dep_args -MT $2"; shift 2 ;;
+    -MD)      dep_args="$dep_args -MD"; shift ;;
+    *)        other_args="$other_args $1"; shift ;;
+  esac
+done
+
+# No ObjC — pure passthrough
+if [ $has_objc -eq 0 ]; then
+  exec $CLANG $other_args ${output:+-o "$output"} $dep_args
+fi
+
+# Rewrite each .m to a temp .c, then compile with original flags
+for input in $objc_inputs; do
+  tmp=$(mktemp /tmp/mulle_rewrite_XXXXXX.c)
+  trap 'rm -f "$tmp"' EXIT
+
+  $CLANG --mulle-objc-emit-c -fobjc-tao -Wno-unused-command-line-argument $other_args "$input" > "$tmp" || exit 1
+  # Strip ObjC-specific flags for the plain C compile step
+  c_args=$(printf '%s' "$other_args" | sed 's/-fobjc-runtime=[^ ]*//g; s/-fobjc-tao//g; s/-fobjc-arc//g')
+  $CLANG -x c $C_DEFINES $c_args ${output:+-o "$output"} $dep_args "$tmp" || exit 1
+done

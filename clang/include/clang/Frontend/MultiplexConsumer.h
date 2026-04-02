@@ -72,6 +72,9 @@ public:
   void CompleteExternalDeclaration(DeclaratorDecl *D) override;
   void AssignInheritanceModel(CXXRecordDecl *RD) override;
   void HandleVTable(CXXRecordDecl *RD) override;
+  // @mulle-objc@ compiler: forward ParserDidFinish to all sub-consumers >
+  void ParserDidFinish(Parser *P) override;
+  // @mulle-objc@ compiler: forward ParserDidFinish to all sub-consumers <
   ASTMutationListener *GetASTMutationListener() override;
   ASTDeserializationListener *GetASTDeserializationListener() override;
   void PrintStats() override;
