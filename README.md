@@ -4,7 +4,7 @@
 
 This is an Objective-C compiler based on clang 22.1.2, written for the
 [mulle-objc](//www.mulle-kybernetik.com/weblog/2015/mulle_objc_a_new_objective_c_.html)
-runtime. It corresponds to mulle-objc-runtime v0.24 or better.
+runtime. It corresponds to mulle-objc-runtime v0.27 or better.
 
 > See [README.txt](README.txt) for more information about clang
 
@@ -78,6 +78,26 @@ same class being loaded first:
 The compiler warns if a method implemented in a category is already declared
 in another category of the same class, unless suppressed by `@dependency` or
 the other category name contains `forward`, `future`, or `prototype`.
+
+
+### ObjC to C Rewriter
+
+The compiler can rewrite Objective-C source to portable C via `-rewrite-mulle-objc`.
+This is used to produce C output that can be compiled by any C compiler targeting
+platforms without a native clang port.
+
+```bash
+mulle-clang -fobjc-tao -rewrite-mulle-objc foo.m -o foo.c
+```
+
+Relevant flags for rewriter output:
+
+| Flag                          | Description
+|-------------------------------|--------------------------------------
+| `-rewrite-mulle-objc`         | Rewrite ObjC source to C
+| `--mulle-objc-portable-call`  | Emit `mulle_metaabi_object_call` macros instead of direct calls (cross-arch portable)
+| `--mulle-objc-no-asm-names`   | Omit `__asm__` symbol renaming (for C compilers that don't support it)
+| `-fobjc-encode-no-offsets`    | Strip byte offsets from type encodings in rewriter output
 
 
 ### AAM - Always Autorelease Mode
