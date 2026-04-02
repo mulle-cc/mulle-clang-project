@@ -64,7 +64,7 @@ class CGBlockInfo;
 // @mulle-objc@ >
 struct CGObjCRuntimeLifetimeMarker
 {
-   llvm::Value  *SizeV;
+   bool          SizeV;
    llvm::Value  *Addr;
 };
 // @mulle-objc@ <

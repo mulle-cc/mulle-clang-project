@@ -410,7 +410,7 @@ void SemaObjC::ActOnStartOfObjCMethodDef(Scope *FnBodyScope, Decl *D) {
       {
          // @mulle-objc@ MetaABI shadow: voidptr-packed struct unpack >
          // isMetaABIVoidPointerParam() is true only when the caller packs by value.
-         QualType RecTy = Context.getTagDeclType( RD);
+         QualType RecTy = Context.getTypeDeclType( (TypeDecl *) RD);
          bool isVoidPtrPacked = MDecl->isMetaABIVoidPointerParam();
          // @mulle-objc@ MetaABI shadow: voidptr-packed struct unpack <
 
@@ -734,8 +734,7 @@ void SemaObjC::ActOnSuperClassOfClassInterface(
         if (T->isObjCObjectType()) {
           if (NamedDecl *IDecl = T->castAs<ObjCObjectType>()->getInterface()) {
             SuperClassDecl = dyn_cast<ObjCInterfaceDecl>(IDecl);
-            SuperClassType = Context.getTypeDeclType(
-                ElaboratedTypeKeyword::None, /*Qualifier=*/std::nullopt, TDecl);
+            SuperClassType = Context.getTypeDeclType( (TypeDecl *) TDecl);
 
             // This handles the following case:
             // @interface NewI @end
@@ -1743,8 +1742,7 @@ void SemaObjC::actOnObjCTypeArgsOrProtocolQualifiers(
     QualType type;
     if (auto *actualTypeDecl = dyn_cast<TypeDecl *>(typeDecl))
       type =
-          Context.getTypeDeclType(ElaboratedTypeKeyword::None,
-                                  /*Qualifier=*/std::nullopt, actualTypeDecl);
+          Context.getTypeDeclType( (TypeDecl *) actualTypeDecl);
     else
       type = Context.getObjCInterfaceType(cast<ObjCInterfaceDecl *>(typeDecl));
     TypeSourceInfo *parsedTSInfo = Context.getTrivialTypeSourceInfo(type, loc);
@@ -5578,7 +5576,7 @@ void   SemaObjC::SetMulleObjCParam( ObjCMethodDecl *ObjCMethod,
    //       add our _param implicit decl now.
    //
    // convert record to a QualType
-   QualType RecTy = Context.getTagDeclType(RD);
+   QualType RecTy = Context.getTypeDeclType( (TypeDecl *) RD);
    PtrTy = Context.getPointerType( RecTy);
 
    ImplicitParamDecl  *Param = ImplicitParamDecl::Create(Context,

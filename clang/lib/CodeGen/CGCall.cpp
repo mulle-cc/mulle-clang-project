@@ -592,7 +592,7 @@ CodeGenTypes::arrangeObjCMessageSendSignature(const ObjCMethodDecl *MD,
       RecordDecl *RD = MD->getParamRecord();
       if( RD)
       {
-         QualType RecTy = Context.getTagDeclType( RD);
+         QualType RecTy = Context.getTypeDeclType( (TypeDecl *) RD);
          QualType PtrTy = Context.getPointerType( RecTy);
 
          argTys.push_back( Context.getCanonicalParamType( PtrTy));
@@ -3528,9 +3528,9 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
 //            const ASTRecordLayout &ASTLayout = CGM.getContext().getASTRecordLayout(RD);
             const CGRecordLayout &CGLayout = CGM.getTypes().getCGRecordLayout(RD);
 //                  const llvm::StructLayout *llvmStructLayout = CGM.getDataLayout().getStructLayout(
-//                                           CGM.getContext().getTagDeclType( RD));
+//                                           CGM.getContext().getTypeDeclType( (TypeDecl *) RD));
 
-            QualType RecTy = CGM.getContext().getTagDeclType( RD);
+            QualType RecTy = CGM.getContext().getTypeDeclType( (TypeDecl *) RD);
             // QualType PtrTy = CGM.getContext().getPointerType( RecTy);
 
             // used to use PtrTy which made more sense to me, but it fails now..

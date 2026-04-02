@@ -490,7 +490,7 @@ namespace {
          SmallVector<CanQualType,5> Params;
          Params.push_back(Ctx.VoidPtrTy);
          Params.push_back(Ctx.VoidPtrTy);
-         Params.push_back(Ctx.getSizeType());
+         Params.push_back(Ctx.getCanonicalType(Ctx.getSizeType()));
          Params.push_back(Ctx.BoolTy);
          Params.push_back(Ctx.BoolTy);
          llvm::FunctionType *FTy =
@@ -1664,7 +1664,7 @@ ObjCTypes(cgm) {
 
    switch( CGM.getLangOpts().ObjCInlineMethodCalls)
    {
-   case 0  :  switch( CGM.getLangOpts().OptimizeSize ? -CGM.getLangOpts().OptimizeSize
+   case 0  :  switch( CGM.getCodeGenOpts().OptimizeSize ? -CGM.getCodeGenOpts().OptimizeSize
                                                      : (int) CGM.getCodeGenOpts().OptimizationLevel)
               {
               case -2 : inline_calls = INLINE_CALL_PARTIAL; break;  // Oz
@@ -1793,7 +1793,7 @@ VarDecl  *CGObjCMulleRuntime::CreateCompilerInfoVarDecl( void)
    IdentifierInfo  *VariableID;
 
    RD            = CreateCompilerInfoRecordDecl();
-   QualType type = CGM.getContext().getTagDeclType( RD);
+   QualType type = CGM.getContext().getTypeDeclType( (TypeDecl *) RD);
 
    VariableID = &CGM.getContext().Idents.get( "__mulle_objc_objccompilerinfo");
    VD         = VarDecl::Create( CGM.getContext(),
@@ -2393,7 +2393,7 @@ llvm::StructType *CGObjCCommonMulleRuntime::CreateNSConstantStringType( void)
 
    D->completeDefinition();
 
-   QualType NSTy = Context.getTagDeclType(D);
+   QualType NSTy = Context.getTypeDeclType( (TypeDecl *) D);
    return( cast<llvm::StructType>( CGM.getTypes().ConvertType(NSTy)));
 }
 
@@ -3171,11 +3171,10 @@ CGObjCMulleRuntime::EmitFastEnumeratorCall( CodeGen::CodeGenFunction &CGF,
    LValue       Union = GenerateAlloca( CGF, UD);
 
    llvm::Type   *UnionLLVMType = CGF.ConvertTypeForMem( Union.getType());
-   llvm::TypeSize size         = CGM.getDataLayout().getTypeAllocSize(UnionLLVMType);
-   llvm::Value  *emitMarker    = CGF.EmitLifetimeStart( size, Union.getPointer( CGF));
+   bool emitMarker = CGF.EmitLifetimeStart( Union.getPointer( CGF));
 
    llvm::Value   *RecordAddr        = CGF.Builder.CreateConstGEP2_32( UnionLLVMType, Union.getPointer(CGF), 0, 0);
-   QualType       RDType            = CGM.getContext().getTagDeclType( RD);
+   QualType       RDType            = CGM.getContext().getTypeDeclType( (TypeDecl *) RD);
    llvm::Type    *RecordLLVMType    = CGF.ConvertTypeForMem( RDType);
    llvm::Type    *RecordLLVMPtrType = CGF.ConvertTypeForMem( CGM.getContext().getPointerType( RDType));
    llvm::Value   *CastedRecordAddr  = CGF.Builder.CreateBitCast( RecordAddr, RecordLLVMPtrType);
@@ -3219,7 +3218,7 @@ CGObjCMulleRuntime::EmitFastEnumeratorCall( CodeGen::CodeGenFunction &CGF,
                        nullptr,
                        nullptr);
    if( emitMarker)
-      CGF.EmitLifetimeEnd( emitMarker, Union.getPointer(CGF));
+      CGF.EmitLifetimeEnd( Union.getPointer(CGF));
 
    return( CountRV);
 }
@@ -3827,7 +3826,7 @@ static void  fill_struct_info_from_recTy( struct struct_info *info, CodeGenModul
 
 static void  fill_struct_info( struct struct_info *info, CodeGenModule *CGM, TagDecl *Decl)
 {
-   info->recTy    = CGM->getContext().getTagDeclType( Decl);
+   info->recTy    = CGM->getContext().getTypeDeclType( (TypeDecl *) Decl);
    fill_struct_info_from_recTy( info, CGM);
 }
 
@@ -4186,7 +4185,7 @@ RecordDecl   *CGObjCMulleRuntime::CreateMetaABIUnionDecl( CodeGenFunction &CGF,
 LValue  CGObjCMulleRuntime::GenerateAlloca( CodeGenFunction &CGF,
                                             RecordDecl *UD)
 {
-   QualType Ty = CGM.getContext().getTagDeclType( UD);
+   QualType Ty = CGM.getContext().getTypeDeclType( (TypeDecl *) UD);
 
    // now alloca the union
    Address  allocaed = CGF.CreateMemTemp( Ty, "_args");  // leak ?
@@ -4297,8 +4296,8 @@ bool CGObjCMulleRuntime::OptimizeReuseParam( CodeGenFunction &CGF,
    // dont need the original alloca anymore
    if( Marker.SizeV)
    {
-      CGF.EmitLifetimeEnd( Marker.SizeV, Marker.Addr);
-      Marker.SizeV = nullptr;
+      CGF.EmitLifetimeEnd( Marker.Addr);
+      Marker.SizeV = false;
    }
 
    Args.add( loaded, CGM.getContext().VoidPtrTy);
@@ -4320,9 +4319,8 @@ LValue  CGObjCMulleRuntime::GenerateMetaABIRecordAlloca( CodeGenFunction &CGF,
    //
    Marker.Addr  = Union.getPointer(CGF);
    llvm::Type   *UnionLLVMType = CGF.ConvertTypeForMem( Union.getType());
-   llvm::TypeSize size         = CGM.getDataLayout().getTypeAllocSize(UnionLLVMType);
 
-   Marker.SizeV = CGF.EmitLifetimeStart( size, Marker.Addr);
+   Marker.SizeV = CGF.EmitLifetimeStart( Marker.Addr);
 
    // now get record out of union again
    RecordDecl::field_iterator   CurField = UD->field_begin();
@@ -4332,7 +4330,7 @@ LValue  CGObjCMulleRuntime::GenerateMetaABIRecordAlloca( CodeGenFunction &CGF,
 //  if( RV)
 //  {
 //     LValue Rval   = CGF.EmitLValueForField( Union, *CurField);
-//     CGF.EmitNullInitialization( Rval.getAddress( CGF), CGM.getContext().getTagDeclType( RV));
+//     CGF.EmitNullInitialization( Rval.getAddress( CGF), CGM.getContext().getTypeDeclType( (TypeDecl *) RV));
 //  }
    return( Record);
 }
@@ -4414,7 +4412,7 @@ CGObjCRuntimeLifetimeMarker   CGObjCMulleRuntime::ConvertToMetaABIArgsIfNeeded( 
    RecordDecl   *RV;
    SmallVector< CallArg, 16>  ArgArray;
 
-   Marker.SizeV = nullptr;
+   Marker.SizeV = false;
    Marker.Addr  = nullptr;
 
    assert( method);
@@ -4476,7 +4474,7 @@ CGObjCRuntimeLifetimeMarker  CGObjCMulleRuntime::GenerateCallArgs( CodeGenFuncti
    RecordDecl   *RV;
    CGObjCRuntimeLifetimeMarker  Marker;
 
-   Marker.SizeV = nullptr;
+   Marker.SizeV = false;
    Marker.Addr  = nullptr;
 
    // Initialize the captured struct.
@@ -5771,7 +5769,7 @@ llvm::Constant *CGObjCMulleRuntime::EmitLoadInfoList(Twine Name,
 
    int  optLevel;
 
-   optLevel = CGM.getLangOpts().OptimizeSize ? -CGM.getLangOpts().OptimizeSize
+   optLevel = CGM.getCodeGenOpts().OptimizeSize ? -CGM.getCodeGenOpts().OptimizeSize
                                              : CGM.getCodeGenOpts().OptimizationLevel;
    optLevel &= 0xF;
 

@@ -137,7 +137,7 @@ CodeGenFunction::EmitObjCBoxedExpr(const ObjCBoxedExpr *E) {
   // @mulle-objc@ MetaABI: tell optimizer the alloca lifetime is done >
   //
   if( Marker.SizeV)  // leaks probably, coz alloced
-      EmitLifetimeEnd( Marker.SizeV, Marker.Addr);
+      EmitLifetimeEnd( Marker.Addr);
   //
   // @mulle-objc@ MetaABI: tell optimizer the alloca lifetime is done <
   //
@@ -285,7 +285,7 @@ llvm::Value *CodeGenFunction::EmitObjCCollectionLiteral(const Expr *E,
   // @mulle-objc@ MetaABI: tell optimizer the alloca lifetime is done >
   //
    if( Marker.SizeV)  // leaks probably, coz alloced
-      EmitLifetimeEnd( Marker.SizeV, Marker.Addr);
+      EmitLifetimeEnd( Marker.Addr);
   // @mulle-objc@ MetaABI: tell optimizer the alloca lifetime is done <
 
   return Builder.CreateBitCast(result.getScalarVal(),
@@ -805,7 +805,7 @@ RValue CodeGenFunction::EmitObjCMessageExpr(const ObjCMessageExpr *E,
   // non-mulle runtimes will NULL here
   //
   if( Marker.SizeV)  // leaks probably, coz alloced
-     EmitLifetimeEnd( Marker.SizeV, Marker.Addr);
+     EmitLifetimeEnd( Marker.Addr);
   // @mulle-objc@ MetaABI: tell optimizer the lifetime is done for this alloca <
 
   return AdjustObjCObjectType(*this, E->getType(), result);
@@ -930,7 +930,7 @@ llvm::Value   *CodeGenFunction::GetMetaABIParamAddressLValue( const Decl *FuncDe
       return( NULL);
    }
 
-   recordTy    = CGM.getContext().getTagDeclType( RD);
+   recordTy    = CGM.getContext().getTypeDeclType( (TypeDecl *) RD);
    recordPtrTy = CGM.getContext().getPointerType( recordTy);
    // llvmRecType = CGM.getTypes().ConvertTypeForMem( recordTy);  // unused
    llvmPointerType = llvm::PointerType::get(CGM.getLLVMContext(), 0);
@@ -979,7 +979,7 @@ void   CodeGenFunction::EmitMetaABIWriteScalarReturnValue( const Decl *FuncDecl,
       return;
    }
 
-   recordTy = CGM.getContext().getTagDeclType( RD);
+   recordTy = CGM.getContext().getTypeDeclType( (TypeDecl *) RD);
 
    // store ScalarExpr in alloca
    // alignment = CGM.getContext().getTypeAlignInChars( recordPtrTy).getQuantity();
@@ -1060,7 +1060,7 @@ void   CodeGenFunction::EmitMetaABIWriteReturnValue( const Decl *FuncDecl, const
             return;
          }
 
-         recordTy    = CGM.getContext().getTagDeclType( RD);
+         recordTy    = CGM.getContext().getTypeDeclType( (TypeDecl *) RD);
          recordPtrTy = CGM.getContext().getPointerType( recordTy);
 
          // get _param address (known to be big enough)

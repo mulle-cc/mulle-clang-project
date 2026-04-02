@@ -487,7 +487,7 @@ CGObjCRuntimeLifetimeMarker   CGObjCRuntime::GenerateCallArgs( CodeGenFunction &
    CGObjCRuntimeLifetimeMarker  Marker;
    CGF.EmitCallArgs( Args, method, Expr->arguments());
 
-   Marker.SizeV = nullptr;
+   Marker.SizeV = false;
    Marker.Addr  = nullptr;
    return( Marker);
 }
@@ -499,7 +499,7 @@ CGObjCRuntimeLifetimeMarker   CGObjCRuntime::ConvertToMetaABIArgsIfNeeded( CodeG
 {
    CGObjCRuntimeLifetimeMarker  Marker;
 
-   Marker.SizeV = nullptr;
+   Marker.SizeV = false;
    Marker.Addr  = nullptr;
    return( Marker);
 }

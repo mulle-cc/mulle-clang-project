@@ -1,0 +1,11 @@
+Cherry-pick started, conflicts in 8 files:
+  UU clang/include/clang/AST/ASTConsumer.h
+  UU clang/include/clang/AST/Type.h
+  UU clang/lib/AST/Type.cpp
+  UU clang/lib/CodeGen/CGException.cpp
+  UU clang/lib/CodeGen/CGObjCRuntime.h
+  UU clang/lib/CodeGen/ModuleBuilder.cpp
+  UU clang/lib/Sema/SemaDecl.cpp
+  UU clang/lib/Sema/SemaExpr.cpp
+
+Now on branch mulle/22.1.2. Proceed to task 3 to resolve conflicts.

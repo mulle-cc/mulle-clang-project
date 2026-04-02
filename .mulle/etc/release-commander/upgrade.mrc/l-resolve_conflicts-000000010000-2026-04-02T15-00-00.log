@@ -1,0 +1,4 @@
+Cherry-pick completed after manual conflict resolution in 8 files.
+TypeBase.h updated with mulle markers (Type.h split into TypeBase.h in llvm 22).
+Options.td moved from Driver/ to Options/ — markers present in new location.
+tmp_mulle/22.1.2 branch deleted. Now on mulle/22.1.2.

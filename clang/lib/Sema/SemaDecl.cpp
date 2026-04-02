@@ -2640,7 +2640,8 @@ void Sema::MergeTypedefNameDecl(Scope *S, TypedefNameDecl *New,
         break;
       Context.setObjCPROTOCOLRedefinitionType(New->getUnderlyingType());
       // Install the built-in type for 'PROTOCOL', ignoring the current definition.
-      New->setTypeForDecl(Context.getObjCPROTOCOLType().getTypePtr());
+      New->setModedTypeSourceInfo(New->getTypeSourceInfo(),
+                                  Context.getObjCPROTOCOLType());
       return;
     /// @mulle-objc@ uniqueid: add builtin type for PROTOCOL <
     case 3:

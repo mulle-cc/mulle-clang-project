@@ -5663,7 +5663,7 @@ void CGDebugInfo::EmitDeclareOfMetaABIArgVariable(const FieldDecl *Field,
   // +3 for self, _cmd, _param, +1 because it starts with 1
   auto *D = DBuilder.createParameterVariable(
                       Scope, FieldName, idx + 3 + 1, Unit, Line, FieldTy,
-                      CGM.getLangOpts().Optimize ? false : true, Flags);
+                      CGM.getCodeGenOpts().OptimizationLevel == 0, Flags);
 
   // Insert an llvm.dbg.declare into the current block.
   DBuilder.insertDeclare(

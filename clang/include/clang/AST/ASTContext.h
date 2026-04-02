@@ -2406,7 +2406,7 @@ public:
    /// \brief Retrieve the type that corresponds to the predefined Objective-C
    /// 'PROTOCOL' type.
    QualType getObjCPROTOCOLType() const {
-      return getTypeDeclType(getObjCPROTOCOLDecl());
+      return getTypeDeclType((TypeDecl *) getObjCPROTOCOLDecl());
    }
    /// @mulle-objc@ uniqueid: add builtin type for PROTOCOL <
 
@@ -2484,7 +2484,7 @@ public:
   QualType getObjCProtoType() const {
    /// @mulle-objc@ compiler: change type of getObjCPROTOCOLDecl >
     if( getLangOpts().ObjCRuntime.hasMulleMetaABI())
-      return getTypeDeclType( (TypedefDecl *) getObjCPROTOCOLDecl());
+      return getTypeDeclType( (TypeDecl *) getObjCPROTOCOLDecl());
    /// @mulle-objc@ compiler: change type of getObjCPROTOCOLDecl <
     return getObjCInterfaceType(getObjCProtocolDecl());
   }

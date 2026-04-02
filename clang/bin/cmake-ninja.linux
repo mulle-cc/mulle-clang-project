@@ -24,7 +24,7 @@ esac
 # MEMO: If you can't use ninja copy this file and make it cmake-make or so.
 PREFIX="${PREFIX:-/opt}"
 # VERSION / RC are passed in via mulle-clang-cpack
-INSTALL_PREFIX="${PREFIX}/mulle-clang-project/${VERSION:-21.1.8.7}${RC}"
+INSTALL_PREFIX="${PREFIX}/mulle-clang-project/${VERSION:-22.1.2.0}${RC}"
 
 NINJAFLAGS="${NINJAFLAGS:--k 100}"
 if [ "${NINJAFLAGS}" = "none" ]
@@ -62,15 +62,15 @@ then
 fi
 
 
-# if use compiler-rt in LLVM_ENABLE_PROJECTS i get a warning but it works
-# if i put it in LLVM_ENABLE_PROJECTS it errors out
+# compiler-rt must be in LLVM_ENABLE_RUNTIMES in llvm 22+
+# (using LLVM_ENABLE_PROJECTS causes check-builtins target conflict)
 [ ! -d build ] && mkdir build
 cd build &&
 cmake \
    -DLLVM_BUILD_LLVM_DYLIB='ON' \
    -DLLVM_BUILD_TESTS="OFF"  \
-   -DLLVM_ENABLE_PROJECTS="clang;compiler-rt;clang-tools-extra" \
-   -DLLVM_ENABLE_RUNTIMES="libcxxabi;libcxx;libunwind"  \
+   -DLLVM_ENABLE_PROJECTS="clang;clang-tools-extra" \
+   -DLLVM_ENABLE_RUNTIMES="compiler-rt;libcxxabi;libcxx;libunwind"  \
    -DLLVM_LINK_LLVM_DYLIB=ON \
    -DLLVM_PARALLEL_LINK_JOBS=$LINK_JOBS \
    -DLLVM_TARGETS_TO_BUILD="X86;ARM;AArch64" \
