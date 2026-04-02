@@ -22,13 +22,13 @@
 
 # Current branch we are developing from and the llvm tag where it
 # branched of from
-OLD_LLVM_TAG="llvmorg-21.1.4"
-OLD_MULLE_DEV_BRANCH="mulle/21.1.4"
+OLD_LLVM_TAG="llvmorg-21.1.8"
+OLD_MULLE_DEV_BRANCH="mulle/21.1.8"
 
 # The llvm where we want to glom our changes unto
-NEW_LLVM_TAG="llvmorg-21.1.8"
+NEW_LLVM_TAG="llvmorg-22.1.2"
 # the name of the new branch we want to develop on from now
-NEW_MULLE_DEV_BRANCH="mulle/21.1.8"
+NEW_MULLE_DEV_BRANCH="mulle/22.1.2"
 
 # usually don't edit these
 
