@@ -2,7 +2,7 @@
 
 # mulle-clang
 
-This is an Objective-C compiler based on clang 21.1.8, written for the
+This is an Objective-C compiler based on clang 22.1.2, written for the
 [mulle-objc](//www.mulle-kybernetik.com/weblog/2015/mulle_objc_a_new_objective_c_.html)
 runtime. It corresponds to mulle-objc-runtime v0.24 or better.
 
@@ -44,9 +44,6 @@ This was already available through macros in previous versions, but the
 syntax is now nicer and the compiler can issue better warnings and error
 messages.
 
-
-## User-Facing Syntax
-
 ```objc
 // Forward declaration (in headers that use the type)
 @protocolclass Foo;
@@ -66,12 +63,29 @@ messages.
 ```
 
 
+### `@dependency`
+
+Declares that a category implementation depends on another category of the
+same class being loaded first:
+
+```objc
+@implementation Foo (Bar)
+@dependency Foo(Base);   // suppress redeclaration warning, declare load order
+- (int) value { return 42; }
+@end
+```
+
+The compiler warns if a method implemented in a category is already declared
+in another category of the same class, unless suppressed by `@dependency` or
+the other category name contains `forward`, `future`, or `prototype`.
+
+
 ### AAM - Always Autorelease Mode
 
 The compiler has a special mode called AAM. This changes the Objective-C
 language in the following ways:
 
-1. There is a tranformation done on selector names
+1. There is a transformation done on selector names
 
     | Name          | Transformed Name
     |---------------|---------------------
@@ -104,7 +118,17 @@ Mode").
 | `__OBJC_CLASS__`                 | -                        | -       | name of the class thats currently being compiled
 | `__OBJC_CATEGORY__`              | -                        | -       | name of the category that's currently being compiled
 | `__MULLE_OBJC_CLASSID__`         | -                        | -       | classid of the class thats currently being compiled
-| `__MULLE_OBJC_CATEGORYID__`      | -                        | -       | uniqueud of the category thats currently being compiled
+| `__MULLE_OBJC_CATEGORYID__`      | -                        | -       | uniqueid of the category thats currently being compiled
+
+The following compiler flags control mulle-objc code generation:
+
+| Flag                              | Description
+|-----------------------------------|--------------------------------------
+| `-fobjc-encode-no-offsets`        | Strip byte offsets from ObjC method type encodings (for cross-arch portability)
+| `--mulle-objc-no-asm-names`       | Disable `__asm__` symbol renaming (for C compilers that don't support it)
+| `--mulle-objc-portable-call`      | Emit `mulle_metaabi_object_call` macro calls in rewriter output for portable cross-arch C
+| `--mulle-objc-emit-deps`          | Emit `@dependency` information as a `.deps` file alongside the object file
+| `-Wmulle-method-implementation`   | Warn when a category implements a method already declared in another category (see `@dependency`)
 
 The following table represents option pairs, that logically exclude each other.
 Either one is always defined.
