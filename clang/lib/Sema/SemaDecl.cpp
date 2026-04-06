@@ -2089,6 +2089,15 @@ static bool ShouldDiagnoseUnusedDecl(const LangOptions &LangOpts,
   if (!isa<VarDecl>(D) || isa<ParmVarDecl>(D) || isa<ImplicitParamDecl>(D))
     return false;
 
+  // @mulle-objc@ MetaABI shadow: suppress unused-variable on shadow VarDecls >
+  // Shadow VarDecls are implicit locals synthesized for debugger visibility
+  // (empty SourceLocation so the debugger skips to the first real statement).
+  // Unused-parameter warnings for ObjC method params are emitted separately
+  // via DiagnoseUnusedParameters in ActOnFinishFunctionBody.
+  if (D->isImplicit())
+    return false;
+  // @mulle-objc@ MetaABI shadow: suppress unused-variable on shadow VarDecls <
+
   // Types of valid local variables should be complete, so this should succeed.
   if (const VarDecl *VD = dyn_cast<VarDecl>(D)) {
 
@@ -16893,6 +16902,28 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body, bool IsInstantiation,
       if (!MD->isInvalidDecl()) {
         DiagnoseSizeOfParametersAndReturnValue(MD->parameters(),
                                                MD->getReturnType(), MD);
+        // @mulle-objc@ MetaABI shadow: propagate shadow reference state to PVDs >
+        // Shadow VarDecls are referenced when the user uses the param name in the
+        // body, but the original ParmVarDecl is not. Propagate so that
+        // DiagnoseUnusedParameters sees the correct referenced state.
+        if (getLangOpts().ObjCRuntime.hasMulleMetaABI()) {
+          for (auto *D : MD->decls()) {
+            auto *VD = dyn_cast<VarDecl>(D);
+            if (!VD || !VD->isImplicit() || VD == MD->getParamDecl())
+              continue;
+            if (!VD->isReferenced())
+              continue;
+            // Find the matching ParmVarDecl by name and mark it referenced.
+            for (auto *PVD : MD->parameters()) {
+              if (PVD->getIdentifier() == VD->getIdentifier()) {
+                PVD->setReferenced();
+                break;
+              }
+            }
+          }
+        }
+        // @mulle-objc@ MetaABI shadow: propagate shadow reference state to PVDs <
+        DiagnoseUnusedParameters(MD->parameters());
 
         if (Body)
           computeNRVO(Body, FSI);

@@ -4318,8 +4318,6 @@ LValue  CGObjCMulleRuntime::GenerateMetaABIRecordAlloca( CodeGenFunction &CGF,
    // do this always, so that the optimizer can get rid of it
    //
    Marker.Addr  = Union.getPointer(CGF);
-   llvm::Type   *UnionLLVMType = CGF.ConvertTypeForMem( Union.getType());
-
    Marker.SizeV = CGF.EmitLifetimeStart( Marker.Addr);
 
    // now get record out of union again
