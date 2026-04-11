@@ -24,7 +24,13 @@ esac
 # MEMO: If you can't use ninja copy this file and make it cmake-make or so.
 PREFIX="${PREFIX:-/opt}"
 # VERSION / RC are passed in via mulle-clang-cpack
-INSTALL_PREFIX="${PREFIX}/mulle-clang-project/${VERSION:-22.1.2.0}${RC}"
+VERSION="${VERSION:-22.1.2.1}"
+INSTALL_PREFIX="${PREFIX}/mulle-clang-project/${VERSION}${RC}"
+
+# @mulle-objc@ extract mulle-clang patch version (4th component) for clang version suffix >
+MULLE_PATCH="${VERSION##*.}"
+CLANG_VERSION_SUFFIX=".${MULLE_PATCH:-0}"
+# @mulle-objc@ extract mulle-clang patch version (4th component) for clang version suffix <
 
 NINJAFLAGS="${NINJAFLAGS:--k 100}"
 if [ "${NINJAFLAGS}" = "none" ]
@@ -61,21 +67,32 @@ then
    LINK_JOBS=1
 fi
 
+# AI suggested but i don't see a difference really
+if [ "${CMAKE_BUILD_TYPE:-Release}" != 'Release' ]
+then
+   ASSERTIONS="${ASSERTIONS:-ON}"
+fi
+
 
 # compiler-rt must be in LLVM_ENABLE_RUNTIMES in llvm 22+
 # (using LLVM_ENABLE_PROJECTS causes check-builtins target conflict)
 [ ! -d build ] && mkdir build
+
+#   -DLLVM_ENABLE_RUNTIMES="compiler-rt;libcxxabi;libcxx;libunwind"  \
+
 cd build &&
 cmake \
    -DLLVM_BUILD_LLVM_DYLIB='ON' \
    -DLLVM_BUILD_TESTS="OFF"  \
+   -DLLVM_ENABLE_ASSERTIONS="${ASSERTIONS:-OFF}" \
    -DLLVM_ENABLE_PROJECTS="clang;clang-tools-extra" \
-   -DLLVM_ENABLE_RUNTIMES="compiler-rt;libcxxabi;libcxx;libunwind"  \
+   -DLLVM_ENABLE_RUNTIMES="compiler-rt"  \
    -DLLVM_LINK_LLVM_DYLIB=ON \
    -DLLVM_PARALLEL_LINK_JOBS=$LINK_JOBS \
-   -DLLVM_TARGETS_TO_BUILD="X86;ARM;AArch64" \
+   -DLLVM_TARGETS_TO_BUILD="X86;ARM;AArch64;WebAssembly" \
 \
    -DCLANG_VENDOR='mulle' \
+   -DCLANG_VERSION_SUFFIX="${CLANG_VERSION_SUFFIX}" \
 \
    -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE:-Release}" \
    -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--reduce-memory-overheads" \

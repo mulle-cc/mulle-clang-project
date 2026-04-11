@@ -4,6 +4,17 @@ set -e
 
 cd /Volumes/Source/srcM/homebrew-prerelease
 
+# Check Xcode is up to date before wasting hours on a build
+xcode_version=$( xcodebuild -version 2>/dev/null | awk '/^Xcode/ { print $2 }')
+latest_xcode=$(softwareupdate --list 2>/dev/null | awk -F'[, ]+' '/[Xx]code/ { print $NF; exit }')
+if [ -n "${latest_xcode}" ]
+then
+   echo "error: Xcode update available (installed: ${xcode_version}, available: ${latest_xcode})"
+   echo "error: Update Xcode via the App Store before building the bottle."
+   exit 1
+fi
+echo "Xcode ${xcode_version} is up to date"
+
 version=$(sw_vers -productVersion | cut -d. -f1)
 case $version in
     11) distro="bigsur" ;;

@@ -54,6 +54,7 @@
 #include "ToolChains/XCore.h"
 #include "ToolChains/ZOS.h"
 #include "clang/Basic/DiagnosticDriver.h"
+#include "clang/Basic/ObjCRuntime.h"
 #include "clang/Basic/TargetID.h"
 #include "clang/Basic/Version.h"
 #include "clang/Config/config.h"
@@ -2331,6 +2332,10 @@ void Driver::PrintVersion(const Compilation &C, raw_ostream &OS) const {
     // know what the client would like to do.
     OS << getClangFullVersion() << '\n';
   }
+  // @mulle-objc@ print compatible runtime load version >
+  OS << "mulle-objc-runtime (load-version: "
+     << COMPATIBLE_MULLE_OBJC_RUNTIME_LOAD_VERSION << ")\n";
+  // @mulle-objc@ print compatible runtime load version <
   const ToolChain &TC = C.getDefaultToolChain();
   OS << "Target: " << TC.getTripleString() << '\n';
 
