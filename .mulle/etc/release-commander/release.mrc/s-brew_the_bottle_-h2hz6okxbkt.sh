@@ -16,9 +16,9 @@ case $version in
 esac
 
 # now download tar.gz and compute checksum
-curl -O -L "https://github.com/mulle-cc/mulle-clang-project/archive/${MULLE_CLANG_PROJECT_VERSION}.tar.gz"
+curl -O -L "https://github.com/mulle-cc/mulle-clang-project/archive/${MULLE_CLANG_PROJECT_TAG}.tar.gz"
 
-sha256=$(shasum -a 256 -b ${MULLE_CLANG_PROJECT_VERSION}.tar.gz)
+sha256=$(shasum -a 256 -b ${MULLE_CLANG_PROJECT_TAG}.tar.gz)
 
 mulle-replace --regex 'sha256 "[^"]*"' \
                       "sha256 \""${sha256}"\"" \
@@ -34,6 +34,6 @@ cp mulle-clang-project.rb /usr/local/Homebrew/Library/Taps/mulle-kybernetik/home
 
 brew bottle mulle-kybernetik/software/mulle-clang-project
 
-mv ./mulle-clang-project--${MULLE_OBJC_RUNTIME_LOAD_VERSION}.${distro}.bottle.tar.gz  \
-   ./mulle-clang-project-${MULLE_OBJC_RUNTIME_LOAD_VERSION}.${distro}.bottle.tar.gz
+mv ./mulle-clang-project--${MULLE_CLANG_PROJECT_TAG}.${distro}.bottle.tar.gz  \
+   ./mulle-clang-project-${MULLE_CLANG_PROJECT_TAG}.${distro}.bottle.tar.gz
 
