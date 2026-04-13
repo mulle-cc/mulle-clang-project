@@ -2040,7 +2040,9 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
         Super->getIvarHashString(*Context)) : 0;
 
     // Collect ivars and methods (needed by helpers below)
-    std::vector<ObjCIvarDecl *> OwnIvars(ID->ivar_begin(), ID->ivar_end());
+    std::vector<ObjCIvarDecl *> OwnIvars;
+    for (auto *IV : ID->ivars())
+      OwnIvars.push_back(IV);
     std::vector<ObjCMethodDecl *> IMethods, CMethods;
     for (auto *M : D->methods())
       (M->isInstanceMethod() ? IMethods : CMethods).push_back(M);
