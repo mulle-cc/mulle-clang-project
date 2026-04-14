@@ -70,7 +70,7 @@
       "scriptFilename": "s-create_homebrew_-a356163a177b.sh",
       "uuid": "a356163a-177b-43c0-af0c-9787dbe609ee",
       "principalTool": "",
-      "status": "todo",
+      "status": "done",
       "skillLevel": "Low"
     },
     {
@@ -79,7 +79,7 @@
       "scriptFilename": "s-create_homebrew_-wdorn7e8sql.sh",
       "uuid": "wdorn7e8sql",
       "principalTool": "",
-      "status": "todo",
+      "status": "done",
       "skillLevel": "Low"
     },
     {
@@ -88,7 +88,7 @@
       "scriptFilename": "s-upload_debian_pa-40x6z8gw161.sh",
       "uuid": "40x6z8gw161",
       "principalTool": "",
-      "status": "todo",
+      "status": "done",
       "skillLevel": "Low"
     },
     {

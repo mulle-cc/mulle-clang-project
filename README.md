@@ -82,22 +82,64 @@ the other category name contains `forward`, `future`, or `prototype`.
 
 ### ObjC to C Rewriter
 
-The compiler can rewrite Objective-C source to portable C via `-rewrite-mulle-objc`.
+The compiler can rewrite Objective-C source to portable C via `--mulle-objc-emit-c`.
 This is used to produce C output that can be compiled by any C compiler targeting
 platforms without a native clang port.
 
 ```bash
-mulle-clang -fobjc-tao -rewrite-mulle-objc foo.m -o foo.c
+mulle-clang -fobjc-tao --mulle-objc-emit-c foo.m -o foo.c
 ```
 
 Relevant flags for rewriter output:
 
 | Flag                          | Description
 |-------------------------------|--------------------------------------
-| `-rewrite-mulle-objc`         | Rewrite ObjC source to C
+| `--mulle-objc-emit-c`         | Rewrite ObjC source to C
 | `--mulle-objc-portable-call`  | Emit `mulle_metaabi_object_call` macros instead of direct calls (cross-arch portable)
 | `--mulle-objc-no-asm-names`   | Omit `__asm__` symbol renaming (for C compilers that don't support it)
 | `-fobjc-encode-no-offsets`    | Strip byte offsets from type encodings in rewriter output
+
+
+### `@method_implementation` — method alias directive
+
+`@method_implementation` is a mulle-clang extension that lets you alias one method
+selector to another method or to a plain C function, inside an `@implementation` block.
+
+**Method-to-method alias:**
+
+```objc
+@implementation Foo
+
+- (void) doWork { ... }
+
+@method_implementation - work = - doWork;   // -work routes to -doWork
+
+@end
+```
+
+The compiler checks that both selectors have the same arity, return type, and
+parameter types. A warning is issued if the LHS selector is not declared in
+the `@interface`.
+
+**Method-to-C-function alias:**
+
+The C function must follow the mulle MetaABI calling convention:
+
+```c
+// 0-arg method:  (id self, SEL sel) -> void *
+// n-arg method:  (id self, SEL sel, void *_param) -> void *  (or -> void)
+void *my_impl(id self, mulle_objc_methodid_t sel, void *_param);
+```
+
+```objc
+@implementation Bar
+
+@method_implementation - compute: = my_impl;
+
+@end
+```
+
+The compiler validates parameter count and types at the point of the directive.
 
 
 ### AAM - Always Autorelease Mode
