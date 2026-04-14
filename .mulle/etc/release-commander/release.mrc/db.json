@@ -10,6 +10,15 @@
       "skillLevel": "Low"
     },
     {
+      "title": "Push branch to mulle and GitHub",
+      "filename": "i-push_branch_to_g-1a2b3c4d5e6f.md",
+      "scriptFilename": "s-push_branch_to_g-1a2b3c4d5e6f.sh",
+      "uuid": "1a2b3c4d-5e6f-4000-0000-000000000000",
+      "principalTool": "",
+      "status": "done",
+      "skillLevel": "Low"
+    },
+    {
       "title": "Release mulle-clang compiler",
       "filename": "i-release_mullecla-d519668af8fa.md",
       "scriptFilename": "s-release_mullecla-d519668af8fa.sh",
@@ -61,7 +70,7 @@
       "scriptFilename": "s-create_homebrew_-a356163a177b.sh",
       "uuid": "a356163a-177b-43c0-af0c-9787dbe609ee",
       "principalTool": "",
-      "status": "done",
+      "status": "todo",
       "skillLevel": "Low"
     },
     {
@@ -70,7 +79,7 @@
       "scriptFilename": "s-create_homebrew_-wdorn7e8sql.sh",
       "uuid": "wdorn7e8sql",
       "principalTool": "",
-      "status": "done",
+      "status": "todo",
       "skillLevel": "Low"
     },
     {
@@ -79,7 +88,7 @@
       "scriptFilename": "s-upload_debian_pa-40x6z8gw161.sh",
       "uuid": "40x6z8gw161",
       "principalTool": "",
-      "status": "done",
+      "status": "todo",
       "skillLevel": "Low"
     },
     {
@@ -90,10 +99,20 @@
       "principalTool": "",
       "status": "done",
       "skillLevel": "Low"
+    },
+    {
+      "title": "Update mulle-clang-mingw version and commit",
+      "filename": "i-update_mulleming-c7d3e2f1a8b9.md",
+      "scriptFilename": "s-update_mulleming-c7d3e2f1a8b9.sh",
+      "uuid": "c7d3e2f1-a8b9-4000-0000-000000000000",
+      "principalTool": "",
+      "status": "done",
+      "skillLevel": "Low"
     }
   ],
   "environmentVariables": {
-    "MULLE_CLANG_PROJECT_TAG": "22.1.2.0",
+    "MULLE_CLANG_PROJECT_TAG": "22.1.2.2",
+    "MULLE_CLANG_BRANCH": "mulle/22.1.2",
     "PWD": "/home/src/srcO",
     "MULLE_OBJC_RUNTIME_LOAD_VERSION": "19"
   },

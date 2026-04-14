@@ -57,7 +57,7 @@ for repo in mulle-objc/mulle-objc-developer \
             MulleFoundation/foundation-developer \
             MulleWeb/mulle-web-developer
 do
-   if git -C "${repo}" status --porcelain | grep -q '\.yml'
+   if git -C "${repo}" status --porcelain | grep -q '.'
    then
       echo "Committing ${repo}"
       git -C "${repo}" add -u

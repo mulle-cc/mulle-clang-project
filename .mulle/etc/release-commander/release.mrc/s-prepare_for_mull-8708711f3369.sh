@@ -33,9 +33,7 @@ fi
 
 git add -u
 git commit -m "update for ${MULLE_CLANG_PROJECT_TAG%\.*}"
-git checkout -b "mulle/${MULLE_CLANG_PROJECT_TAG%\.*}"
-git push github "mulle/${MULLE_CLANG_PROJECT_TAG%\.*}"
-git checkout master
 git push github master
+git push github "master:mulle/${MULLE_CLANG_PROJECT_TAG%\.*}"
 
 

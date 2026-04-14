@@ -4,7 +4,7 @@ Determine the version to release and ensure a GitHub release + tag exists for it
 
 1. Read the version from the build script:
    ```
-   /home/src/srcL/mulle-clang-21.1.8/mulle-clang-project/clang/bin/cmake-ninja.linux
+   /home/src/srcL/mulle-clang-22.1.2/mulle-clang-project/clang/bin/cmake-ninja.linux
    ```
    Look for the line like `INSTALL_PREFIX=".../mulle-clang-project/${VERSION:-X.Y.Z.W}${RC}"` and extract `X.Y.Z.W`.
 
