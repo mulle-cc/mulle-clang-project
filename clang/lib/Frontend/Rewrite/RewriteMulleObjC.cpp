@@ -1276,6 +1276,7 @@ void RewriteMulleObjC::RewriteMethodDecl(ObjCMethodDecl *M,
         UOS << "  " << PrintType(FD->getType()) << " " << FD->getNameAsString()
             << " = _param->" << FD->getNameAsString() << ";\n";
     } else {
+      // Multi-arg is always passed by pointer to struct (never tiny-packed).
       for (auto *FD : RD->fields())
         UOS << "  " << PrintType(FD->getType()) << " " << FD->getNameAsString()
             << " = ((struct " << StructName << " *)_param)->"
@@ -1283,11 +1284,22 @@ void RewriteMulleObjC::RewriteMethodDecl(ObjCMethodDecl *M,
     }
 
   } else if (M->param_size() == 1) {
-    // Single-param: _param IS a pointer to the single value
+    // Single-param: _param is a pointer to the value, unless it's a tiny struct
+    // (fits in void*) in which case the runtime packs the value into the slot.
     auto *P = *M->param_begin();
     llvm::raw_string_ostream UOS(Unpack);
-    UOS << "  " << PrintType(P->getType()) << " " << P->getNameAsString()
-        << " = *(" << PrintType(P->getType()) << " *)_param;\n";
+    QualType PTy = P->getType();
+    // @mulle-objc@ tiny-struct single-param unpack >
+    if (M->isMetaABIVoidPointerParam()) {
+      // _param IS the struct value packed into the void* slot (not a pointer).
+      // This is set only when: single tiny-struct param + void return.
+      UOS << "  " << PrintType(PTy) << " " << P->getNameAsString() << ";\n";
+      UOS << "  *(void **)&" << P->getNameAsString() << " = _param;\n";
+    } else {
+      UOS << "  " << PrintType(PTy) << " " << P->getNameAsString()
+          << " = *(" << PrintType(PTy) << " *)_param;\n";
+    }
+    // @mulle-objc@ tiny-struct single-param unpack <
   }
 
   // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef >
@@ -1930,7 +1942,14 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
       static unsigned TmpCount = 0;
       std::string tmpName = "_mulle_p" + std::to_string(TmpCount++);
       OS << "({ " << PrintType(ArgTy) << " " << tmpName << " = " << ArgText << "; ";
-      buildCall("&" + tmpName);
+      // @mulle-objc@ tiny-struct single-arg call >
+      // isMetaABIVoidPointerParam: single tiny-struct param + void return — the
+      // runtime packs the struct value into the void* slot. Use void** pun to pack.
+      bool isTiny = false;
+      if (auto *MD = E->getMethodDecl())
+        isTiny = MD->isMetaABIVoidPointerParam();
+      buildCall(isTiny ? "*(void **)&" + tmpName : "&" + tmpName);
+      // @mulle-objc@ tiny-struct single-arg call <
       OS << "; })";
     } else {
       buildCall("&(" + PrintType(ArgTy) + "){ " + ArgText + " }");
@@ -1957,6 +1976,7 @@ void RewriteMulleObjC::RewriteMessageExpr(ObjCMessageExpr *E) {
       OS << Rewrite.getRewrittenText(E->getArg(i)->getSourceRange());
     }
     OS << " }; ";
+    // Multi-arg is always passed by pointer to the combined struct (never tiny-packed).
     buildCall("&" + tmpName);
     OS << "; })";
   }
