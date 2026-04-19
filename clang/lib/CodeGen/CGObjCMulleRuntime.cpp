@@ -5431,7 +5431,13 @@ static bool startsWithWord(StringRef name, StringRef word) {
 /// method has not been defined. The return value has type MethodPtrTy.
 llvm::Constant *CGObjCMulleRuntime::GetMethodConstant(const ObjCMethodDecl *MD) {
    llvm::Function *Fn = GetMethodDefinition(MD);
-   if (!Fn)
+
+   // Runtime alias: no local definition, but the AST has a method alias target.
+   // Emit a method struct with an alias-on-load bit and the target method ID
+   // stored in the implementation field so the runtime can resolve it at load.
+   bool IsRuntimeAlias = !Fn && MD->isAlias() && MD->isMethodAlias();
+
+   if (!Fn && !IsRuntimeAlias)
       return nullptr;
 
    int   bits;
@@ -5503,6 +5509,42 @@ llvm::Constant *CGObjCMulleRuntime::GetMethodConstant(const ObjCMethodDecl *MD) 
    }
    bits |= family << 16;
 
+   llvm::Constant *Imp;
+   if (IsRuntimeAlias) {
+      const ObjCMethodDecl *Target = MD->getAliasMethod();
+      // Flatten alias chains: if the immediate target is itself a runtime alias
+      // (it was defined via @method_implementation but has no local function
+      // body because its own RHS was also absent), follow the chain to the
+      // ultimate target.  This avoids load-order dependencies when the runtime
+      // resolves alias-of-alias chains.  Limit iterations to prevent cycles.
+      for (int depth = 0; depth < 64; ++depth) {
+         if (!Target->isAlias() || !Target->isMethodAlias())
+            break;
+         const ObjCMethodDecl *Next = Target->getAliasMethod();
+         if (!Next)
+            break;
+         // Stop if the intermediate target has a real local definition:
+         // it is a compile-time alias and will be resolved by the linker.
+         if (GetMethodDefinition(Target))
+            break;
+         Target = Next;
+      }
+      // _mulle_objc_method_alias_on_load_infra = 0x100  (alias instance method)
+      // _mulle_objc_method_alias_on_load_meta  = 0x200  (alias class method)
+      bits |= Target->isInstanceMethod() ? 0x100 : 0x200;
+      // Store the target method ID (uint32_t) in the union implementation field,
+      // zero-extended to pointer width so the struct layout is correct on both
+      // 32-bit and 64-bit targets.
+      llvm::ConstantInt *MethodID =
+         _HashConstantForString(Target->getSelector().getAsString());
+      llvm::Type *IntPtrTy = CGM.getDataLayout().getIntPtrType(VMContext);
+      llvm::Constant *Extended =
+         llvm::ConstantInt::get(IntPtrTy, MethodID->getZExtValue());
+      Imp = llvm::ConstantExpr::getIntToPtr(Extended, ObjCTypes.Int8PtrTy);
+   } else {
+      Imp = llvm::ConstantExpr::getBitCast(Fn, ObjCTypes.Int8PtrTy);
+   }
+
    llvm::Constant *Method[] = {
       llvm::ConstantExpr::getBitCast( _HashConstantForString( MD->getSelector().getAsString()),
                                        ObjCTypes.SelectorIDTy),
@@ -5510,7 +5552,7 @@ llvm::Constant *CGObjCMulleRuntime::GetMethodConstant(const ObjCMethodDecl *MD) 
       llvm::ConstantExpr::getBitCast(GetMethodVarName(MD->getSelector()),
                                      ObjCTypes.Int8PtrTy),
       llvm::ConstantInt::get(ObjCTypes.IntTy, bits),
-      llvm::ConstantExpr::getBitCast(Fn, ObjCTypes.Int8PtrTy)
+      Imp
    };
    return llvm::ConstantStruct::get(ObjCTypes.MethodTy, Method);
 }
@@ -7088,10 +7130,9 @@ void CGObjCCommonMulleRuntime::ResolveMethodAliases(const ObjCImplDecl *ID) {
          if (ImplTarget)
             Fn = GetMethodDefinition(ImplTarget);
          if (!Fn) {
-            CGM.getDiags().Report(MD->getLocation(),
-               clang::diag::err_mulle_method_impl_rhs_not_found)
-               << (int)(!Target->isInstanceMethod()) << Target->getSelector()
-               << ID->getDeclName();
+            // RHS not found in this @implementation — this is a deferred
+            // runtime alias.  Leave it out of MethodDefinitions; GetMethodConstant
+            // will emit the alias-on-load method struct instead.
             return;
          }
       }

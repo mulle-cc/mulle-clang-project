@@ -19,7 +19,7 @@
 #
 PREFIX="${PREFIX:-${HOME}}"
 # VERSION / RC are passed in via mulle-clang-cpack
-VERSION="${VERSION:-22.1.2.2}"
+VERSION="${VERSION:-22.1.2.3}"
 INSTALL_PREFIX="${PREFIX}/mulle-clang-project/${VERSION}${RC}"
 
 # @mulle-objc@ extract mulle-clang patch version (4th component) for clang version suffix >

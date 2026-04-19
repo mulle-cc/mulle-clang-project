@@ -27,18 +27,24 @@ for all Objective-C method calls. C function calls use the platform convention.
 The resultant `.o` files are linkable like any other compiled C code.
 
 
-### `@protocolclass` and `@protocolimplementation`
+### `@protocol_class` and `@protocol_implementation`
 
 Add two new ObjC language constructs for mulle-objc protocolclasses:
 
-1. **`@protocolclass`** — Declares a protocolclass. Works like `@protocol`:
-   - `@protocolclass Foo;` — forward declaration
-   - `@protocolclass Foo, Bar;` — multiple forward declarations
-   - `@protocolclass Foo <NSObject> @optional ... @end` — full definition
+1. **`@protocol_class`** — Declares a protocolclass. Works like `@protocol`:
+   - `@protocol_class Foo;` — forward declaration
+   - `@protocol_class Foo, Bar;` — multiple forward declarations
+   - `@protocol_class Foo <NSObject> @optional ... @end` — full definition
 
-2. **`@protocolimplementation Foo`** — Provides default method implementations.
+   `@protocol_interface` is an accepted alias for `@protocol_class`, anticipating
+   a future where `@protocol_interface`, `@protocol_class`, and `@protocol_implementation`
+   form a symmetric triple.
+
+2. **`@protocol_implementation Foo`** — Provides default method implementations.
    Ends with `@end`.
 
+> **Compatibility**: the older spellings `@protocolclass` and `@protocolimplementation`
+> (without underscores) are still accepted as aliases.
 
 This was already available through macros in previous versions, but the
 syntax is now nicer and the compiler can issue better warnings and error
@@ -46,15 +52,15 @@ messages.
 
 ```objc
 // Forward declaration (in headers that use the type)
-@protocolclass Foo;
+@protocol_class Foo;
 
 // Full declaration (in the defining header)
-@protocolclass Foo < NSObject>
+@protocol_class Foo < NSObject>
 - (void) doSomething;
 @end
 
 // Default implementations (in .m file)
-@protocolimplementation Foo
+@protocol_implementation Foo
 - (void) doSomething
 {
     // default impl

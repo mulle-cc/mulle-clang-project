@@ -2214,30 +2214,58 @@ Decl *SemaObjC::ActOnMethodImplementationAlias(
   // Look up RHS method
   ObjCMethodDecl *RHSMethod = nullptr;
   FunctionDecl *RHSFuncDecl = nullptr;
+  // Tracks whether this alias must be resolved by the runtime at load time
+  // (RHS not found in the current @implementation or its @interface).
+  bool IsRuntimeAlias = false;
   if (RHSIsMethod) {
-    if (IFace) {
+    // Check the implementation first: a previous @method_implementation in
+    // the same @implementation block may have already registered the selector
+    // as a runtime alias.  Preferring the impl version means the codegen
+    // chain-flattener sees the alias target directly and can collapse chains
+    // like "-copy = -retain; -immutableCopy = -copy" into a single hop.
+    RHSMethod = RHSIsInstance ? ImpDecl->getInstanceMethod(RHSSel)
+                              : ImpDecl->getClassMethod(RHSSel);
+    if (!RHSMethod && IFace) {
       RHSMethod = RHSIsInstance ? IFace->lookupInstanceMethod(RHSSel)
                                 : IFace->lookupClassMethod(RHSSel);
     }
+    // Not found in the current impl/interface.  Check the global method pool
+    // for a declaration anywhere in the translation unit.  If found, this
+    // becomes a deferred runtime alias (resolved by the runtime at load time).
+    // If not found at all, emit a warning but still produce the runtime alias
+    // so the user can reference methods defined in separately-compiled units.
     if (!RHSMethod) {
-      // Also check the implementation itself (methods defined before this line)
-      RHSMethod = RHSIsInstance ? ImpDecl->getInstanceMethod(RHSSel)
-                                : ImpDecl->getClassMethod(RHSSel);
-    }
-    if (!RHSMethod) {
-      Diag(RHSLoc, diag::err_mulle_method_impl_rhs_not_found)
-        << (int)(!RHSIsInstance) << RHSSel
-        << (IFace ? IFace->getDeclName() : DeclarationName());
-      return nullptr;
+      RHSMethod = LookupMethodInGlobalPool(RHSSel, SourceRange(RHSLoc, RHSLoc),
+                                           /*receiverIdOrClass=*/false,
+                                           /*instance=*/RHSIsInstance);
+      if (!RHSMethod) {
+        Diag(RHSLoc, diag::warn_mulle_method_impl_rhs_undeclared)
+          << (int)(!RHSIsInstance) << RHSSel;
+        // Synthesise a minimal stub so codegen has the selector and
+        // instance/class flag available.  isDefined=false marks it as a stub.
+        RHSMethod = ObjCMethodDecl::Create(
+            Context, RHSLoc, RHSLoc, RHSSel, Context.getObjCIdType(),
+            /*ReturnTInfo=*/nullptr, SemaRef.CurContext, RHSIsInstance,
+            /*isVariadic=*/false, /*isPropertyAccessor=*/false,
+            /*isSynthesizedAccessorStub=*/false,
+            /*isImplicitlyDeclared=*/false, /*isDefined=*/false,
+            ObjCImplementationControl::Optional,
+            /*HasRelatedResultType=*/false);
+      }
+      IsRuntimeAlias = true;
     }
 
-    // Type check: arity
+    if (!IsRuntimeAlias) {
+    // Arity check: warn (not error) so the user can still alias methods with
+    // different argument counts (e.g. -copyWithZone: = -copy).  The alias
+    // becomes a runtime alias resolved by name at load time.
     if (NewSel.getNumArgs() != RHSSel.getNumArgs()) {
-      Diag(AtLoc, diag::err_mulle_method_impl_arity_mismatch)
+      Diag(AtLoc, diag::warn_mulle_method_impl_arity_mismatch)
         << NewSel << RHSSel;
-      return nullptr;
+      IsRuntimeAlias = true;
     }
 
+    if (!IsRuntimeAlias) {
     // Type check: return type and parameter types against LHS declaration
     ObjCMethodDecl *LHSMethod = nullptr;
     if (IFace)
@@ -2265,6 +2293,8 @@ Decl *SemaObjC::ActOnMethodImplementationAlias(
         }
       }
     }
+    } // !IsRuntimeAlias (inner: type checks)
+    } // !IsRuntimeAlias (outer: arity + type checks)
   } else {
     // C function — look up in translation unit scope
     LookupResult R(SemaRef, RHSFunc, RHSLoc, Sema::LookupOrdinaryName);
@@ -2325,10 +2355,27 @@ Decl *SemaObjC::ActOnMethodImplementationAlias(
     }
   }
 
-  QualType ReturnType = RHSMethod ? RHSMethod->getReturnType()
-                                  : Context.getObjCIdType();
-  TypeSourceInfo *ReturnTInfo = RHSMethod ? RHSMethod->getReturnTypeSourceInfo()
-                                          : nullptr;
+  // For a runtime alias where the RHS is an undeclared stub (created by us
+  // with a default id return type), use the LHS declared return type so we
+  // don't emit a spurious "conflicting return type" warning.
+  QualType ReturnType;
+  TypeSourceInfo *ReturnTInfo = nullptr;
+  if (IsRuntimeAlias) {
+    ObjCMethodDecl *LHSDecl = nullptr;
+    if (IFace)
+      LHSDecl = NewIsInstance ? IFace->lookupInstanceMethod(NewSel)
+                              : IFace->lookupClassMethod(NewSel);
+    if (!LHSDecl)
+      LHSDecl = NewIsInstance ? ImpDecl->getInstanceMethod(NewSel)
+                              : ImpDecl->getClassMethod(NewSel);
+    ReturnType   = LHSDecl ? LHSDecl->getReturnType()
+                           : Context.getObjCIdType();
+    ReturnTInfo  = LHSDecl ? LHSDecl->getReturnTypeSourceInfo() : nullptr;
+  } else {
+    ReturnType  = RHSMethod ? RHSMethod->getReturnType()
+                            : Context.getObjCIdType();
+    ReturnTInfo = RHSMethod ? RHSMethod->getReturnTypeSourceInfo() : nullptr;
+  }
 
   ObjCMethodDecl *NewMethod = ObjCMethodDecl::Create(
       Context, AtLoc, AtLoc, NewSel, ReturnType, ReturnTInfo,
@@ -2340,6 +2387,10 @@ Decl *SemaObjC::ActOnMethodImplementationAlias(
 
   // Copy parameters from LHS interface or RHS method
   ObjCMethodDecl *ParamSource = RHSMethod;
+  // For a runtime alias backed by a bare stub (no declared params), treat
+  // it as if we have no param source so the fallback path applies.
+  if (ParamSource && ParamSource->param_size() == 0 && NewSel.getNumArgs() > 0)
+    ParamSource = nullptr;
   if (!ParamSource) {
     // C function alias: get params from LHS interface declaration
     if (IFace)
@@ -2361,13 +2412,50 @@ Decl *SemaObjC::ActOnMethodImplementationAlias(
       Params.push_back(NewP);
     }
     NewMethod->setMethodParams(Context, Params, SelLocs);
+  } else if (!ParamSource && NewSel.getNumArgs() > 0) {
+    // No interface declaration to copy params from (C func alias, undeclared
+    // selector with args). Try the global method pool for real param types
+    // so the encoding matches other declarations of this selector. Fall back
+    // to anonymous void* params so getObjCEncodingForMethodDecl doesn't walk
+    // a null ParamsAndSelLocs.
+    ObjCMethodDecl *PoolMethod =
+        LookupMethodInGlobalPool(NewSel, SourceRange(AtLoc, NewSelLoc),
+                                 /*receiverIdOrClass=*/false,
+                                 /*instance=*/NewIsInstance);
+    SmallVector<ParmVarDecl *, 8> Params;
+    SmallVector<SourceLocation, 8> SelLocs;
+    if (PoolMethod && PoolMethod->param_size() == NewSel.getNumArgs()) {
+      SelLocs.push_back(NewSelLoc);
+      for (auto *P : PoolMethod->parameters()) {
+        ParmVarDecl *NewP = ParmVarDecl::Create(
+            Context, NewMethod, AtLoc, AtLoc,
+            /*Id=*/nullptr, P->getType(), P->getTypeSourceInfo(),
+            SC_None, /*DefArg=*/nullptr);
+        Params.push_back(NewP);
+      }
+    } else {
+      TypeSourceInfo *VoidPtrTInfo =
+          Context.getTrivialTypeSourceInfo(Context.VoidPtrTy, AtLoc);
+      for (unsigned i = 0, n = NewSel.getNumArgs(); i < n; ++i) {
+        SelLocs.push_back(NewSelLoc);
+        ParmVarDecl *SynP = ParmVarDecl::Create(
+            Context, NewMethod, AtLoc, AtLoc,
+            /*Id=*/nullptr, Context.VoidPtrTy, VoidPtrTInfo,
+            SC_None, /*DefArg=*/nullptr);
+        Params.push_back(SynP);
+      }
+    }
+    NewMethod->setMethodParams(Context, Params, SelLocs);
   }
 
   // Store alias target for codegen
   if (RHSIsMethod)
     NewMethod->setAliasTarget(RHSMethod);
-  else
+  else {
     NewMethod->setAliasTarget(RHSFuncDecl);
+    // Mark the C function as referenced so -Wunused-function is suppressed.
+    SemaRef.MarkFunctionReferenced(RHSLoc, RHSFuncDecl);
+  }
 
   NewMethod->createImplicitParams(Context, IFace);
   ImpDecl->addDecl(NewMethod);

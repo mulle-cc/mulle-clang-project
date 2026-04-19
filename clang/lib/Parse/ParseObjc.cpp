@@ -58,6 +58,9 @@ Parser::ParseObjCAtDirectives(ParsedAttributes &DeclAttrs,
   case tok::objc_protocol:
   case tok::objc_implementation:
   // @mulle-objc@ protocolclass dispatch >
+  case tok::objc_protocol_class:
+  case tok::objc_protocol_interface:
+  case tok::objc_protocol_implementation:
   case tok::objc_protocolclass:
   case tok::objc_protocolimplementation:
   // @mulle-objc@ protocolclass dispatch <
@@ -81,8 +84,11 @@ Parser::ParseObjCAtDirectives(ParsedAttributes &DeclAttrs,
   case tok::objc_implementation:
     return ParseObjCAtImplementationDeclaration(AtLoc, DeclAttrs);
   // @mulle-objc@ protocolclass dispatch >
+  case tok::objc_protocol_class:
+  case tok::objc_protocol_interface:
   case tok::objc_protocolclass:
     return ParseObjCAtProtocolClassDeclaration(AtLoc, DeclAttrs);
+  case tok::objc_protocol_implementation:
   case tok::objc_protocolimplementation:
     return ParseObjCAtProtocolImplementation(AtLoc, DeclAttrs);
   // @mulle-objc@ protocolclass dispatch <
@@ -2047,10 +2053,12 @@ Decl *Parser::ParseObjCMethodImplementation(SourceLocation AtLoc,
 Parser::DeclGroupPtrTy
 Parser::ParseObjCAtProtocolClassDeclaration(SourceLocation AtLoc,
                                             ParsedAttributes &attrs) {
-  assert(Tok.isObjCAtKeyword(tok::objc_protocolclass));
-  ConsumeToken(); // "protocolclass"
+  assert(Tok.isObjCAtKeyword(tok::objc_protocol_class) ||
+         Tok.isObjCAtKeyword(tok::objc_protocol_interface) ||
+         Tok.isObjCAtKeyword(tok::objc_protocolclass));
+  ConsumeToken(); // "protocol_class" or "protocolclass"
 
-  MaybeSkipAttributes(tok::objc_protocolclass);
+  MaybeSkipAttributes(tok::objc_protocol_class);
 
   if (expectIdentifier())
     return nullptr;
@@ -2134,9 +2142,10 @@ Parser::ParseObjCAtProtocolClassDeclaration(SourceLocation AtLoc,
 Parser::DeclGroupPtrTy
 Parser::ParseObjCAtProtocolImplementation(SourceLocation AtLoc,
                                           ParsedAttributes &Attrs) {
-  assert(Tok.isObjCAtKeyword(tok::objc_protocolimplementation));
+  assert(Tok.isObjCAtKeyword(tok::objc_protocol_implementation) ||
+         Tok.isObjCAtKeyword(tok::objc_protocolimplementation));
   CheckNestedObjCContexts(AtLoc);
-  ConsumeToken(); // "protocolimplementation"
+  ConsumeToken(); // "protocol_implementation" or "protocolimplementation"
 
   if (expectIdentifier())
     return nullptr;

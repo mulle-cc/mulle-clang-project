@@ -8394,8 +8394,12 @@ def err_mulle_method_impl_rhs_not_found : Error<
   "%select{instance|class}0 method %1 not found in %2">;
 def err_mulle_method_impl_cfunc_not_found : Error<
   "C function %0 not found for @method_implementation">;
+def warn_mulle_method_impl_arity_mismatch : Warning<
+  "number of arguments mismatch in @method_implementation: %0 vs %1; "
+  "runtime alias will be resolved by name at load time">,
+  InGroup<MulleMethodImplementation>;
 def err_mulle_method_impl_arity_mismatch : Error<
-  "selector arity mismatch in @method_implementation: %0 vs %1">;
+  "number of arguments mismatch in @method_implementation: %0 vs %1">;
 def err_mulle_method_impl_return_type_mismatch : Error<
   "return type mismatch in @method_implementation: %0 vs %1">;
 def err_mulle_method_impl_param_type_mismatch : Error<
@@ -8409,6 +8413,10 @@ def warn_mulle_method_impl_lhs_not_in_interface : Warning<
 def warn_mulle_method_impl_in_other_category : Warning<
   "method %0 is already declared in category %1; "
   "add '@dependency %2(%1)' to suppress this warning">,
+  InGroup<MulleMethodImplementation>;
+def warn_mulle_method_impl_rhs_undeclared : Warning<
+  "%select{instance|class}0 method %1 is not declared anywhere; "
+  "runtime alias will be resolved by name at load time">,
   InGroup<MulleMethodImplementation>;
 def note_mulle_method_impl_no_category_interface : Note<
   "no @interface %0(%1) found; check for a category name typo">;
