@@ -2253,6 +2253,16 @@ Decl *SemaObjC::ActOnMethodImplementationAlias(
             /*HasRelatedResultType=*/false);
       }
       IsRuntimeAlias = true;
+      // @mulle-objc@ method_implementation: runtime alias in root class check >
+      // Runtime alias resolution walks superclasses and categories at load time.
+      // Root classes have neither, so a runtime alias can never resolve there.
+      // Protocol classes are always root classes, so this catches both cases.
+      if (IFace && IFace->getSuperClass() == nullptr) {
+        Diag(AtLoc, diag::err_mulle_method_impl_runtime_alias_in_root_class)
+          << NewSel << (RHSIsMethod ? RHSSel.getAsString() : RHSFunc->getName());
+        return nullptr;
+      }
+      // @mulle-objc@ method_implementation: runtime alias in root class check <
     }
 
     if (!IsRuntimeAlias) {
@@ -2287,9 +2297,16 @@ Decl *SemaObjC::ActOnMethodImplementationAlias(
         QualType LT = LHSMethod->param_begin()[i]->getType();
         QualType RT = RHSMethod->param_begin()[i]->getType();
         if (!Ctx.hasSameType(LT, RT)) {
-          Diag(AtLoc, diag::err_mulle_method_impl_param_type_mismatch)
-            << i << LT << RT;
-          return nullptr;
+          // Both pointer types are passed by value in the MetaABI — the user
+          // may intentionally alias across compatible pointer types.
+          // WarnConflictingTypedMethods will fire the standard diagnostic with
+          // a note pointing back here; only error when one side is non-pointer
+          // (MetaABI calling convention would differ: by-reference vs by-value).
+          if (!LT->isAnyPointerType() || !RT->isAnyPointerType()) {
+            Diag(AtLoc, diag::err_mulle_method_impl_param_type_mismatch)
+              << i << LT << RT;
+            return nullptr;
+          }
         }
       }
     }
@@ -2319,8 +2336,13 @@ Decl *SemaObjC::ActOnMethodImplementationAlias(
     const auto *FT = RHSFuncDecl->getType()->getAs<FunctionProtoType>();
     if (FT && LHSMethod) {
       ASTContext &Ctx = getASTContext();
+      // MetaABI: the void*_param slot is needed when there are ObjC arguments
+      // OR when the method has a non-void return type (return value is packed
+      // through the same _param slot).
       unsigned nMethodArgs = NewSel.getNumArgs();
-      unsigned expectedParams = 2 + (nMethodArgs > 0 ? 1 : 0); // id, SEL [, void*]
+      bool methodReturnsVoid = LHSMethod->getReturnType()->isVoidType();
+      bool needsParamSlot = nMethodArgs > 0 || !methodReturnsVoid;
+      unsigned expectedParams = 2 + (needsParamSlot ? 1 : 0); // id, SEL [, void*]
 
       if (FT->getNumParams() != expectedParams) {
         Diag(RHSLoc, diag::err_mulle_method_impl_arity_mismatch)
@@ -2336,17 +2358,19 @@ Decl *SemaObjC::ActOnMethodImplementationAlias(
           return nullptr;
         }
       }
-      // param 2 (if present): void *
-      if (nMethodArgs > 0 &&
+      // param 2 (if present): must be void *
+      if (needsParamSlot &&
           !Ctx.hasSameType(FT->getParamType(2), Ctx.VoidPtrTy)) {
         Diag(RHSLoc, diag::err_mulle_method_impl_param_type_mismatch)
           << 2 << FT->getParamType(2) << Ctx.VoidPtrTy;
         return nullptr;
       }
-      // return: void * or void (matching method)
+      // return: void * or void — MetaABI functions may also return a typed pointer
+      // as a convenience (e.g. char * for UTF8String); accept any pointer or void.
       QualType FnRet = FT->getReturnType();
       bool retOK = Ctx.hasSameType(FnRet, Ctx.VoidPtrTy) ||
-                   Ctx.hasSameType(FnRet, Ctx.VoidTy);
+                   Ctx.hasSameType(FnRet, Ctx.VoidTy) ||
+                   FnRet->isAnyPointerType();
       if (!retOK) {
         Diag(RHSLoc, diag::err_mulle_method_impl_return_type_mismatch)
           << FnRet << Ctx.VoidPtrTy;
@@ -2354,6 +2378,12 @@ Decl *SemaObjC::ActOnMethodImplementationAlias(
       }
     }
   }
+
+  // @mulle-objc@ method_implementation: runtime alias in root class check >
+  // Runtime alias resolution walks superclasses and categories at load time.
+  // Root classes have neither, so a runtime alias can never resolve there.
+  // Protocol classes are always root classes, so this catches both cases.
+  // @mulle-objc@ method_implementation: runtime alias in root class check <
 
   // For a runtime alias where the RHS is an undeclared stub (created by us
   // with a default id return type), use the LHS declared return type so we
@@ -2372,9 +2402,17 @@ Decl *SemaObjC::ActOnMethodImplementationAlias(
                            : Context.getObjCIdType();
     ReturnTInfo  = LHSDecl ? LHSDecl->getReturnTypeSourceInfo() : nullptr;
   } else {
-    ReturnType  = RHSMethod ? RHSMethod->getReturnType()
-                            : Context.getObjCIdType();
-    ReturnTInfo = RHSMethod ? RHSMethod->getReturnTypeSourceInfo() : nullptr;
+    if (RHSMethod) {
+      ReturnType  = RHSMethod->getReturnType();
+      ReturnTInfo = RHSMethod->getReturnTypeSourceInfo();
+    } else if (RHSFuncDecl) {
+      // C function alias: use the actual function return type, not 'id'.
+      ReturnType  = RHSFuncDecl->getReturnType();
+      ReturnTInfo = RHSFuncDecl->getTypeSourceInfo();
+    } else {
+      ReturnType  = Context.getObjCIdType();
+      ReturnTInfo = nullptr;
+    }
   }
 
   ObjCMethodDecl *NewMethod = ObjCMethodDecl::Create(
@@ -2825,14 +2863,20 @@ static void WarnUndefinedMethod(Sema &S, ObjCImplDecl *Impl,
     if (NeededFor)
       B << NeededFor;
 
-    // Add an empty definition at the end of the @implementation.
-    std::string FixItStr;
-    llvm::raw_string_ostream Out(FixItStr);
-    method->print(Out, Impl->getASTContext().getPrintingPolicy());
-    Out << " {\n}\n\n";
+    // @mulle-objc@ skip FixIt for @protocolimplementation — user uses @method_implementation instead >
+    const ObjCInterfaceDecl *IFace = Impl->getClassInterface();
+    bool isProtoImpl = IFace && IFace->isProtocolClass();
+    if (!isProtoImpl) {
+      // Add an empty definition at the end of the @implementation.
+      std::string FixItStr;
+      llvm::raw_string_ostream Out(FixItStr);
+      method->print(Out, Impl->getASTContext().getPrintingPolicy());
+      Out << " {\n}\n\n";
 
-    SourceLocation Loc = Impl->getAtEndRange().getBegin();
-    B << FixItHint::CreateInsertion(Loc, FixItStr);
+      SourceLocation Loc = Impl->getAtEndRange().getBegin();
+      B << FixItHint::CreateInsertion(Loc, FixItStr);
+    }
+    // @mulle-objc@ skip FixIt for @protocolimplementation <
   }
 
   // Issue a note to the original declaration.
@@ -3157,6 +3201,27 @@ void SemaObjC::WarnConflictingTypedMethods(ObjCMethodDecl *ImpMethodDecl,
       checkMethodFamilyMismatch(SemaRef, ImpMethodDecl, MethodDecl))
     return;
 
+  // @mulle-objc@ method_implementation: alias note >
+  // If the implementation is a @method_implementation alias, the type
+  // mismatch is intentional (user-acknowledged, pointer-only).  Let the
+  // standard diagnostic fire so it shows the right location and wording,
+  // but append a note pointing at the @method_implementation line.
+  if (ImpMethodDecl->isAlias()) {
+    // Run the normal checks — they emit the standard warnings at the right
+    // source locations.
+    CheckMethodOverrideReturn(SemaRef, ImpMethodDecl, MethodDecl,
+                              IsProtocolMethodDecl, false, true);
+    for (ObjCMethodDecl::param_iterator IM = ImpMethodDecl->param_begin(),
+         IF = MethodDecl->param_begin(), EM = ImpMethodDecl->param_end(),
+         EF = MethodDecl->param_end();
+         IM != EM && IF != EF; ++IM, ++IF) {
+      CheckMethodOverrideParam(SemaRef, ImpMethodDecl, MethodDecl, *IM, *IF,
+                               IsProtocolMethodDecl, false, true);
+    }
+    return;
+  }
+  // @mulle-objc@ method_implementation: alias note <
+
   CheckMethodOverrideReturn(SemaRef, ImpMethodDecl, MethodDecl,
                             IsProtocolMethodDecl, false, true);
 
@@ -3283,6 +3348,13 @@ static void CheckProtocolMethodDefs(
                                : dyn_cast<ObjCInterfaceDecl>(CDecl);
   assert (IDecl && "CheckProtocolMethodDefs - IDecl is null");
 
+  // @mulle-objc@ protocolclass optional method check >
+  // For @protocol_implementation (protocol class), the semantics are inverted:
+  // @optional methods must be implemented (they are the default implementations),
+  // while @required methods are for adaptors/subclasses and need not be present.
+  bool isProtoClassImpl = IDecl->isProtocolClass();
+  // @mulle-objc@ protocolclass optional method check <
+
   ObjCInterfaceDecl *Super = IDecl->getSuperClass();
   ObjCInterfaceDecl *NSIDecl = nullptr;
 
@@ -3339,8 +3411,11 @@ static void CheckProtocolMethodDefs(
   // check unimplemented instance methods.
   if (!NSIDecl)
     for (auto *method : PDecl->instance_methods()) {
-      if (method->getImplementationControl() !=
-              ObjCImplementationControl::Optional &&
+      // @mulle-objc@ protocolclass optional method check >
+      bool isOptional = (method->getImplementationControl() ==
+                         ObjCImplementationControl::Optional);
+      // @mulle-objc@ protocolclass optional method check <
+      if ((isProtoClassImpl ? isOptional : !isOptional) &&
           !method->isPropertyAccessor() &&
           !InsMap.count(method->getSelector()) &&
           (!Super || !Super->lookupMethod(
@@ -3364,13 +3439,16 @@ static void CheckProtocolMethodDefs(
               if (C || MethodInClass->isPropertyAccessor())
                 continue;
             // @mulle-objc@ allow protocol methods to be redeclared as optional >
-            if (ObjCMethodDecl *NearestMethod =
-                  IDecl->lookupMethod(method->getSelector(),
-                                      true /* instance */,
-                                      false /* shallowCategoryLookup */,
-                                      true /* followSuper */))
-              if ( NearestMethod->getImplementationControl() == ObjCImplementationControl::Optional)
-                continue;
+            // (but not in protocol class impls — there we explicitly want to warn
+            // about unimplemented optional methods since they are the defaults)
+            if (!isProtoClassImpl)
+              if (ObjCMethodDecl *NearestMethod =
+                    IDecl->lookupMethod(method->getSelector(),
+                                        true /* instance */,
+                                        false /* shallowCategoryLookup */,
+                                        true /* followSuper */))
+                if ( NearestMethod->getImplementationControl() == ObjCImplementationControl::Optional)
+                  continue;
             // @mulle-objc@ allow protocol methods to be redeclared as optional <
 
             unsigned DIAG = diag::warn_unimplemented_protocol_method;
@@ -3381,8 +3459,11 @@ static void CheckProtocolMethodDefs(
     }
   // check unimplemented class methods
   for (auto *method : PDecl->class_methods()) {
-    if (method->getImplementationControl() !=
-            ObjCImplementationControl::Optional &&
+    // @mulle-objc@ protocolclass optional method check >
+    bool isOptionalCls = (method->getImplementationControl() ==
+                          ObjCImplementationControl::Optional);
+    // @mulle-objc@ protocolclass optional method check <
+    if ((isProtoClassImpl ? isOptionalCls : !isOptionalCls) &&
         !ClsMap.count(method->getSelector()) &&
         (!Super || !Super->lookupMethod(
                        method->getSelector(), false /* class method */,

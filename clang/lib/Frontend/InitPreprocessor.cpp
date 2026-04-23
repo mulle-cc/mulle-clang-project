@@ -974,6 +974,7 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
        Builder.defineMacro( LangOpts.ObjCDisableFastCalls ? "__MULLE_OBJC_NO_FCS__" : "__MULLE_OBJC_FCS__");
        Builder.defineMacro( LangOpts.ObjCDisableTaggedPointers ? "__MULLE_OBJC_NO_TPS__" : "__MULLE_OBJC_TPS__");
        Builder.defineMacro( LangOpts.ObjCEnableThreadAffineObjects ? "__MULLE_OBJC_TAO__" : "__MULLE_OBJC_NO_TAO__");
+       Builder.defineMacro( LangOpts.ObjCUTF8Strings ? "__MULLE_OBJC_UTF8_STRINGS__" : "__MULLE_OBJC_NO_UTF8_STRINGS__");
 
        if( LangOpts.ObjCUniverseName.length())
        {

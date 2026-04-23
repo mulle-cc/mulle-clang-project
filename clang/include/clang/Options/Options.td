@@ -3737,6 +3737,10 @@ def fobjc_tao : Flag<["-"], "fobjc-tao">, Group<f_Group>, Visibility<[ClangOptio
    HelpText<"use Objective-C thread affine objects">;
 def fno_objc_tao : Flag<["-"], "fno-objc-tao">, Group<f_Group>, Visibility<[ClangOption, CC1Option]>,
    HelpText<"don't use Objective-C thread affine objects">;
+def fobjc_utf8_strings : Flag<["-"], "fobjc-utf8-strings">, Group<f_Group>, Visibility<[ClangOption, CC1Option]>,
+   HelpText<"use UTF-8 encoding for Objective-C NSString literals (single-class mode)">;
+def fno_objc_utf8_strings : Flag<["-"], "fno-objc-utf8-strings">, Group<f_Group>, Visibility<[ClangOption, CC1Option]>,
+   HelpText<"don't use UTF-8 encoding for Objective-C NSString literals (default: three-class mode)">;
 def fobjc_universename_EQ : Joined<["-"], "fobjc-universename=">, Group<f_Group>, Visibility<[ClangOption, CC1Option]>,
   HelpText<"name of the Objective-C universe (enables multiverse), disables tps">;
 def fobjc_aam : Flag<["-"], "fobjc-aam">, Group<f_Group>, Visibility<[ClangOption, CC1Option]>,

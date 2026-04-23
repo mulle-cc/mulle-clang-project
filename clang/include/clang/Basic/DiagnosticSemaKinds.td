@@ -8404,6 +8404,9 @@ def err_mulle_method_impl_return_type_mismatch : Error<
   "return type mismatch in @method_implementation: %0 vs %1">;
 def err_mulle_method_impl_param_type_mismatch : Error<
   "parameter %0 type mismatch in @method_implementation: %1 vs %2">;
+def err_mulle_method_impl_runtime_alias_in_root_class : Error<
+  "@method_implementation %0 = '%1' requires runtime alias resolution "
+  "which is not available in root classes">;
 def warn_mulle_method_impl_instance_class_mismatch : Warning<
   "@method_implementation mixes instance and class method">,
   InGroup<MulleMethodImplementation>;
@@ -11073,6 +11076,8 @@ def err_cfstring_literal_not_string_constant : Error<
 // @mulle-objc@ literal is not ASCII >
 def err_mulle_nsstring_literal_not_ascii : Error<
   "the NSString literal is not ASCII">;
+def err_mulle_nsstring_invalid_utf8 : Error<
+  "invalid UTF-8 sequence in NSString literal">;
 // @mulle-objc@ literal is not ASCII <
 def warn_cfstring_truncated : Warning<
   "input conversion stopped due to an input byte that does not "

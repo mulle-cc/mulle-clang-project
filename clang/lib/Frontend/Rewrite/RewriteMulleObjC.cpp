@@ -18,6 +18,7 @@
 #include "clang/Basic/TokenKinds.h"
 #include "clang/Rewrite/Core/Rewriter.h"
 #include "clang/Rewrite/Frontend/ASTConsumers.h"
+#include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Path.h"
 #include <memory>
@@ -536,20 +537,20 @@ public:
       LOS << HashNameStr;
 
     if (!NSStringPtrs.empty()) {
-      LOS << "static struct {\n"
-          << "  unsigned int n_loadstrings;\n"
-          << "  struct _mulle_objc_object *loadstrings[" << NSStringPtrs.size() << "];\n"
+      LOS << "\nstatic struct {\n"
+          << "   unsigned int n_loadstrings;\n"
+          << "   struct _mulle_objc_object *loadstrings[" << NSStringPtrs.size() << "];\n"
           << "} OBJC_STATICSTRING_LOADS __attribute__((used, section(\".data.objc.objc_load_info\"))) = {\n"
-          << "  " << NSStringPtrs.size() << ",\n  {";
+          << "   " << NSStringPtrs.size() << ",\n   {";
       for (unsigned i = 0; i < NSStringPtrs.size(); ++i) {
         if (i) LOS << ",";
-        LOS << "\n    " << NSStringPtrs[i];
+        LOS << "\n      " << NSStringPtrs[i];
       }
-      LOS << "\n  }\n};\n";
+      LOS << "\n   }\n};\n";
     }
 
     if (!LoadSupers.empty()) {
-      LOS << "static struct {\n"
+      LOS << "\nstatic struct {\n"
           << "  unsigned int n_supers;\n"
           << "  struct _mulle_objc_super supers[" << LoadSupers.size() << "];\n"
           << "} OBJC_SUPER_LOADS __attribute__((used, section(\".data.objc.objc_load_info\"))) =\n{\n"
@@ -569,7 +570,7 @@ public:
     }
 
     if (HasObjCContent) {
-    LOS << "static struct _mulle_objc_loadinfo OBJC_IMAGE_INFO"
+    LOS << "\nstatic struct _mulle_objc_loadinfo OBJC_IMAGE_INFO"
         << " __attribute__((used, section(\".data.objc.objc_load_info\"))) =\n{\n"
         << "   .version =\n   {\n"
         << "      .load      = MULLE_OBJC_RUNTIME_LOAD_VERSION,\n"
@@ -603,11 +604,11 @@ public:
       }
     }
     // @mulle-objc@ loaduniverse <
-    LOS << "   .loadclasslist        = " << (LoadClasses.empty()    ? "0" : "(struct _mulle_objc_loadclasslist *)&OBJC_CLASS_LOADS") << ",\n"
-        << "   .loadcategorylist     = " << (LoadCategories.empty() ? "0" : "(struct _mulle_objc_loadcategorylist *)&OBJC_CATEGORY_LOADS") << ",\n"
-        << "   .loadsuperlist        = " << (LoadSupers.empty()     ? "0" : "(struct _mulle_objc_superlist *)&OBJC_SUPER_LOADS") << ",\n"
-        << "   .loadstringlist       = " << (NSStringPtrs.empty()   ? "0" : "(struct _mulle_objc_loadstringlist *)&OBJC_STATICSTRING_LOADS") << ",\n"
-        << "   .loadhashedstringlist = " << (LoadClasses.empty()    ? "0" : "(struct _mulle_objc_loadhashedstringlist *)&OBJC_HASHNAME_LOADS") << ",\n"
+    LOS << "   .loadclasslist        = " << (LoadClasses.empty()    ? "0" : "(struct _mulle_objc_loadclasslist *) &OBJC_CLASS_LOADS") << ",\n"
+        << "   .loadcategorylist     = " << (LoadCategories.empty() ? "0" : "(struct _mulle_objc_loadcategorylist *) &OBJC_CATEGORY_LOADS") << ",\n"
+        << "   .loadsuperlist        = " << (LoadSupers.empty()     ? "0" : "(struct _mulle_objc_superlist *) &OBJC_SUPER_LOADS") << ",\n"
+        << "   .loadstringlist       = " << (NSStringPtrs.empty()   ? "0" : "(struct _mulle_objc_loadstringlist *) &OBJC_STATICSTRING_LOADS") << ",\n"
+        << "   .loadhashedstringlist = " << (LoadClasses.empty()    ? "0" : "(struct _mulle_objc_loadhashedstringlist *) &OBJC_HASHNAME_LOADS") << ",\n"
         // @mulle-objc@ origin >
         << "#ifndef __OPTIMIZE__\n"
         << "   .origin               = (char *) __FILE__,\n"
@@ -2006,24 +2007,114 @@ void RewriteMulleObjC::RewriteStringLiteral(ObjCStringLiteral *E) {
     OS.write_hex(value);
     OS << "ULL) /* @\"" << Str << "\" */";
   } else {
-    // Static NSConstantString struct — isa patched at load time by runtime.
-    // Layout: { intptr_t rc; void *isa; const char *str; unsigned len; }
-    // The object pointer is &str (field 2), matching the compiler's alias.
+    // Static NSConstantString struct — isa-tag set at emit time; runtime patches
+    // the tag with the real class pointer at load time.
+    // Field layout (non-TAO): { intptr_t _rc; void *_isa; <data-ptr> *_s; unsigned _len; }
+    // The object pointer is &_s (field 2), matching the compiler's alias.
+    //
+    // Classify into ASCII (tag 0) / UCS-2 (tag 1) / UCS-4 (tag 2), mirroring
+    // ClassifyNSStringTier + CreateNSConstantStringStruct in CGObjCMulleRuntime.cpp.
+
+    // Step 1: detect tier.
+    int tier = 0; // ASCII
+    bool hasHighBit = false;
+    for (unsigned char c : Str)
+      if (c & 0x80) { hasHighBit = true; break; }
+
+    if (hasHighBit) {
+      const llvm::UTF8 *Src    = (const llvm::UTF8 *) Str.data();
+      const llvm::UTF8 *SrcEnd = Src + Str.size();
+      bool isUCS2 = true;
+      while (Src < SrcEnd) {
+        llvm::UTF32 cp = 0;
+        llvm::UTF32 *cpPtr = &cp;
+        llvm::ConvertUTF8toUTF32(&Src, SrcEnd, &cpPtr, cpPtr + 1,
+                                 llvm::lenientConversion);
+        if (cp > 0x7FFF) { isUCS2 = false; break; }
+      }
+      tier = isUCS2 ? 1 : 2;
+    }
+
     std::string VarName = "__nsstr_" + std::to_string(NSStringCount++);
     std::string Def;
     llvm::raw_string_ostream DS(Def);
-    DS << "static struct { intptr_t _rc; void *_isa; const char *_str; unsigned _len; } "
-       << VarName << " = { (intptr_t) 0x";
-    DS.write_hex((uint64_t)(INTPTR_MAX - 1));
-    DS << ", 0, \"";
-    for (char c : Str) { if (c == '"' || c == '\\') DS << '\\'; DS << c; }
-    DS << "\", " << Len << " };\n";
-    // Register with runtime load info so _isa gets patched at startup.
-    // Collected into OBJC_STATICSTRING_LOADS at end of TU — no per-string section needed.
-    NSStringPtrs.push_back("(struct _mulle_objc_object *)&" + VarName + "._str");
-    NSStringDefs += Def;
 
-    OS << "((void *) &" << VarName << "._str) /* @\"" << Str << "\" */";
+    if (tier == 0) {
+      // ASCII: inline string literal, char pointer, byte-length.
+      DS << "static struct {\n"
+         << "   intptr_t    _rc;\n"
+         << "   void       *_isa;\n"
+         << "   const char *_s;\n"
+         << "   unsigned    _len;\n"
+         << "} " << VarName << " = { (intptr_t) 0x";
+      DS.write_hex((uint64_t)(INTPTR_MAX - 1));
+      DS << ", (void *) 0, \"";
+      for (char c : Str) { if (c == '"' || c == '\\') DS << '\\'; DS << c; }
+      DS << "\", " << Len << " };\n";
+      NSStringPtrs.push_back("(struct _mulle_objc_object *) &" + VarName + "._s");
+      NSStringDefs += Def;
+      OS << "((void *) &" << VarName << "._s) /* @\"" << Str << "\" */";
+
+    } else if (tier == 1) {
+      // UCS-2: transcode UTF-8 → int16_t[], codepoint count.
+      std::string CharsName = VarName + "_chars";
+      std::vector<uint16_t> Buf;
+      const llvm::UTF8 *Src    = (const llvm::UTF8 *) Str.data();
+      const llvm::UTF8 *SrcEnd = Src + Str.size();
+      while (Src < SrcEnd) {
+        llvm::UTF32 cp = 0;
+        llvm::UTF32 *cpPtr = &cp;
+        llvm::ConvertUTF8toUTF32(&Src, SrcEnd, &cpPtr, cpPtr + 1,
+                                 llvm::lenientConversion);
+        Buf.push_back((uint16_t) cp);
+      }
+      Buf.push_back(0);
+      unsigned CodepointCount = (unsigned) Buf.size() - 1;
+      DS << "static int16_t " << CharsName << "[] = {";
+      for (uint16_t v : Buf) { DS << " 0x"; DS.write_hex((uint64_t) v); DS << ","; }
+      DS << " };\n";
+      DS << "static struct {\n"
+         << "   intptr_t   _rc;\n"
+         << "   void      *_isa;\n"
+         << "   int16_t   *_s;\n"
+         << "   unsigned   _len;\n"
+         << "} " << VarName << " = { (intptr_t) 0x";
+      DS.write_hex((uint64_t)(INTPTR_MAX - 1));
+      DS << ", (void *) 1, " << CharsName << ", " << CodepointCount << " };\n";
+      NSStringPtrs.push_back("(struct _mulle_objc_object *) &" + VarName + "._s");
+      NSStringDefs += Def;
+      OS << "((void *) &" << VarName << "._s) /* @\"" << Str << "\" */";
+
+    } else {
+      // UCS-4: transcode UTF-8 → uint32_t[], codepoint count.
+      std::string CharsName = VarName + "_chars";
+      std::vector<uint32_t> Buf;
+      const llvm::UTF8 *Src    = (const llvm::UTF8 *) Str.data();
+      const llvm::UTF8 *SrcEnd = Src + Str.size();
+      while (Src < SrcEnd) {
+        llvm::UTF32 cp = 0;
+        llvm::UTF32 *cpPtr = &cp;
+        llvm::ConvertUTF8toUTF32(&Src, SrcEnd, &cpPtr, cpPtr + 1,
+                                 llvm::lenientConversion);
+        Buf.push_back((uint32_t) cp);
+      }
+      Buf.push_back(0);
+      unsigned CodepointCount = (unsigned) Buf.size() - 1;
+      DS << "static uint32_t " << CharsName << "[] = {";
+      for (uint32_t v : Buf) { DS << " 0x"; DS.write_hex((uint64_t) v); DS << ","; }
+      DS << " };\n";
+      DS << "static struct {\n"
+         << "   intptr_t   _rc;\n"
+         << "   void      *_isa;\n"
+         << "   uint32_t  *_s;\n"
+         << "   unsigned   _len;\n"
+         << "} " << VarName << " = { (intptr_t) 0x";
+      DS.write_hex((uint64_t)(INTPTR_MAX - 1));
+      DS << ", (void *) 2, " << CharsName << ", " << CodepointCount << " };\n";
+      NSStringPtrs.push_back("(struct _mulle_objc_object *) &" + VarName + "._s");
+      NSStringDefs += Def;
+      OS << "((void *) &" << VarName << "._s) /* @\"" << Str << "\" */";
+    }
   }
 
   ReplaceText(E->getSourceRange(), OS.str());

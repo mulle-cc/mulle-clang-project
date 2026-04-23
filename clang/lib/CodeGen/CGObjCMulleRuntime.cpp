@@ -55,6 +55,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cstdio>
 
@@ -773,10 +774,22 @@ namespace {
     *
     */
 
+   // @mulle-objc@ NSString tier encoding >
+   // isa-field tag values stored as inttoptr(N) in NSConstantString structs:
+   //   0  ASCII   (char *,     7-bit clean)
+   //   1  UCS-2   (int16_t *,  all codepoints <= 0x7FFF)
+   //   2  UCS-4   (uint32_t *, any codepoint > 0x7FFF)
+   //   3  UTF-8   (char *,     raw UTF-8, only with -fobjc-utf8-strings)
+   enum MulleNSStringTier {
+      MulleNSStringTierASCII = 0,
+      MulleNSStringTierUCS2  = 1,
+      MulleNSStringTierUCS4  = 2,
+      MulleNSStringTierUTF8  = 3,
+   };
+   // @mulle-objc@ NSString tier encoding <
+
    class CGObjCCommonMulleRuntime : public CodeGen::CGObjCRuntime {
-   public:
-      // FIXME - accessibility
-      class GC_IVAR {
+      struct GC_IVAR {
       public:
          unsigned ivar_bytepos;
          unsigned ivar_size;
@@ -1101,7 +1114,7 @@ namespace {
       CGObjCCommonMulleRuntime(CodeGen::CodeGenModule &cgm) :
       CGObjCRuntime(cgm), VMContext(cgm.getLLVMContext()) { }
 
-      virtual llvm::ConstantStruct *CreateNSConstantStringStruct( StringRef S, unsigned StringLength) = 0;
+      virtual llvm::ConstantStruct *CreateNSConstantStringStruct( StringRef S, unsigned StringLength, MulleNSStringTier Tier) = 0;
       llvm::StructType *GetOrCreateNSConstantStringType( void);
       llvm::StructType *CreateNSConstantStringType( void);
 
@@ -1474,7 +1487,7 @@ namespace {
                                   const ObjCInterfaceDecl *Interface,
                                   const ObjCIvarDecl *Ivar) override;
 
-      llvm::ConstantStruct *CreateNSConstantStringStruct( StringRef S, unsigned StringLength) override;
+      llvm::ConstantStruct *CreateNSConstantStringStruct( StringRef S, unsigned StringLength, MulleNSStringTier Tier) override;
    };
 }
 
@@ -2425,7 +2438,7 @@ void   CGObjCCommonMulleRuntime::DiscoverOriginNameIfMissing( const Decl *D)
 // and slighlty tweaked. Why this code is in CodeGenModule beats me..
 //
 
-llvm::ConstantStruct *CGObjCMulleRuntime::CreateNSConstantStringStruct( StringRef S, unsigned StringLength)
+llvm::ConstantStruct *CGObjCMulleRuntime::CreateNSConstantStringStruct( StringRef S, unsigned StringLength, MulleNSStringTier Tier)
 {
    llvm::Constant *Fields6[6];
    llvm::Constant *Fields4[4]; //because of some retard code down in llvm
@@ -2447,30 +2460,77 @@ llvm::ConstantStruct *CGObjCMulleRuntime::CreateNSConstantStringStruct( StringRe
    Fields6[i] = llvm::ConstantInt::get(Ty, INTPTR_MAX-1);
    Fields4[j++] = Fields6[i++];
 
-   // this is filled in by the runtime later
-
-   Fields6[i] = llvm::Constant::getNullValue( CGM.VoidPtrTy);
+   // isa field: small integer tag (0=ASCII, 1=UCS-2, 2=UCS-4, 3=UTF-8)
+   // inttoptr(tag) — values 0-3 are never valid pointers; runtime patches
+   // this field at load time with the real class pointer.
+   {
+      llvm::Type    *IntPtrTy   = CGM.getTypes().ConvertType(CGM.getContext().getUIntPtrType());
+      llvm::Constant *TagInt    = llvm::ConstantInt::get(IntPtrTy, (uint64_t) Tier);
+      Fields6[i] = llvm::ConstantExpr::getIntToPtr( TagInt, CGM.VoidPtrTy);
+   }
    Fields4[j++] = Fields6[i++];
 
    llvm::GlobalValue::LinkageTypes Linkage = llvm::GlobalValue::PrivateLinkage;
-   llvm::Constant *C                       = llvm::ConstantDataArray::getString(VMContext, S);
+   llvm::Constant *C = nullptr;
+   unsigned int    CodepointCount = 0;
+   CharUnits       DataAlign;
+
+   if( Tier == MulleNSStringTierUCS2)
+   {
+      // Transcode UTF-8 → uint16_t[] (all codepoints fit in 15 bits)
+      SmallVector<uint16_t, 64> Buf;
+      const llvm::UTF8 *Src    = (const llvm::UTF8 *) S.data();
+      const llvm::UTF8 *SrcEnd = Src + S.size();
+      while (Src < SrcEnd)
+      {
+         llvm::UTF32 cp = 0;
+         llvm::UTF32 *cpPtr = &cp;
+         llvm::ConvertUTF8toUTF32( &Src, SrcEnd, &cpPtr, cpPtr + 1,
+                                   llvm::lenientConversion);
+         Buf.push_back((uint16_t) cp);
+      }
+      Buf.push_back(0); // null terminator
+      CodepointCount = (unsigned) Buf.size() - 1;
+      C = llvm::ConstantDataArray::get(VMContext, llvm::ArrayRef<uint16_t>(Buf));
+      DataAlign = CGM.getContext().getTypeAlignInChars(CGM.getContext().ShortTy);
+   }
+   else if( Tier == MulleNSStringTierUCS4)
+   {
+      // Transcode UTF-8 → uint32_t[]
+      SmallVector<uint32_t, 64> Buf;
+      const llvm::UTF8 *Src    = (const llvm::UTF8 *) S.data();
+      const llvm::UTF8 *SrcEnd = Src + S.size();
+      while (Src < SrcEnd)
+      {
+         llvm::UTF32 cp = 0;
+         llvm::UTF32 *cpPtr = &cp;
+         llvm::ConvertUTF8toUTF32( &Src, SrcEnd, &cpPtr, cpPtr + 1,
+                                   llvm::lenientConversion);
+         Buf.push_back((uint32_t) cp);
+      }
+      Buf.push_back(0); // null terminator
+      CodepointCount = (unsigned) Buf.size() - 1;
+      C = llvm::ConstantDataArray::get(VMContext, llvm::ArrayRef<uint32_t>(Buf));
+      DataAlign = CGM.getContext().getTypeAlignInChars(CGM.getContext().UnsignedIntTy);
+   }
+   else
+   {
+      // ASCII (tag 0) or raw UTF-8 (tag 3): char* data, byte length
+      C = llvm::ConstantDataArray::getString(VMContext, S);
+      CodepointCount = StringLength;
+      DataAlign = CGM.getContext().getTypeAlignInChars(CGM.getContext().CharTy);
+   }
 
    auto *GV = new llvm::GlobalVariable( CGM.getModule(), C->getType(), false,
                                        Linkage, C, ".str");
-   // FIXME: release_39 used to be true, now its Global:
    GV->setUnnamedAddr( llvm::GlobalValue::UnnamedAddr::Global);
-
-   // Don't enforce the target's minimum global alignment, since the only use
-   // of the string is via this class initializer.
-
-   CharUnits Align = CGM.getContext().getTypeAlignInChars(CGM.getContext().CharTy);
-   GV->setAlignment( llvm::MaybeAlign( Align.getQuantity()));
+   GV->setAlignment( llvm::MaybeAlign( DataAlign.getQuantity()));
    Fields6[i]   = getConstantGEP( VMContext, GV, 0, 0);
    Fields4[j++] = Fields6[i++];
 
-   // String length.
+   // String length: codepoint count for UCS-2/UCS-4, byte count for ASCII/UTF-8.
    Ty = CGM.getTypes().ConvertType(CGM.getContext().UnsignedIntTy);
-   Fields6[i]   = llvm::ConstantInt::get(Ty, StringLength);
+   Fields6[i]   = llvm::ConstantInt::get(Ty, CodepointCount);
    Fields4[j++] = Fields6[i++];
 
    llvm::StructType *StructType = GetOrCreateNSConstantStringType();
@@ -2652,6 +2712,54 @@ uint32_t  mulle_char7_encode32_ascii( char *src, size_t len)
 }
 
 
+// Classify a raw UTF-8 string into the appropriate NSConstantString tier.
+// Assumes the bytes are already validated as legal UTF-8.
+static MulleNSStringTier ClassifyNSStringTier( StringRef Str, bool UTF8Mode)
+{
+   if( UTF8Mode)
+   {
+      // In UTF-8 mode we only use ASCII (tag 0) and raw UTF-8 (tag 3).
+      for (unsigned char c : Str)
+         if (c & 0x80)
+            return MulleNSStringTierUTF8;
+      return MulleNSStringTierASCII;
+   }
+
+   // Three-class default mode: classify into ASCII / UCS-2 / UCS-4.
+   bool  hasHighBit = false;
+   for (unsigned char c : Str)
+      if (c & 0x80) { hasHighBit = true; break; }
+
+   if (!hasHighBit)
+      return MulleNSStringTierASCII;
+
+   // Decode UTF-8 → UTF-32 codepoints and check if all fit in 15 bits.
+   const llvm::UTF8 *Src    = (const llvm::UTF8 *) Str.data();
+   const llvm::UTF8 *SrcEnd = Src + Str.size();
+   bool isUCS2 = true;
+   while (Src < SrcEnd)
+   {
+      llvm::UTF32 cp = 0;
+      llvm::UTF32 *cpPtr = &cp;
+      llvm::UTF32 *cpEnd  = cpPtr + 1;
+      llvm::ConversionResult Res =
+         llvm::ConvertUTF8toUTF32( &Src, SrcEnd, &cpPtr, cpEnd,
+                                   llvm::strictConversion);
+      // conversionOK: source exhausted (last char fits in buffer)
+      // targetExhausted: 1-element buffer filled, more source remains — normal
+      // sourceIllegal/sourceExhausted: malformed UTF-8, shouldn't happen (Sema validated)
+      if (Res == llvm::sourceIllegal || Res == llvm::sourceExhausted)
+         break;
+      if (cp > 0x7FFF)
+      {
+         isUCS2 = false;
+         break;
+      }
+   }
+   return isUCS2 ? MulleNSStringTierUCS2 : MulleNSStringTierUCS4;
+}
+
+
 ConstantAddress CGObjCCommonMulleRuntime::GenerateConstantString( const StringLiteral *SL)
 {
    CharUnits Align = CGM.getPointerAlign();
@@ -2740,7 +2848,11 @@ ConstantAddress CGObjCCommonMulleRuntime::GenerateConstantString( const StringLi
       return ConstantAddress( C, CType, Align);
 
    llvm::GlobalVariable   *GV;
-   llvm::ConstantStruct   *NSStringHeader = CreateNSConstantStringStruct( Entry.first(), StringLength);
+
+   // Classify the string into a tier and emit the appropriate struct.
+   bool UTF8Mode = CGM.getLangOpts().ObjCUTF8Strings;
+   MulleNSStringTier Tier = ClassifyNSStringTier( Entry.first(), UTF8Mode);
+   llvm::ConstantStruct   *NSStringHeader = CreateNSConstantStringStruct( Entry.first(), StringLength, Tier);
 
    const char   *Section;
 
@@ -5817,6 +5929,7 @@ llvm::Constant *CGObjCMulleRuntime::EmitLoadInfoList(Twine Name,
    bits |= this->no_tagged_pointers ? 0x4 : 0x0;
    bits |= this->no_fast_calls  ? 0x8 : 0x0;
    bits |= this->thread_affine_objects ? 0x10 : 0x0;
+   bits |= CGM.getLangOpts().ObjCUTF8Strings ? 0x20 : 0x0;   // _mulle_objc_loadinfo_utf8_strings
 
    bits |= optLevel << 8;
    bits |= ((unsigned int) this->inline_calls & 0x7) << 12;

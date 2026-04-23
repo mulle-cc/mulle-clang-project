@@ -4210,6 +4210,8 @@ static void RenderObjCOptions(const ToolChain &TC, const Driver &D,
          CmdArgs.push_back( "-fno-objc-fcs");
       if( Args.hasArg( options::OPT_fobjc_tao))
          CmdArgs.push_back( "-fobjc-tao");
+      if( Args.hasArg( options::OPT_fobjc_utf8_strings))
+         CmdArgs.push_back( "-fobjc-utf8-strings");
       if( Args.hasArg( options::OPT_fobjc_aam))
          CmdArgs.push_back( "-fobjc-aam");
       if (const Arg *A =

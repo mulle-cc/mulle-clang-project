@@ -3770,6 +3770,9 @@ void CompilerInvocationBase::GenerateLangArgs(const LangOptions &Opts,
     if( Opts.ObjCEnableThreadAffineObjects)
          GenerateArg(Consumer, OPT_fobjc_tao);
 
+    if( Opts.ObjCUTF8Strings)
+         GenerateArg(Consumer, OPT_fobjc_utf8_strings);
+
     if( Opts.ObjCAllocsAutoreleasedObjects)
          GenerateArg(Consumer, OPT_fobjc_aam);
 
@@ -4180,6 +4183,10 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
     if( Args.hasArg( OPT_fobjc_tao))
        Opts.ObjCEnableThreadAffineObjects = 1;
        //fprintf( stderr, "-fobjc-tao detected\n");
+
+    // UTF-8 string mode is by default OFF (three-class mode is default)
+    if( Args.hasArg( OPT_fobjc_utf8_strings))
+       Opts.ObjCUTF8Strings = 1;;
 
     StringRef value = Args.getLastArgValue(OPT_fobjc_universename_EQ);
     if( value.size() != 0)
