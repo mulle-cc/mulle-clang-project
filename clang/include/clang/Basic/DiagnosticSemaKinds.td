@@ -8370,19 +8370,21 @@ def err_mulle_confined_return_in_nested_loop : Error<
 
 // @mulle-objc@ protocolclass diagnostics >
 def err_mulle_protocolclass_conflict_class : Error<
-  "%0 was already forward-declared as a class; cannot redeclare as protocolclass">;
+  "%0 was already forward-declared as a class; cannot redeclare as protocol class">;
 def err_mulle_protocolclass_conflict_protocol : Error<
-  "%0 was already forward-declared as a protocol; cannot redeclare as protocolclass">;
+  "%0 was already forward-declared as a protocol; cannot redeclare as protocol class">;
 def err_mulle_class_conflicts_protocolclass : Error<
-  "%0 is a protocolclass; use @protocolclass for forward declaration">;
+  "%0 is a protocol class; use @protocol_class for forward declaration">;
 def err_mulle_protocol_def_conflicts_protocolclass : Error<
-  "%0 is a protocolclass; use @protocolclass for protocol definition">;
+  "%0 is a protocol class; use @protocol_interface for protocol definition">;
 def warn_mulle_protocol_fwd_after_protocolclass : Warning<
-  "%0 is a protocolclass; @protocol forward declaration is redundant">,
+  "%0 is a protocol class; @protocol forward declaration is redundant">,
   InGroup<MulleProtocolClass>;
 def warn_mulle_protocolimpl_missing_protocol : Warning<
-  "protocol %0 not found for @protocolimplementation">,
+  "protocol %0 not found for @protocol_implementation">,
   InGroup<MulleProtocolClass>;
+def err_mulle_subclass_of_protocolclass : Error<
+  "%0 cannot subclass %1 because it is a protocol class">;
 // @mulle-objc@ protocolclass diagnostics <
 
 // @mulle-objc@ method_implementation diagnostics >

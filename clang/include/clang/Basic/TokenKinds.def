@@ -865,11 +865,9 @@ OBJC_AT_KEYWORD(import)
 OBJC_AT_KEYWORD(available)
 
 // @mulle-objc@ protocolclass keywords >
-OBJC_AT_KEYWORD(protocol_class)           // preferred
-OBJC_AT_KEYWORD(protocol_interface)       // alias for @protocol_class
-OBJC_AT_KEYWORD(protocol_implementation)  // preferred
-OBJC_AT_KEYWORD(protocolclass)            // deprecated alias
-OBJC_AT_KEYWORD(protocolimplementation)   // deprecated alias
+OBJC_AT_KEYWORD(protocol_class)           // forward declaration (like @class)
+OBJC_AT_KEYWORD(protocol_interface)       // protocol definition (like @interface)
+OBJC_AT_KEYWORD(protocol_implementation)  // implementation
 // @mulle-objc@ protocolclass keywords <
 
 // @mulle-objc@ method_implementation keyword >

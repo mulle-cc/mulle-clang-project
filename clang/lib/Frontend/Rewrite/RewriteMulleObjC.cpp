@@ -528,6 +528,10 @@ public:
     if (!ClassListStr.empty())
       LOS << ClassListStr;
 
+    std::string ProtocolClassListStr = EmitLoadProtocolClassList();
+    if (!ProtocolClassListStr.empty())
+      LOS << ProtocolClassListStr;
+
     std::string CatListStr = EmitLoadCategoryList();
     if (!CatListStr.empty())
       LOS << CatListStr;
@@ -604,17 +608,23 @@ public:
       }
     }
     // @mulle-objc@ loaduniverse <
-    LOS << "   .loadclasslist        = " << (LoadClasses.empty()    ? "0" : "(struct _mulle_objc_loadclasslist *) &OBJC_CLASS_LOADS") << ",\n"
-        << "   .loadcategorylist     = " << (LoadCategories.empty() ? "0" : "(struct _mulle_objc_loadcategorylist *) &OBJC_CATEGORY_LOADS") << ",\n"
-        << "   .loadsuperlist        = " << (LoadSupers.empty()     ? "0" : "(struct _mulle_objc_superlist *) &OBJC_SUPER_LOADS") << ",\n"
-        << "   .loadstringlist       = " << (NSStringPtrs.empty()   ? "0" : "(struct _mulle_objc_loadstringlist *) &OBJC_STATICSTRING_LOADS") << ",\n"
-        << "   .loadhashedstringlist = " << (LoadClasses.empty()    ? "0" : "(struct _mulle_objc_loadhashedstringlist *) &OBJC_HASHNAME_LOADS") << ",\n"
+    {
+    bool hasClasses         = !ClassListStr.empty();
+    bool hasProtocolClasses = !ProtocolClassListStr.empty();
+    bool hasCategories      = !LoadCategories.empty();
+    LOS << "   .loadclasslist            = " << (hasClasses         ? "(struct _mulle_objc_loadclasslist *) &OBJC_CLASS_LOADS" : "0") << ",\n"
+        << "   .loadprotocolclasslist    = " << (hasProtocolClasses ? "(struct _mulle_objc_loadprotocolclasslist *) &OBJC_PROTOCOLCLASS_LOADS" : "0") << ",\n"
+        << "   .loadcategorylist         = " << (hasCategories      ? "(struct _mulle_objc_loadcategorylist *) &OBJC_CATEGORY_LOADS" : "0") << ",\n"
+        << "   .loadsuperlist            = " << (LoadSupers.empty()     ? "0" : "(struct _mulle_objc_superlist *) &OBJC_SUPER_LOADS") << ",\n"
+        << "   .loadstringlist           = " << (NSStringPtrs.empty()   ? "0" : "(struct _mulle_objc_loadstringlist *) &OBJC_STATICSTRING_LOADS") << ",\n"
+        << "   .loadhashedstringlist     = " << ((hasClasses || hasProtocolClasses) ? "(struct _mulle_objc_loadhashedstringlist *) &OBJC_HASHNAME_LOADS" : "0") << ",\n"
         // @mulle-objc@ origin >
         << "#ifndef __OPTIMIZE__\n"
         << "   .origin               = (char *) __FILE__,\n"
         << "#endif\n"
         // @mulle-objc@ origin <
         << "};\n";
+    }
 
     LOS << "\nstatic void __attribute__((constructor))\n"
            "__load_mulle_objc(void)\n"
@@ -657,6 +667,7 @@ private:
   void RewriteReturnStmt(ReturnStmt *S);
   void RewriteMessageExpr(ObjCMessageExpr *E);
   std::string EmitLoadClassList();
+  std::string EmitLoadProtocolClassList();
   std::string EmitLoadCategoryList();
   std::string EmitHashNameList();
   void RewriteStringLiteral(ObjCStringLiteral *E);
@@ -2128,16 +2139,25 @@ void RewriteMulleObjC::RewriteStringLiteral(ObjCStringLiteral *E) {
 std::string RewriteMulleObjC::EmitLoadClassList() {
   if (LoadClasses.empty()) return "";
 
+  // Filter out protocol classes
+  std::vector<ObjCImplementationDecl *> RegularClasses;
+  for (auto *D : LoadClasses) {
+    ObjCInterfaceDecl *ID = D->getClassInterface();
+    if (!ID->isProtocolClass())
+      RegularClasses.push_back(D);
+  }
+  if (RegularClasses.empty()) return "";
+
   std::string Out;
   llvm::raw_string_ostream OS(Out);
 
   std::vector<std::string> ClassVarNames;
 
-  for (auto *D : LoadClasses) {
+  for (auto *D : RegularClasses) {
     ObjCInterfaceDecl *ID = D->getClassInterface();
     std::string ClassName = ID->getNameAsString();
-    std::string VarBase    = "OBJC_CLASS___" + ClassName;  // C-safe name
-    std::string VarAsmName = "OBJC_CLASS_$_" + ClassName;  // linker symbol
+    std::string VarBase    = "OBJC_CLASS___" + ClassName;
+    std::string VarAsmName = "OBJC_CLASS_$_" + ClassName;
     ClassVarNames.push_back(VarBase);
 
     uint32_t classId    = MulleObjCUniqueIdHashForString(ClassName);
@@ -2150,7 +2170,6 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
     uint32_t superIvarHash  = Super ? MulleObjCUniqueIdHashForString(
         Super->getIvarHashString(*Context)) : 0;
 
-    // Collect ivars and methods (needed by helpers below)
     std::vector<ObjCIvarDecl *> OwnIvars;
     for (auto *IV : ID->ivars())
       OwnIvars.push_back(IV);
@@ -2319,13 +2338,26 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
       return S;
     };
 
-    // --- loadclass struct (all sub-structs inlined as compound literals) ---
+    // --- loadclass struct (new field order: base fields first) ---
     OS << "static struct _mulle_objc_loadclass " << VarBase
        << (LangOpts.ObjCNoAsmNames ? "" : " __asm__(\"\\\"" + VarAsmName + "\\\"\")")
        << " __attribute__((used,section(\".data.objc.objc_load_info\"))) =\n{\n"
-       << "   .classid          = (mulle_objc_classid_t) 0x"; OS.write_hex(classId);
+       << "   .base =\n   {\n"
+       << "      .classid          = (mulle_objc_classid_t) 0x"; OS.write_hex(classId);
     OS << "U,\n"
-       << "   .classname        = \"" << ClassName << "\",\n"
+       << "      .classname        = \"" << ClassName << "\",\n"
+       << "      .classmethods     = " << EmitMethodListInline(CMethods, 0) << ",\n"
+       << "      .instancemethods  = " << EmitMethodListInline(IMethods, 0) << ",\n"
+       << "      .properties       = " << EmitPropList() << ",\n"
+       << "      .protocols        = " << EmitProtoList() << ",\n"
+       // @mulle-objc@ origin >
+       << "#ifndef __OPTIMIZE__\n"
+       << "      .origin           = (char *) __FILE__,\n"
+       << "#else\n"
+       << "      .origin           = 0\n"
+       << "#endif\n"
+       // @mulle-objc@ origin <
+       << "   },\n"
        << "   .classivarhash    = (mulle_objc_hash_t) 0x"; OS.write_hex(classIvarHash);
     OS << "U,\n"
        << "   .superclassid     = (mulle_objc_classid_t) 0x"; OS.write_hex(superId);
@@ -2338,18 +2370,7 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
        << "   .instancesize     = " << (OwnIvars.empty() ? "0" : "(int) sizeof(OBJC_CLASS_" + ClassName + ")") << ",\n"
        // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef <
        << "   .instancevariables = " << EmitIvarList() << ",\n"
-       << "   .classmethods     = " << EmitMethodListInline(CMethods, 0) << ",\n"
-       << "   .instancemethods  = " << EmitMethodListInline(IMethods, 0) << ",\n"
-       << "   .properties       = " << EmitPropList() << ",\n"
-       << "   .protocols        = " << EmitProtoList() << ",\n"
-       << "   .protocolclassids = " << EmitProtoClassIds() << ",\n"
-       // @mulle-objc@ origin >
-       << "#ifndef __OPTIMIZE__\n"
-       << "   .origin           = (char *) __FILE__,\n"
-       << "#else\n"
-       << "   .origin           = 0\n"
-       << "#endif\n"
-       // @mulle-objc@ origin <
+       << "   .protocolclassids = " << EmitProtoClassIds() << "\n"
        << "};\n";
   }
 
@@ -2370,6 +2391,174 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
   return Out;
 }
 
+
+// ---------------------------------------------------------------------------
+// Emit OBJC_PROTOCOLCLASS_LOADS data structures
+// ---------------------------------------------------------------------------
+std::string RewriteMulleObjC::EmitLoadProtocolClassList() {
+  if (LoadClasses.empty()) return "";
+
+  // Filter to only protocol classes
+  std::vector<ObjCImplementationDecl *> ProtocolClasses;
+  for (auto *D : LoadClasses) {
+    ObjCInterfaceDecl *ID = D->getClassInterface();
+    if (ID->isProtocolClass())
+      ProtocolClasses.push_back(D);
+  }
+  if (ProtocolClasses.empty()) return "";
+
+  std::string Out;
+  llvm::raw_string_ostream OS(Out);
+
+  std::vector<std::string> PCVarNames;
+
+  for (auto *D : ProtocolClasses) {
+    ObjCInterfaceDecl *ID = D->getClassInterface();
+    std::string ClassName = ID->getNameAsString();
+    std::string VarBase    = "OBJC_CLASS___" + ClassName;
+    std::string VarAsmName = "OBJC_CLASS_$_" + ClassName;
+    PCVarNames.push_back(VarBase);
+
+    uint32_t classId = MulleObjCUniqueIdHashForString(ClassName);
+
+    std::vector<ObjCMethodDecl *> IMethods, CMethods;
+    for (auto *M : D->methods())
+      (M->isInstanceMethod() ? IMethods : CMethods).push_back(M);
+    auto sortMethods = [](ObjCMethodDecl *A, ObjCMethodDecl *B) {
+      return MulleObjCUniqueIdHashForString(A->getSelector().getAsString())
+           < MulleObjCUniqueIdHashForString(B->getSelector().getAsString());
+    };
+    std::sort(IMethods.begin(), IMethods.end(), sortMethods);
+    std::sort(CMethods.begin(), CMethods.end(), sortMethods);
+
+    auto EmitMethodListInline = [&](const std::vector<ObjCMethodDecl *> &Methods,
+                                    uint32_t catId) -> std::string {
+      if (Methods.empty()) return "0";
+      std::string S;
+      llvm::raw_string_ostream L(S);
+      L << "(struct _mulle_objc_methodlist *) &(struct { unsigned int n_methods; struct _mulle_objc_loadcategory *loadcategory;"
+           " struct _mulle_objc_method methods[" << Methods.size() << "]; }){\n"
+        << "      .n_methods    = " << Methods.size() << ",\n"
+        << "      .loadcategory = ";
+      if (catId) { L << "(struct _mulle_objc_loadcategory *) 0x"; L.write_hex(catId); L << "U"; }
+      else L << "0";
+      L << ",\n      .methods      =\n      {\n";
+      for (auto *M : Methods) {
+        std::string sel = M->getSelector().getAsString();
+        uint32_t selId  = MulleObjCUniqueIdHashForString(sel);
+        std::string cname;
+        if (M->isAlias()) {
+          if (auto *TM = M->getAliasMethod())
+            cname = MethodCName(TM, D->getClassInterface());
+          else if (auto *FD = M->getAliasFunction())
+            cname = FD->getNameAsString();
+        }
+        if (cname.empty()) cname = MethodCName(M, D->getClassInterface());
+        std::string methSig = Context->getObjCEncodingForMethodDecl(M);
+        L << "         { .descriptor = { .methodid  = (mulle_objc_methodid_t) 0x";
+        L.write_hex(selId);
+        L << "U,\n"
+          << "                           .signature = \"" << methSig << "\",\n"
+          << "                           .name      = \"" << sel << "\",\n";
+        L << "                           .bits      = 0x";
+        L.write_hex(MethodBits(M));
+        L << " },\n"
+          << "           .value      = (mulle_objc_implementation_t) " << cname << " },\n";
+      }
+      L << "      }\n   }";
+      return S;
+    };
+
+    auto EmitProtoList = [&]() -> std::string {
+      auto &Protos = ID->getReferencedProtocols();
+      if (Protos.empty()) return "0";
+      std::string S;
+      llvm::raw_string_ostream L(S);
+      L << "(struct _mulle_objc_protocollist *) &(struct { unsigned int n_protocols; struct _mulle_objc_protocol protocols["
+        << Protos.size() << "]; }){\n"
+        << "      .n_protocols = " << Protos.size() << ",\n"
+        << "      .protocols   =\n      {\n";
+      for (auto *P : Protos) {
+        uint32_t pid = MulleObjCUniqueIdHashForString(P->getNameAsString());
+        L << "         { .protocolid = (mulle_objc_protocolid_t) 0x";
+        L.write_hex(pid);
+        L << "U, .name = \"" << P->getNameAsString() << "\" },\n";
+      }
+      L << "      }\n   }";
+      return S;
+    };
+
+    auto EmitPropList = [&]() -> std::string {
+      SmallVector<ObjCPropertyDecl *, 8> Props(ID->instance_properties());
+      if (Props.empty()) return "0";
+      std::string S;
+      llvm::raw_string_ostream L(S);
+      L << "(struct _mulle_objc_propertylist *) &(struct { unsigned int n_properties; struct _mulle_objc_property properties["
+        << Props.size() << "]; }){\n"
+        << "      .n_properties = " << Props.size() << ",\n"
+        << "      .properties   =\n      {\n";
+      for (auto *PD : Props) {
+        uint32_t propId   = MulleObjCUniqueIdHashForString(PD->getNameAsString());
+        ObjCIvarDecl *IVar = PD->getPropertyIvarDecl();
+        std::string ivarName = IVar ? IVar->getNameAsString() : "_" + PD->getNameAsString();
+        uint32_t ivarId   = MulleObjCUniqueIdHashForString(ivarName);
+        uint32_t getterId = MulleObjCUniqueIdHashForString(PD->getGetterName().getAsString());
+        uint32_t setterId = PD->isReadOnly() ? 0
+            : MulleObjCUniqueIdHashForString(PD->getSetterName().getAsString());
+        std::string sig = Context->getObjCEncodingForPropertyDecl(PD, D);
+        L << "         { .propertyid = (mulle_objc_propertyid_t) 0x";
+        L.write_hex(propId);
+        L << "U,\n           .ivarid     = (mulle_objc_ivarid_t) 0x";
+        L.write_hex(ivarId);
+        L << "U,\n           .name       = \"" << PD->getNameAsString() << "\",\n"
+          << "           .signature  = \"" << sig << "\",\n"
+          << "           .getter     = (mulle_objc_methodid_t) 0x";
+        L.write_hex(getterId);
+        L << "U,\n           .setter     = (mulle_objc_methodid_t) 0x";
+        L.write_hex(setterId);
+        L << "U },\n";
+      }
+      L << "      }\n   }";
+      return S;
+    };
+
+    // --- loadprotocolclass struct (base fields only) ---
+    OS << "static struct _mulle_objc_loadprotocolclass " << VarBase
+       << (LangOpts.ObjCNoAsmNames ? "" : " __asm__(\"\\\"" + VarAsmName + "\\\"\")")
+       << " __attribute__((used,section(\".data.objc.objc_load_info\"))) =\n{\n"
+       << "   .base =\n   {\n"
+       << "      .classid          = (mulle_objc_classid_t) 0x"; OS.write_hex(classId);
+    OS << "U,\n"
+       << "      .classname        = \"" << ClassName << "\",\n"
+       << "      .classmethods     = " << EmitMethodListInline(CMethods, 0) << ",\n"
+       << "      .instancemethods  = " << EmitMethodListInline(IMethods, 0) << ",\n"
+       << "      .properties       = " << EmitPropList() << ",\n"
+       << "      .protocols        = " << EmitProtoList() << ",\n"
+       << "#ifndef __OPTIMIZE__\n"
+       << "      .origin           = (char *) __FILE__,\n"
+       << "#else\n"
+       << "      .origin           = 0\n"
+       << "#endif\n"
+       << "   }\n"
+       << "};\n";
+  }
+
+  // --- protocol class list ---
+  OS << "static struct {\n"
+     << "  unsigned int n_loadprotocolclasses;\n"
+     << "  struct _mulle_objc_loadprotocolclass *loadprotocolclasses[" << PCVarNames.size() << "];\n"
+     << "} OBJC_PROTOCOLCLASS_LOADS"
+     << " __attribute__((used,section(\".data.objc.objc_load_info\"))) =\n{\n"
+     << "   .n_loadprotocolclasses = " << PCVarNames.size() << ",\n"
+     << "   .loadprotocolclasses   =\n   {";
+  for (unsigned i = 0; i < PCVarNames.size(); ++i) {
+    if (i) OS << ",";
+    OS << "\n      &" << PCVarNames[i];
+  }
+  OS << "\n   }\n};\n";
+
+  return Out;
+}
 
 
 // ---------------------------------------------------------------------------

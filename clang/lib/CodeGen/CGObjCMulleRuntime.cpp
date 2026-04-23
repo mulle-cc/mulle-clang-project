@@ -677,6 +677,10 @@ namespace {
       llvm::StructType *ClassTy;
       /// ClassPtrTy - LLVM type for struct objc_class *.
       llvm::Type *ClassPtrTy;
+      /// ProtocolClassTy - LLVM type for struct _mulle_objc_loadprotocolclass.
+      llvm::StructType *ProtocolClassTy;
+      /// ProtocolClassPtrTy - LLVM type for struct _mulle_objc_loadprotocolclass *.
+      llvm::Type *ProtocolClassPtrTy;
       /// ClassExtensionTy - LLVM type for struct objc_class_ext.
       llvm::StructType *ClassExtensionTy;
       /// ClassExtensionPtrTy - LLVM type for struct objc_class_ext *.
@@ -963,6 +967,9 @@ namespace {
 
       /// DefinedClasses - List of defined classes.
       SmallVector<llvm::GlobalValue*, 16> DefinedClasses;
+
+      /// DefinedProtocolClasses - List of defined protocol classes.
+      SmallVector<llvm::GlobalValue*, 16> DefinedProtocolClasses;
 
       /// ImplementedClasses - List of @implemented classes.
       SmallVector<const ObjCInterfaceDecl*, 16> ImplementedClasses;
@@ -1255,6 +1262,9 @@ namespace {
       llvm::Constant *EmitClassList(Twine Name,
                                     const char *Section,
                                     ArrayRef<llvm::Constant*> Classes);
+      llvm::Constant *EmitProtocolClassList(Twine Name,
+                                    const char *Section,
+                                    ArrayRef<llvm::Constant*> ProtocolClasses);
       llvm::Constant *EmitCategoryList(Twine Name,
                                        const char *Section,
                                        ArrayRef<llvm::Constant*> Categories);
@@ -1274,6 +1284,7 @@ namespace {
                                           const char *Section,
                                           llvm::Constant *Universe,
                                           llvm::Constant *ClassList,
+                                          llvm::Constant *ProtocolClassList,
                                           llvm::Constant *CategoryList,
                                           llvm::Constant *SuperList,
                                           llvm::Constant *StringList,
@@ -4874,7 +4885,14 @@ CGObjCMulleRuntime::EmitProtocolClassIDList(Twine Name,
    for (; begin != end; ++begin)
    {
       identifier = (*begin)->getIdentifier();
-      if( DeclaredClassNames.find( identifier) != DeclaredClassNames.end())
+      // emit if the class is actually a @protocol_class
+      auto Results = CGM.getContext().getTranslationUnitDecl()->lookup(
+                        DeclarationName( identifier));
+      ObjCInterfaceDecl *IDecl = nullptr;
+      for( auto *R : Results)
+         if( (IDecl = dyn_cast<ObjCInterfaceDecl>( R)))
+            break;
+      if( IDecl && IDecl->isProtocolClass())
       {
          classID = _HashConstantForString( identifier->getNameStart());
          ClassIds.push_back( classID);
@@ -5239,34 +5257,10 @@ void CGObjCMulleRuntime::GenerateClass(const ObjCImplementationDecl *ID) {
                     Section,
                     Interface->all_referenced_protocol_begin(),
                     Interface->all_referenced_protocol_end());
-   llvm::Constant *ProtocolClasses =
-   EmitProtocolClassIDList("OBJC_CLASS_PROTOCOLCLASSES_" + ID->getName(),
-                     Section,
-                      Interface->all_referenced_protocol_begin(),
-                      Interface->all_referenced_protocol_end());
-   // unsigned Flags = FragileABI_Class_Factory;
-   // if (ID->hasNonZeroConstructors() || ID->hasDestructors())
-   //    Flags |= FragileABI_Class_HasCXXStructors;
-   unsigned Size =
-   CGM.getContext().getASTObjCInterfaceLayout(ID->getClassInterface()).getSize().getQuantity();
 
-   // FIXME: Set CXX-structors flag.
-   // if (ID->getClassInterface()->getVisibility() == HiddenVisibility)
-   //   Flags |= FragileABI_Class_Hidden;
-
-   SmallVector<llvm::Constant *, 16> InstanceMethods, ClassMethods, InstanceVariables, Properties;
+   SmallVector<llvm::Constant *, 16> InstanceMethods, ClassMethods;
 
   const ObjCInterfaceDecl *OID = ID->getClassInterface();
-
-  for (const ObjCIvarDecl *IVD = OID->all_declared_ivar_begin();
-       IVD; IVD = IVD->getNextIvar())
-  {
-    if (!IVD->getDeclName())
-      continue;
-    InstanceVariables.push_back( GetIvarConstant( OID, IVD));
-  }
-   llvm::array_pod_sort( InstanceVariables.begin(), InstanceVariables.end(),
-                         uniqueid_comparator);
 
    // @mulle-objc@ method_implementation: resolve aliases >
    ResolveMethodAliases(ID);
@@ -5304,121 +5298,183 @@ void CGObjCMulleRuntime::GenerateClass(const ObjCImplementationDecl *ID) {
    llvm::array_pod_sort( InstanceMethods.begin(), InstanceMethods.end(),
                          uniqueid_comparator);
 
+   bool isProtocolClass = Interface->isProtocolClass();
+
+   if( isProtocolClass)
+   {
+//   struct _mulle_objc_loadprotocolclass
+//   {
+//      struct _mulle_objc_loadclassbase  base;
+//   };
+
+      llvm::Constant *Values[7];
+      int   i = 0;
+
+      Values[ i++] = llvm::ConstantExpr::getBitCast(
+                        _HashConstantForString( ID->getObjCRuntimeNameAsString().str()),
+                        ObjCTypes.ClassIDTy);
+      Values[ i++] = GetClassName( ID->getObjCRuntimeNameAsString());
+      Values[ i++] = EmitMethodList("OBJC_CLASS_METHODS_" + ID->getNameAsString(),
+                                    Section, ClassMethods);
+      Values[ i++] = EmitMethodList("OBJC_CLASS_METHODS_" + ID->getNameAsString(),
+                                    Section, InstanceMethods);
+      Values[ i++] = EmitPropertyList("OBJC_CLASS_METHODS_" + ID->getNameAsString(),
+                                    Section,
+                                    ID, OID, ObjCTypes);
+      Values[ i++] = Protocols;
+
+      if( CGM.getCodeGenOpts().getDebugInfo() != llvm::codegenoptions::NoDebugInfo)
+         Values[ i++] = GetSourceLocationDescription( ID->getLocation());
+      else
+         Values[ i++] = llvm::Constant::getNullValue(ObjCTypes.Int8PtrTy);
+
+      assert( i == sizeof( Values) / sizeof( llvm::Constant *));
+
+      llvm::Constant *Init = llvm::ConstantStruct::get(ObjCTypes.ProtocolClassTy,
+                                                       Values);
+      std::string Name("OBJC_CLASS_$_");
+      Name += ClassName;
+
+      llvm::GlobalVariable *GV = CGM.getModule().getGlobalVariable(Name, true);
+      if (GV) {
+         assert(GV->getValueType() == ObjCTypes.ProtocolClassTy &&
+              "Forward metaclass reference has incorrect type.");
+         GV->setInitializer(Init);
+         GV->setSection(Section);
+         GV->setAlignment(llvm::MaybeAlign( 4));
+         CGM.addCompilerUsedGlobal(GV);
+      } else
+         GV = CreateMetadataVar(Name, Init, Section, CGM.getPointerAlign(), true, true);
+
+      DeclaredClassNames.insert( ID->getIdentifier());
+      DefinedProtocolClasses.push_back(GV);
+      ImplementedClasses.push_back(Interface);
+   }
+   else
+   {
+      llvm::Constant *ProtocolClasses =
+      EmitProtocolClassIDList("OBJC_CLASS_PROTOCOLCLASSES_" + ID->getName(),
+                        Section,
+                         Interface->all_referenced_protocol_begin(),
+                         Interface->all_referenced_protocol_end());
+
+      unsigned Size =
+      CGM.getContext().getASTObjCInterfaceLayout(ID->getClassInterface()).getSize().getQuantity();
+
+      SmallVector<llvm::Constant *, 16> InstanceVariables;
+
+      for (const ObjCIvarDecl *IVD = OID->all_declared_ivar_begin();
+           IVD; IVD = IVD->getNextIvar())
+      {
+        if (!IVD->getDeclName())
+          continue;
+        InstanceVariables.push_back( GetIvarConstant( OID, IVD));
+      }
+      llvm::array_pod_sort( InstanceVariables.begin(), InstanceVariables.end(),
+                            uniqueid_comparator);
 
 //   struct _mulle_objc_loadclass
 //   {
-//      mulle_objc_classid_t              classid;
-//      char                              *classname;
+//      struct _mulle_objc_loadclassbase  base;
 //      mulle_objc_hash_t                 classivarhash;
-//
 //      mulle_objc_classid_t              superclassid;
 //      char                              *superclassname;
 //      mulle_objc_hash_t                 superclassivarhash;
-//
 //      int                               fastclassindex;
 //      int                               instancesize;
-//
 //      struct _mulle_objc_ivarlist       *instancevariables;
-//
-//      struct _mulle_objc_methodlist     *classmethods;
-//      struct _mulle_objc_methodlist     *instancemethods;
-//      struct _mulle_objc_propertylist   *properties;
-//
-//      mulle_objc_protocolid_t           *protocolids;
 //      mulle_objc_classid_t              *protocolclassids;
-//
-//      char                              *origin;
 //   };
 
-   llvm::Constant *Values[15];
-   int   i = 0;
+      llvm::Constant *Values[15];
+      int   i = 0;
 
-   ObjCInterfaceDecl *Super = Interface->getSuperClass();
-   llvm::ConstantInt *ClassID = _HashConstantForString( ID->getObjCRuntimeNameAsString().str());
+      ObjCInterfaceDecl *Super = Interface->getSuperClass();
+      llvm::ConstantInt *ClassID = _HashConstantForString( ID->getObjCRuntimeNameAsString().str());
 
-   Values[ i++] = llvm::ConstantExpr::getBitCast( ClassID, ObjCTypes.ClassIDTy);
-   Values[ i++] = GetClassName( ID->getObjCRuntimeNameAsString());
-   Values[ i++] = llvm::ConstantExpr::getBitCast( _HashConstantForString( OID->getIvarHashString( CGM.getContext())), ObjCTypes.ClassIDTy);;
+      // base fields
+      Values[ i++] = llvm::ConstantExpr::getBitCast( ClassID, ObjCTypes.ClassIDTy);
+      Values[ i++] = GetClassName( ID->getObjCRuntimeNameAsString());
+      Values[ i++] = EmitMethodList("OBJC_CLASS_METHODS_" + ID->getNameAsString(),
+                                    Section, ClassMethods);
+      Values[ i++] = EmitMethodList("OBJC_CLASS_METHODS_" + ID->getNameAsString(),
+                                  Section, InstanceMethods);
+      Values[ i++] = EmitPropertyList("OBJC_CLASS_METHODS_" + ID->getNameAsString(),
+                                  Section,
+                                  ID, OID, ObjCTypes);
+      Values[ i++] = Protocols;
 
-   llvm::ConstantInt   *SuperClassID = nullptr;
-   if( Super)
-   {
-      SuperClassID = _HashConstantForString( Super->getObjCRuntimeNameAsString().str());
-      Values[ i++] = llvm::ConstantExpr::getBitCast( SuperClassID, ObjCTypes.ClassIDTy);
-      Values[ i++] = GetClassName( Super->getObjCRuntimeNameAsString());
-      Values[ i++] = llvm::ConstantExpr::getBitCast( _HashConstantForString( Super->getIvarHashString( CGM.getContext())), ObjCTypes.ClassIDTy);;
-   }
-   else
-   {
-      Values[ i++] = llvm::Constant::getNullValue(ObjCTypes.ClassIDTy);
-      Values[ i++] = llvm::Constant::getNullValue(ObjCTypes.Int8PtrTy);
-      Values[ i++] = llvm::Constant::getNullValue(ObjCTypes.ClassIDTy);
-   }
+      if( CGM.getCodeGenOpts().getDebugInfo() != llvm::codegenoptions::NoDebugInfo)
+         Values[ i++] = GetSourceLocationDescription( ID->getLocation());
+      else
+         Values[ i++] = llvm::Constant::getNullValue(ObjCTypes.Int8PtrTy);
 
-   // determine fastclass index
-   if( fastclassids_defined)
-   {
-      int        j;
-      // @mulle-objc@ uniqueid is now 32 bit since fnv hash
-      uint32_t   uniqueid;
+      // class-specific fields
+      Values[ i++] = llvm::ConstantExpr::getBitCast( _HashConstantForString( OID->getIvarHashString( CGM.getContext())), ObjCTypes.ClassIDTy);
 
-      uniqueid = UniqueIdHashForString( ID->getObjCRuntimeNameAsString().str());
-      for( j = fastclassids_defined - 1; j >= 0; j--)
+      llvm::ConstantInt   *SuperClassID = nullptr;
+      if( Super)
       {
-         if( fastclassids[ j] == uniqueid)
-            break;
+         SuperClassID = _HashConstantForString( Super->getObjCRuntimeNameAsString().str());
+         Values[ i++] = llvm::ConstantExpr::getBitCast( SuperClassID, ObjCTypes.ClassIDTy);
+         Values[ i++] = GetClassName( Super->getObjCRuntimeNameAsString());
+         Values[ i++] = llvm::ConstantExpr::getBitCast( _HashConstantForString( Super->getIvarHashString( CGM.getContext())), ObjCTypes.ClassIDTy);
       }
-      Values[ i++] = llvm::ConstantInt::get(ObjCTypes.IntTy, j);
-      if( _trace_fastids && j >= 0)
-         fprintf( stderr, "%s is a fastclass with id 0x%llx\n",
-               ID->getNameAsString().c_str(), (long long) uniqueid);
+      else
+      {
+         Values[ i++] = llvm::Constant::getNullValue(ObjCTypes.ClassIDTy);
+         Values[ i++] = llvm::Constant::getNullValue(ObjCTypes.Int8PtrTy);
+         Values[ i++] = llvm::Constant::getNullValue(ObjCTypes.ClassIDTy);
+      }
+
+      // determine fastclass index
+      if( fastclassids_defined)
+      {
+         int        j;
+         uint32_t   uniqueid;
+
+         uniqueid = UniqueIdHashForString( ID->getObjCRuntimeNameAsString().str());
+         for( j = fastclassids_defined - 1; j >= 0; j--)
+         {
+            if( fastclassids[ j] == uniqueid)
+               break;
+         }
+         Values[ i++] = llvm::ConstantInt::get(ObjCTypes.IntTy, j);
+         if( _trace_fastids && j >= 0)
+            fprintf( stderr, "%s is a fastclass with id 0x%llx\n",
+                  ID->getNameAsString().c_str(), (long long) uniqueid);
+      }
+      else
+         Values[ i++] = llvm::ConstantInt::get(ObjCTypes.IntTy, -1);
+
+      Values[ i++] = llvm::ConstantInt::get(ObjCTypes.IntTy, Size);
+
+      Values[ i++] = EmitIvarList( ID, Section, InstanceVariables, false);
+
+      Values[ i++] = ProtocolClasses;
+
+      assert( i == sizeof( Values) / sizeof( llvm::Constant *));
+
+      llvm::Constant *Init = llvm::ConstantStruct::get(ObjCTypes.ClassTy,
+                                                       Values);
+      std::string Name("OBJC_CLASS_$_");
+      Name += ClassName;
+
+      llvm::GlobalVariable *GV = CGM.getModule().getGlobalVariable(Name, true);
+      if (GV) {
+         assert(GV->getValueType() == ObjCTypes.ClassTy &&
+              "Forward metaclass reference has incorrect type.");
+         GV->setInitializer(Init);
+         GV->setSection(Section);
+         GV->setAlignment(llvm::MaybeAlign( 4));
+         CGM.addCompilerUsedGlobal(GV);
+      } else
+         GV = CreateMetadataVar(Name, Init, Section, CGM.getPointerAlign(), true, true);
+
+      DeclaredClassNames.insert( ID->getIdentifier());
+      DefinedClasses.push_back(GV);
+      ImplementedClasses.push_back(Interface);
    }
-   else
-      Values[ i++] = llvm::ConstantInt::get(ObjCTypes.IntTy, -1);
-
-   Values[ i++] = llvm::ConstantInt::get(ObjCTypes.IntTy, Size);
-
-   Values[ i++] = EmitIvarList( ID, Section, InstanceVariables, false);
-
-   Values[ i++] = EmitMethodList("OBJC_CLASS_METHODS_" + ID->getNameAsString(),
-                                 Section, ClassMethods);
-   Values[ i++] = EmitMethodList("OBJC_CLASS_METHODS_" + ID->getNameAsString(),
-                               Section, InstanceMethods);
-   Values[ i++] = EmitPropertyList("OBJC_CLASS_METHODS_" + ID->getNameAsString(),
-                               Section,
-                               ID, OID, ObjCTypes);
-   Values[ i++] = Protocols;
-   Values[ i++] = ProtocolClasses;
-
-   if( CGM.getCodeGenOpts().getDebugInfo() != llvm::codegenoptions::NoDebugInfo)
-      Values[ i++] = GetSourceLocationDescription( ID->getLocation());
-   else
-      Values[ i++] = llvm::Constant::getNullValue(ObjCTypes.Int8PtrTy);
-
-   assert( i == sizeof( Values) / sizeof( llvm::Constant *));
-
-   llvm::Constant *Init = llvm::ConstantStruct::get(ObjCTypes.ClassTy,
-                                                    Values);
-   std::string Name("OBJC_CLASS_$_");  // use $ for public stuff ? keep this as is for lldb
-   Name += ClassName;
-
-   // cargo cult programming
-   // const char *Section = "__DATA,__class,regular,no_dead_strip";
-   // Check for a forward reference.
-   llvm::GlobalVariable *GV = CGM.getModule().getGlobalVariable(Name, true);
-   if (GV) {
-      assert(GV->getValueType() == ObjCTypes.ClassTy &&
-           "Forward metaclass reference has incorrect type.");
-      GV->setInitializer(Init);
-      GV->setSection(Section);
-      GV->setAlignment(llvm::MaybeAlign( 4));
-      CGM.addCompilerUsedGlobal(GV);
-   } else
-      GV = CreateMetadataVar(Name, Init, Section, CGM.getPointerAlign(), true, true);
-
-   DeclaredClassNames.insert( ID->getIdentifier());
-   DefinedClasses.push_back(GV);
-   ImplementedClasses.push_back(Interface);
 
    // method definition entries must be clear for next implementation.
    MethodDefinitions.clear();
@@ -5812,6 +5868,26 @@ llvm::Constant *CGObjCMulleRuntime::EmitClassList(Twine Name,
 }
 
 
+llvm::Constant *CGObjCMulleRuntime::EmitProtocolClassList(Twine Name,
+                                          const char *Section,
+                                          ArrayRef<llvm::Constant*> ProtocolClasses)
+{
+   // Return null for empty list.
+   if (ProtocolClasses.empty())
+      return llvm::Constant::getNullValue( llvm::PointerType::get(CGM.getLLVMContext(), 0));
+
+   llvm::Constant *Values[2];
+   Values[0] = llvm::ConstantInt::get(ObjCTypes.IntTy, ProtocolClasses.size());
+   llvm::ArrayType *AT = llvm::ArrayType::get(ObjCTypes.ProtocolClassPtrTy,
+                                              ProtocolClasses.size());
+   Values[1] = llvm::ConstantArray::get(AT, ProtocolClasses);
+   llvm::Constant *Init = llvm::ConstantStruct::getAnon(Values);
+
+   llvm::GlobalVariable *GV = CreateMetadataVar( Name, Init, Section, CGM.getPointerAlign());
+   return llvm::ConstantExpr::getBitCast(GV, llvm::PointerType::get(CGM.getLLVMContext(), 0));
+}
+
+
 llvm::Constant *CGObjCMulleRuntime::EmitCategoryList(Twine Name,
                                           const char *Section,
                                           ArrayRef<llvm::Constant*> Categories)
@@ -5900,13 +5976,14 @@ llvm::Constant *CGObjCMulleRuntime::EmitLoadInfoList(Twine Name,
                                                      const char *Section,
                                                      llvm::Constant *Universe,
                                                      llvm::Constant *ClassList,
+                                                     llvm::Constant *ProtocolClassList,
                                                      llvm::Constant *CategoryList,
                                                      llvm::Constant *SuperList,
                                                      llvm::Constant *StringList,
                                                      llvm::Constant *HashNameList,
                                                      llvm::Constant *FileName)
 {
-   llvm::Constant   *Values[12];
+   llvm::Constant   *Values[13];
 
    //
    // should get these values from the header
@@ -5943,11 +6020,12 @@ llvm::Constant *CGObjCMulleRuntime::EmitLoadInfoList(Twine Name,
 
    Values[5] = Universe;
    Values[6] = ClassList;
-   Values[7] = CategoryList;
-   Values[8] = SuperList;
-   Values[9] = StringList;
-   Values[10] = HashNameList;
-   Values[11] = FileName;
+   Values[7] = ProtocolClassList;
+   Values[8] = CategoryList;
+   Values[9] = SuperList;
+   Values[10] = StringList;
+   Values[11] = HashNameList;
+   Values[12] = FileName;
 
    llvm::Constant *Init = llvm::ConstantStruct::getAnon(Values);
 
@@ -5967,6 +6045,7 @@ llvm::Function *CGObjCMulleRuntime::ModuleInitFunction() {
    llvm::Constant  *expr;
 
    SmallVector<llvm::Constant *, 16> LoadClasses;
+   SmallVector<llvm::Constant *, 16> LoadProtocolClasses;
    SmallVector<llvm::Constant *, 16> LoadCategories;
    SmallVector<llvm::Constant *, 16> LoadStrings;
    SmallVector<llvm::Constant *, 16> LoadSupers;
@@ -5975,14 +6054,18 @@ llvm::Function *CGObjCMulleRuntime::ModuleInitFunction() {
 
    for (auto *I : DefinedClasses)
    {
-      // Instance methods should always be defined.
       expr = llvm::ConstantExpr::getBitCast( I, llvm::PointerType::get(CGM.getLLVMContext(), 0));
       LoadClasses.push_back( expr);
    }
 
+   for (auto *I : DefinedProtocolClasses)
+   {
+      expr = llvm::ConstantExpr::getBitCast( I, llvm::PointerType::get(CGM.getLLVMContext(), 0));
+      LoadProtocolClasses.push_back( expr);
+   }
+
    for (auto *I : DefinedCategories)
    {
-      // Instance methods should always be defined.
       expr = llvm::ConstantExpr::getBitCast( I, llvm::PointerType::get(CGM.getLLVMContext(), 0));
       LoadCategories.push_back( expr);
    }
@@ -6044,7 +6127,7 @@ llvm::Function *CGObjCMulleRuntime::ModuleInitFunction() {
    // always emit to check for code compatability
    // supers w/o classes or categories are uninteresting
    //
-   if( ! LoadClasses.size() && ! LoadCategories.size() && \
+   if( ! LoadClasses.size() && ! LoadProtocolClasses.size() && ! LoadCategories.size() && \
        ! LoadStrings.size() && ! EmitHashes.size())
    {
       // if nothing is emitted, and no runtime versions has been set emit
@@ -6089,13 +6172,14 @@ llvm::Function *CGObjCMulleRuntime::ModuleInitFunction() {
    else
       FileName = llvm::Constant::getNullValue(ObjCTypes.Int8PtrTy);
 
-  llvm::Constant *Universe     = EmitUniverse( "OBJC_UNIVERSE_LOAD", Section);
-  llvm::Constant *ClassList    = EmitClassList( "OBJC_CLASS_LOADS", Section, LoadClasses);
-  llvm::Constant *CategoryList = EmitCategoryList( "OBJC_CATEGORY_LOADS", Section, LoadCategories);
-  llvm::Constant *SuperList    = EmitSuperList( "OBJC_SUPER_LOADS", Section, LoadSupers);
-  llvm::Constant *StringList   = EmitStaticStringList( "OBJC_STATICSTRING_LOADS", Section, LoadStrings);
-  llvm::Constant *HashNameList = EmitHashNameList( "OBJC_HASHNAME_LOADS", Section, EmitHashes);
-  llvm::Constant *LoadInfo     = EmitLoadInfoList( "OBJC_LOAD_INFO", Section, Universe, ClassList, CategoryList, SuperList, StringList, HashNameList, FileName);
+  llvm::Constant *Universe          = EmitUniverse( "OBJC_UNIVERSE_LOAD", Section);
+  llvm::Constant *ClassList         = EmitClassList( "OBJC_CLASS_LOADS", Section, LoadClasses);
+  llvm::Constant *ProtocolClassList = EmitProtocolClassList( "OBJC_PROTOCOLCLASS_LOADS", Section, LoadProtocolClasses);
+  llvm::Constant *CategoryList      = EmitCategoryList( "OBJC_CATEGORY_LOADS", Section, LoadCategories);
+  llvm::Constant *SuperList         = EmitSuperList( "OBJC_SUPER_LOADS", Section, LoadSupers);
+  llvm::Constant *StringList        = EmitStaticStringList( "OBJC_STATICSTRING_LOADS", Section, LoadStrings);
+  llvm::Constant *HashNameList      = EmitHashNameList( "OBJC_HASHNAME_LOADS", Section, EmitHashes);
+  llvm::Constant *LoadInfo          = EmitLoadInfoList( "OBJC_LOAD_INFO", Section, Universe, ClassList, ProtocolClassList, CategoryList, SuperList, StringList, HashNameList, FileName);
 
    // take collected initializers and create a __attribute__(constructor)
    // static void   __load_mulle_objc() function
@@ -7608,55 +7692,68 @@ ObjCTypesHelper::ObjCTypesHelper(CodeGen::CodeGenModule &cgm)
    ClassTy = llvm::StructType::create(VMContext, "struct._mulle_objc_loadclass");
 
 
-//   struct _mulle_objc_loadclass
+//   struct _mulle_objc_loadclassbase
 //   {
 //      mulle_objc_classid_t              classid;
 //      char                              *classname;
-//      mulle_objc_hash_t                 classivarhash;
-//
-//      mulle_objc_classid_t              superclassuniqueid;
-//      char                              *superclassname;
-//      mulle_objc_hash_t                 superclassivarhash;
-//
-//      int                               fastclassindex;
-//      int                               instancesize;
-//
-//      struct _mulle_objc_ivarlist       *instancevariables;
-//
 //      struct _mulle_objc_methodlist     *classmethods;
 //      struct _mulle_objc_methodlist     *instancemethods;
 //      struct _mulle_objc_propertylist   *properties;
-//
 //      struct _mulle_objc_protocollist   *protocols;
-//      mulle_objc_classid_t              *protocolclassids;
-//
 //      char                              *origin;
+//   };
+//
+//   struct _mulle_objc_loadclass
+//   {
+//      struct _mulle_objc_loadclassbase  base;
+//      mulle_objc_hash_t                 classivarhash;
+//      mulle_objc_classid_t              superclassid;
+//      char                              *superclassname;
+//      mulle_objc_hash_t                 superclassivarhash;
+//      int                               fastclassindex;
+//      int                               instancesize;
+//      struct _mulle_objc_ivarlist       *instancevariables;
+//      mulle_objc_classid_t              *protocolclassids;
 //   };
 
    ClassTy->setBody(
-                    {ClassIDTy,         // classid
-                    Int8PtrTy,         // class_name
-                    ClassIDTy,         // ivarhash
+                    {ClassIDTy,         // base.classid
+                    Int8PtrTy,         // base.classname
+                    MethodListPtrTy,   // base.classmethods
+                    MethodListPtrTy,   // base.instancemethods
+                    PropertyListPtrTy, // base.properties
+                    ProtocolListPtrTy, // base.protocols
+                    Int8PtrTy,         // base.origin
 
-                    ClassIDTy,         // superclass_classid
-                    Int8PtrTy,         // superclass_name,
-                    ClassIDTy,         // superclass_ivarhash
-
+                    ClassIDTy,         // classivarhash
+                    ClassIDTy,         // superclassid
+                    Int8PtrTy,         // superclassname
+                    ClassIDTy,         // superclassivarhash
                     IntTy,             // fastclassindex
-                    IntTy,             // instance_size
-
-                    IvarListPtrTy,     // instance_variables
-                    MethodListPtrTy,   // class_methods
-                    MethodListPtrTy,   // instance_methods
-                    PropertyListPtrTy, // properties
-
-                    ProtocolListPtrTy, // protocols
-                    ClassIDPtrTy,      // protocolclassids
-
-                    Int8PtrTy         // origin,
+                    IntTy,             // instancesize
+                    IvarListPtrTy,     // instancevariables
+                    ClassIDPtrTy       // protocolclassids
                     });
 
    ClassPtrTy = llvm::PointerType::get(CGM.getLLVMContext(), 0);
+
+//   struct _mulle_objc_loadprotocolclass
+//   {
+//      struct _mulle_objc_loadclassbase  base;
+//   };
+
+   ProtocolClassTy = llvm::StructType::create(VMContext, "struct._mulle_objc_loadprotocolclass");
+   ProtocolClassTy->setBody(
+                    {ClassIDTy,         // base.classid
+                    Int8PtrTy,         // base.classname
+                    MethodListPtrTy,   // base.classmethods
+                    MethodListPtrTy,   // base.instancemethods
+                    PropertyListPtrTy, // base.properties
+                    ProtocolListPtrTy, // base.protocols
+                    Int8PtrTy          // base.origin
+                    });
+
+   ProtocolClassPtrTy = llvm::PointerType::get(CGM.getLLVMContext(), 0);
 
 
 //   struct _mulle_objc_loadcategory

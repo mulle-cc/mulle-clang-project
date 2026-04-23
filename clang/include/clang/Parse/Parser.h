@@ -5651,8 +5651,10 @@ private:
   DeclGroupPtrTy ParseObjCAtImplementationDeclaration(SourceLocation AtLoc,
                                                       ParsedAttributes &Attrs);
   // @mulle-objc@ protocolclass declarations >
-  DeclGroupPtrTy ParseObjCAtProtocolClassDeclaration(SourceLocation AtLoc,
-                                                     ParsedAttributes &Attrs);
+  DeclGroupPtrTy ParseObjCAtProtocolClassForwardDeclaration(SourceLocation AtLoc,
+                                                            ParsedAttributes &Attrs);
+  DeclGroupPtrTy ParseObjCAtProtocolInterfaceDeclaration(SourceLocation AtLoc,
+                                                         ParsedAttributes &Attrs);
   DeclGroupPtrTy ParseObjCAtProtocolImplementation(SourceLocation AtLoc,
                                                    ParsedAttributes &Attrs);
   // @mulle-objc@ protocolclass declarations <

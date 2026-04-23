@@ -61,8 +61,6 @@ Parser::ParseObjCAtDirectives(ParsedAttributes &DeclAttrs,
   case tok::objc_protocol_class:
   case tok::objc_protocol_interface:
   case tok::objc_protocol_implementation:
-  case tok::objc_protocolclass:
-  case tok::objc_protocolimplementation:
   // @mulle-objc@ protocolclass dispatch <
     break;
   default:
@@ -85,11 +83,10 @@ Parser::ParseObjCAtDirectives(ParsedAttributes &DeclAttrs,
     return ParseObjCAtImplementationDeclaration(AtLoc, DeclAttrs);
   // @mulle-objc@ protocolclass dispatch >
   case tok::objc_protocol_class:
+    return ParseObjCAtProtocolClassForwardDeclaration(AtLoc, DeclAttrs);
   case tok::objc_protocol_interface:
-  case tok::objc_protocolclass:
-    return ParseObjCAtProtocolClassDeclaration(AtLoc, DeclAttrs);
+    return ParseObjCAtProtocolInterfaceDeclaration(AtLoc, DeclAttrs);
   case tok::objc_protocol_implementation:
-  case tok::objc_protocolimplementation:
     return ParseObjCAtProtocolImplementation(AtLoc, DeclAttrs);
   // @mulle-objc@ protocolclass dispatch <
   case tok::objc_end:
@@ -2051,12 +2048,41 @@ Decl *Parser::ParseObjCMethodImplementation(SourceLocation AtLoc,
 
 // @mulle-objc@ protocolclass parser >
 Parser::DeclGroupPtrTy
-Parser::ParseObjCAtProtocolClassDeclaration(SourceLocation AtLoc,
-                                            ParsedAttributes &attrs) {
-  assert(Tok.isObjCAtKeyword(tok::objc_protocol_class) ||
-         Tok.isObjCAtKeyword(tok::objc_protocol_interface) ||
-         Tok.isObjCAtKeyword(tok::objc_protocolclass));
-  ConsumeToken(); // "protocol_class" or "protocolclass"
+Parser::ParseObjCAtProtocolClassForwardDeclaration(SourceLocation AtLoc,
+                                                   ParsedAttributes &attrs) {
+  assert(Tok.isObjCAtKeyword(tok::objc_protocol_class));
+  ConsumeToken(); // "protocol_class"
+
+  MaybeSkipAttributes(tok::objc_protocol_class);
+
+  if (expectIdentifier())
+    return nullptr;
+
+  SmallVector<IdentifierLoc, 8> IdentList;
+  IdentList.emplace_back(Tok.getLocation(), Tok.getIdentifierInfo());
+  ConsumeToken();
+
+  while (Tok.is(tok::comma)) {
+    ConsumeToken(); // ','
+    if (expectIdentifier()) {
+      SkipUntil(tok::semi);
+      return nullptr;
+    }
+    IdentList.emplace_back(Tok.getLocation(), Tok.getIdentifierInfo());
+    ConsumeToken();
+  }
+
+  if (ExpectAndConsume(tok::semi, diag::err_expected_after, "@protocol_class"))
+    return nullptr;
+  return Actions.ObjC().ActOnProtocolClassForwardDeclaration(
+      AtLoc, IdentList, attrs);
+}
+
+Parser::DeclGroupPtrTy
+Parser::ParseObjCAtProtocolInterfaceDeclaration(SourceLocation AtLoc,
+                                                ParsedAttributes &attrs) {
+  assert(Tok.isObjCAtKeyword(tok::objc_protocol_interface));
+  ConsumeToken(); // "protocol_interface"
 
   MaybeSkipAttributes(tok::objc_protocol_class);
 
@@ -2066,37 +2092,8 @@ Parser::ParseObjCAtProtocolClassDeclaration(SourceLocation AtLoc,
   IdentifierInfo *name = Tok.getIdentifierInfo();
   SourceLocation nameLoc = ConsumeToken();
 
-  // Case 1: @protocolclass Foo;
-  if (TryConsumeToken(tok::semi)) {
-    IdentifierLoc Info(nameLoc, name);
-    return Actions.ObjC().ActOnProtocolClassForwardDeclaration(
-        AtLoc, Info, attrs);
-  }
-
   CheckNestedObjCContexts(AtLoc);
 
-  // Case 2: @protocolclass Foo, Bar;
-  if (Tok.is(tok::comma)) {
-    SmallVector<IdentifierLoc, 8> IdentList;
-    IdentList.emplace_back(nameLoc, name);
-    while (true) {
-      ConsumeToken(); // ','
-      if (expectIdentifier()) {
-        SkipUntil(tok::semi);
-        return nullptr;
-      }
-      IdentList.emplace_back(Tok.getLocation(), Tok.getIdentifierInfo());
-      ConsumeToken();
-      if (Tok.isNot(tok::comma))
-        break;
-    }
-    if (ExpectAndConsume(tok::semi, diag::err_expected_after, "@protocolclass"))
-      return nullptr;
-    return Actions.ObjC().ActOnProtocolClassForwardDeclaration(
-        AtLoc, IdentList, attrs);
-  }
-
-  // Case 3: @protocolclass Foo <NSObject> ... @end — full definition
   // First create the class+protocol forward decls (marks as protocolclass)
   {
     IdentifierLoc Info(nameLoc, name);
@@ -2142,10 +2139,9 @@ Parser::ParseObjCAtProtocolClassDeclaration(SourceLocation AtLoc,
 Parser::DeclGroupPtrTy
 Parser::ParseObjCAtProtocolImplementation(SourceLocation AtLoc,
                                           ParsedAttributes &Attrs) {
-  assert(Tok.isObjCAtKeyword(tok::objc_protocol_implementation) ||
-         Tok.isObjCAtKeyword(tok::objc_protocolimplementation));
+  assert(Tok.isObjCAtKeyword(tok::objc_protocol_implementation));
   CheckNestedObjCContexts(AtLoc);
-  ConsumeToken(); // "protocol_implementation" or "protocolimplementation"
+  ConsumeToken(); // "protocol_implementation"
 
   if (expectIdentifier())
     return nullptr;

@@ -795,6 +795,14 @@ void SemaObjC::ActOnSuperClassOfClassInterface(
                                                          SuperLoc);
     }
 
+    // @mulle-objc@ protocolclass subclass check >
+    if (SuperClassDecl && SuperClassDecl->isProtocolClass()) {
+      Diag(SuperLoc, diag::err_mulle_subclass_of_protocolclass)
+        << ClassName << SuperName;
+      return;
+    }
+    // @mulle-objc@ protocolclass subclass check <
+
     IDecl->setSuperClass(SuperClassTInfo);
     IDecl->setEndOfDefinitionLoc(SuperClassTInfo->getTypeLoc().getEndLoc());
     getASTContext().addObjCSubClass(IDecl->getSuperClass(), IDecl);
@@ -1116,7 +1124,8 @@ ObjCInterfaceDecl *SemaObjC::ActOnStartClassInterface(
     ArrayRef<ParsedType> SuperTypeArgs, SourceRange SuperTypeArgsRange,
     Decl *const *ProtoRefs, unsigned NumProtoRefs,
     const SourceLocation *ProtoLocs, SourceLocation EndProtoLoc,
-    const ParsedAttributesView &AttrList, SkipBodyInfo *SkipBody) {
+    const ParsedAttributesView &AttrList, SkipBodyInfo *SkipBody,
+    bool AllowProtocolClassName) {
   assert(ClassName && "Missing class identifier");
 
   ASTContext &Context = getASTContext();
@@ -1203,6 +1212,17 @@ ObjCInterfaceDecl *SemaObjC::ActOnStartClassInterface(
       }
     }
   }
+
+  // @mulle-objc@ protocolclass class conflict check >
+  // A regular @interface must not reuse the name of a protocol class.
+  // AllowProtocolClassName is true when called from ActOnStartProtocolImplementation
+  // (which synthetically creates the backing interface for the protocol class).
+  if (!AllowProtocolClassName && PrevIDecl && PrevIDecl->isProtocolClass()) {
+    Diag(ClassLoc, diag::err_mulle_class_conflicts_protocolclass) << ClassName;
+    Diag(PrevIDecl->getLocation(), diag::note_previous_definition);
+    IDecl->setInvalidDecl();
+  }
+  // @mulle-objc@ protocolclass class conflict check <
 
   SemaRef.ProcessDeclAttributeList(SemaRef.TUScope, IDecl, AttrList);
   SemaRef.AddPragmaAttributes(SemaRef.TUScope, IDecl);
@@ -2163,7 +2183,8 @@ ObjCImplementationDecl *SemaObjC::ActOnStartProtocolImplementation(
       /*SuperTypeArgs=*/{}, SourceRange(),
       ProtoRefs.data(), ProtoRefs.size(),
       ProtoLocs.data(), ClassLoc,
-      ParsedAttributesView{}, /*SkipBody=*/nullptr);
+      ParsedAttributesView{}, /*SkipBody=*/nullptr,
+      /*AllowProtocolClassName=*/true);
 
   if (IDecl) {
     IDecl->addAttr(ObjCRootClassAttr::CreateImplicit(getASTContext()));
@@ -2365,12 +2386,17 @@ Decl *SemaObjC::ActOnMethodImplementationAlias(
           << 2 << FT->getParamType(2) << Ctx.VoidPtrTy;
         return nullptr;
       }
-      // return: void * or void — MetaABI functions may also return a typed pointer
-      // as a convenience (e.g. char * for UTF8String); accept any pointer or void.
+      // return: must be MetaABI-compatible.
+      // Accepted: void * (raw MetaABI), void (void-returning methods),
+      // any pointer type (typed convenience, e.g. char * for UTF8String),
+      // or the same type as the ObjC method's declared return (e.g. BOOL, int).
+      // The return value always travels in the C register, never via _param.
       QualType FnRet = FT->getReturnType();
       bool retOK = Ctx.hasSameType(FnRet, Ctx.VoidPtrTy) ||
                    Ctx.hasSameType(FnRet, Ctx.VoidTy) ||
-                   FnRet->isAnyPointerType();
+                   FnRet->isAnyPointerType() ||
+                   (LHSMethod &&
+                    Ctx.hasSameUnqualifiedType(FnRet, LHSMethod->getReturnType()));
       if (!retOK) {
         Diag(RHSLoc, diag::err_mulle_method_impl_return_type_mismatch)
           << FnRet << Ctx.VoidPtrTy;
@@ -2406,9 +2432,20 @@ Decl *SemaObjC::ActOnMethodImplementationAlias(
       ReturnType  = RHSMethod->getReturnType();
       ReturnTInfo = RHSMethod->getReturnTypeSourceInfo();
     } else if (RHSFuncDecl) {
-      // C function alias: use the actual function return type, not 'id'.
-      ReturnType  = RHSFuncDecl->getReturnType();
-      ReturnTInfo = RHSFuncDecl->getTypeSourceInfo();
+      // C function alias: use the LHS declared return type so WarnConflictingTypedMethods
+      // doesn't fire when the C function uses void * (raw MetaABI) or a typed pointer.
+      // The actual return value travels in the register per the C calling convention.
+      ObjCMethodDecl *LHSDecl = nullptr;
+      if (IFace)
+        LHSDecl = NewIsInstance ? IFace->lookupInstanceMethod(NewSel)
+                                : IFace->lookupClassMethod(NewSel);
+      if (!LHSDecl)
+        LHSDecl = NewIsInstance ? ImpDecl->getInstanceMethod(NewSel)
+                                : ImpDecl->getClassMethod(NewSel);
+      ReturnType  = LHSDecl ? LHSDecl->getReturnType()
+                            : RHSFuncDecl->getReturnType();
+      ReturnTInfo = LHSDecl ? LHSDecl->getReturnTypeSourceInfo()
+                            : RHSFuncDecl->getTypeSourceInfo();
     } else {
       ReturnType  = Context.getObjCIdType();
       ReturnTInfo = nullptr;
@@ -3337,6 +3374,53 @@ static void findProtocolsWithExplicitImpls(const ObjCInterfaceDecl *Super,
   findProtocolsWithExplicitImpls(Super->getSuperClass(), PNS);
 }
 
+// @mulle-objc@ protocol class implementation check >
+// Returns true if 'Sel' is provided by a @protocol_implementation for any
+// protocol class that IDecl conforms to.  Two paths to credit:
+//
+//  (a) Same TU: the protocol class implementation is visible and has the method.
+//  (b) Cross TU: the protocol class's own ObjCProtocolDecl declares the method
+//      (as @optional in the @protocol_interface), meaning the
+//      @protocol_implementation provides a default that will be injected at
+//      runtime into every class adopting it.
+// CheckedPDecl is the protocol whose method list we are currently verifying.
+// When the matching protocol class corresponds to CheckedPDecl itself, the
+// method was declared @required in that @protocol_interface — "must implement
+// even though a default exists".  Only suppress for a DIFFERENT protocol class
+// (e.g. MulleObjCRootObject satisfying the NSObject protocol's requirements).
+static bool isMethodProvidedByProtocolClass(ASTContext &Ctx,
+                                            const ObjCInterfaceDecl *IDecl,
+                                            Selector Sel, bool IsInstance,
+                                            const ObjCProtocolDecl *CheckedPDecl) {
+  for (const auto *Proto : IDecl->all_referenced_protocols()) {
+    IdentifierInfo *II = Proto->getIdentifier();
+    // Look for a class interface with the same name that is a protocol class.
+    DeclContext::lookup_result Res =
+        Ctx.getTranslationUnitDecl()->lookup(DeclarationName(II));
+    for (NamedDecl *ND : Res) {
+      ObjCInterfaceDecl *ProtoIface = dyn_cast<ObjCInterfaceDecl>(ND);
+      if (!ProtoIface || !ProtoIface->isProtocolClass())
+        continue;
+      // If this protocol class IS the protocol being checked, its @required
+      // methods must still be implemented by adopters — don't suppress.
+      if (Proto == CheckedPDecl)
+        continue;
+      // (a) Implementation visible in this TU — check directly.
+      if (ObjCImplementationDecl *ProtoImpl = ProtoIface->getImplementation()) {
+        if (IsInstance ? ProtoImpl->getInstanceMethod(Sel)
+                       : ProtoImpl->getClassMethod(Sel))
+          return true;
+      }
+      // (b) Cross-TU: if the protocol class's own protocol declares the method,
+      // trust that its @protocol_implementation provides it at runtime.
+      if (Proto->lookupMethod(Sel, IsInstance))
+        return true;
+    }
+  }
+  return false;
+}
+// @mulle-objc@ protocol class implementation check <
+
 /// CheckProtocolMethodDefs - This routine checks unimplemented methods
 /// Declared in protocol, and those referenced by it.
 static void CheckProtocolMethodDefs(
@@ -3352,7 +3436,11 @@ static void CheckProtocolMethodDefs(
   // For @protocol_implementation (protocol class), the semantics are inverted:
   // @optional methods must be implemented (they are the default implementations),
   // while @required methods are for adaptors/subclasses and need not be present.
-  bool isProtoClassImpl = IDecl->isProtocolClass();
+  // Only invert when checking the protocol class's OWN protocol (same name).
+  // Adopted/inherited protocol classes have their own semantics and their
+  // @optional methods do not need to be re-implemented.
+  bool isProtoClassImpl = IDecl->isProtocolClass() &&
+                          (PDecl->getIdentifier() == IDecl->getIdentifier());
   // @mulle-objc@ protocolclass optional method check <
 
   ObjCInterfaceDecl *Super = IDecl->getSuperClass();
@@ -3451,6 +3539,14 @@ static void CheckProtocolMethodDefs(
                   continue;
             // @mulle-objc@ allow protocol methods to be redeclared as optional <
 
+            // @mulle-objc@ skip if method provided by a @protocol_implementation >
+            if (!isProtoClassImpl &&
+                isMethodProvidedByProtocolClass(S.Context, IDecl,
+                                                method->getSelector(), true,
+                                                PDecl))
+              continue;
+            // @mulle-objc@ skip if method provided by a @protocol_implementation <
+
             unsigned DIAG = diag::warn_unimplemented_protocol_method;
             if (!S.Diags.isIgnored(DIAG, Impl->getLocation())) {
               WarnUndefinedMethod(S, Impl, method, IncompleteImpl, DIAG, PDecl);
@@ -3485,6 +3581,15 @@ static void CheckProtocolMethodDefs(
          if ( NearestMethod->getImplementationControl() == ObjCImplementationControl::Optional)
             continue;
       // @mulle-objc@ allow protocol methods to be redeclared as optional <
+
+      // @mulle-objc@ skip if method provided by a @protocol_implementation >
+      if (!isProtoClassImpl &&
+          isMethodProvidedByProtocolClass(S.Context, IDecl,
+                                          method->getSelector(), false,
+                                          PDecl))
+        continue;
+      // @mulle-objc@ skip if method provided by a @protocol_implementation <
+
       unsigned DIAG = diag::warn_unimplemented_protocol_method;
       if (!S.Diags.isIgnored(DIAG, Impl->getLocation())) {
         WarnUndefinedMethod(S, Impl, method, IncompleteImpl, DIAG, PDecl);
