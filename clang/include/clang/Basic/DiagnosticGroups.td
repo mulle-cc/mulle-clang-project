@@ -686,9 +686,9 @@ def AAMRenaming  : DiagGroup<"objc-aam-renaming">;
 // @mulle-objc@ mulle_confined_loop >
 def MulleConfinedLoop : DiagGroup<"mulle-confined-loop">;
 // @mulle-objc@ mulle_confined_loop <
-// @mulle-objc@ protocolclass group >
-def MulleProtocolClass : DiagGroup<"mulle-protocolclass">;
-// @mulle-objc@ protocolclass group <
+// @mulle-objc@ mixin group >
+def MulleMixin : DiagGroup<"mulle-mixin">;
+// @mulle-objc@ mixin group <
 // @mulle-objc@ method_implementation group >
 def MulleMethodImplementation : DiagGroup<"mulle-method-implementation">;
 // @mulle-objc@ method_implementation group <

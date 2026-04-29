@@ -528,9 +528,9 @@ public:
     if (!ClassListStr.empty())
       LOS << ClassListStr;
 
-    std::string ProtocolClassListStr = EmitLoadProtocolClassList();
-    if (!ProtocolClassListStr.empty())
-      LOS << ProtocolClassListStr;
+    std::string MixinListStr = EmitLoadMixinList();
+    if (!MixinListStr.empty())
+      LOS << MixinListStr;
 
     std::string CatListStr = EmitLoadCategoryList();
     if (!CatListStr.empty())
@@ -610,14 +610,14 @@ public:
     // @mulle-objc@ loaduniverse <
     {
     bool hasClasses         = !ClassListStr.empty();
-    bool hasProtocolClasses = !ProtocolClassListStr.empty();
+    bool hasMixins = !MixinListStr.empty();
     bool hasCategories      = !LoadCategories.empty();
     LOS << "   .loadclasslist            = " << (hasClasses         ? "(struct _mulle_objc_loadclasslist *) &OBJC_CLASS_LOADS" : "0") << ",\n"
-        << "   .loadprotocolclasslist    = " << (hasProtocolClasses ? "(struct _mulle_objc_loadprotocolclasslist *) &OBJC_PROTOCOLCLASS_LOADS" : "0") << ",\n"
+        << "   .loadmixinlist    = " << (hasMixins ? "(struct _mulle_objc_loadmixinlist *) &OBJC_MIXIN_LOADS" : "0") << ",\n"
         << "   .loadcategorylist         = " << (hasCategories      ? "(struct _mulle_objc_loadcategorylist *) &OBJC_CATEGORY_LOADS" : "0") << ",\n"
         << "   .loadsuperlist            = " << (LoadSupers.empty()     ? "0" : "(struct _mulle_objc_superlist *) &OBJC_SUPER_LOADS") << ",\n"
         << "   .loadstringlist           = " << (NSStringPtrs.empty()   ? "0" : "(struct _mulle_objc_loadstringlist *) &OBJC_STATICSTRING_LOADS") << ",\n"
-        << "   .loadhashedstringlist     = " << ((hasClasses || hasProtocolClasses) ? "(struct _mulle_objc_loadhashedstringlist *) &OBJC_HASHNAME_LOADS" : "0") << ",\n"
+        << "   .loadhashedstringlist     = " << ((hasClasses || hasMixins) ? "(struct _mulle_objc_loadhashedstringlist *) &OBJC_HASHNAME_LOADS" : "0") << ",\n"
         // @mulle-objc@ origin >
         << "#ifndef __OPTIMIZE__\n"
         << "   .origin               = (char *) __FILE__,\n"
@@ -667,7 +667,7 @@ private:
   void RewriteReturnStmt(ReturnStmt *S);
   void RewriteMessageExpr(ObjCMessageExpr *E);
   std::string EmitLoadClassList();
-  std::string EmitLoadProtocolClassList();
+  std::string EmitLoadMixinList();
   std::string EmitLoadCategoryList();
   std::string EmitHashNameList();
   void RewriteStringLiteral(ObjCStringLiteral *E);
@@ -886,7 +886,7 @@ void RewriteMulleObjC::RewriteStmt(Stmt *S) {
 
 void RewriteMulleObjC::RewriteForwardClassDecl(ObjCInterfaceDecl *D) {
   // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef >
-  // @class Foo;  or  @protocolclass Foo;  ->  typedef struct { } OBJC_CLASS_Foo;
+  // @class Foo;  or  @mixin Foo;  ->  typedef struct { } OBJC_CLASS_Foo;
   std::string Name = D->getNameAsString();
   std::string S = "typedef struct { } OBJC_CLASS_" + Name + ";";
   SourceLocation End = Lexer::findLocationAfterToken(
@@ -929,7 +929,7 @@ void RewriteMulleObjC::RewriteInterfaceDecl(ObjCInterfaceDecl *D) {
   }
 
   // The macro value inlines the superclass macro (expands at use-time)
-  // Only include super macro if super has ivars (not a protocolclass).
+  // Only include super macro if super has ivars (not a mixin).
   std::string MacroVal;
   if (ObjCInterfaceDecl *Super = D->getSuperClass()) {
     // Check if super has any ivars anywhere in its hierarchy
@@ -987,7 +987,7 @@ void RewriteMulleObjC::RewriteInterfaceDecl(ObjCInterfaceDecl *D) {
 void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
   CurrentClass = D->getClassInterface();
 
-  // If the @interface/@protocolclass definition had invalid sloc (e.g. @protocolclass),
+  // If the @interface/@mixin definition had invalid sloc (e.g. @mixin),
   // emit a bare typedef before the methods so the type is known.
   if (CurrentClass && EmittedIvarStructs.find(CurrentClass->getNameAsString()) == EmittedIvarStructs.end()) {
     std::string Name = CurrentClass->getNameAsString();
@@ -1402,7 +1402,7 @@ void RewriteMulleObjC::RewriteCategoryImplDecl(ObjCCategoryImplDecl *D) {
 void RewriteMulleObjC::RewriteProtocolDecl(ObjCProtocolDecl *D) {
   // @protocol — no C output needed
   // Only erase the definition; forward decls are handled by RewriteForwardClassDecl
-  // (for @protocolclass) or are already erased by the interface rewrite.
+  // (for @mixin) or are already erased by the interface rewrite.
   if (D->isThisDeclarationADefinition())
     ReplaceText(D->getSourceRange(), "");
 }
@@ -2143,7 +2143,7 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
   std::vector<ObjCImplementationDecl *> RegularClasses;
   for (auto *D : LoadClasses) {
     ObjCInterfaceDecl *ID = D->getClassInterface();
-    if (!ID->isProtocolClass())
+    if (!ID->isMixin())
       RegularClasses.push_back(D);
   }
   if (RegularClasses.empty()) return "";
@@ -2276,8 +2276,8 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
       return S;
     };
 
-    // Helper: emit protocolclassids array as compound literal (or "0")
-    auto EmitProtoClassIds = [&]() -> std::string {
+    // Helper: emit mixinids array as compound literal (or "0")
+    auto EmitMixinIds = [&]() -> std::string {
       auto &Protos = ID->getReferencedProtocols();
       std::vector<std::pair<uint32_t,std::string>> PCIds;
       for (auto *P : Protos) {
@@ -2286,7 +2286,7 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
             DeclarationName(&Context->Idents.get(P->getName())));
         for (auto *R : Results)
           if ((PI = dyn_cast<ObjCInterfaceDecl>(R))) break;
-        if (PI && PI->isProtocolClass())
+        if (PI && PI->isMixin())
           PCIds.push_back({MulleObjCUniqueIdHashForString(P->getNameAsString()),
                            P->getNameAsString()});
       }
@@ -2370,7 +2370,7 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
        << "   .instancesize     = " << (OwnIvars.empty() ? "0" : "(int) sizeof(OBJC_CLASS_" + ClassName + ")") << ",\n"
        // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef <
        << "   .instancevariables = " << EmitIvarList() << ",\n"
-       << "   .protocolclassids = " << EmitProtoClassIds() << "\n"
+       << "   .mixinids = " << EmitMixinIds() << "\n"
        << "};\n";
   }
 
@@ -2393,31 +2393,31 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
 
 
 // ---------------------------------------------------------------------------
-// Emit OBJC_PROTOCOLCLASS_LOADS data structures
+// Emit OBJC_MIXIN_LOADS data structures
 // ---------------------------------------------------------------------------
-std::string RewriteMulleObjC::EmitLoadProtocolClassList() {
+std::string RewriteMulleObjC::EmitLoadMixinList() {
   if (LoadClasses.empty()) return "";
 
   // Filter to only protocol classes
-  std::vector<ObjCImplementationDecl *> ProtocolClasses;
+  std::vector<ObjCImplementationDecl *> Mixins;
   for (auto *D : LoadClasses) {
     ObjCInterfaceDecl *ID = D->getClassInterface();
-    if (ID->isProtocolClass())
-      ProtocolClasses.push_back(D);
+    if (ID->isMixin())
+      Mixins.push_back(D);
   }
-  if (ProtocolClasses.empty()) return "";
+  if (Mixins.empty()) return "";
 
   std::string Out;
   llvm::raw_string_ostream OS(Out);
 
-  std::vector<std::string> PCVarNames;
+  std::vector<std::string> MixinVarNames;
 
-  for (auto *D : ProtocolClasses) {
+  for (auto *D : Mixins) {
     ObjCInterfaceDecl *ID = D->getClassInterface();
     std::string ClassName = ID->getNameAsString();
     std::string VarBase    = "OBJC_CLASS___" + ClassName;
     std::string VarAsmName = "OBJC_CLASS_$_" + ClassName;
-    PCVarNames.push_back(VarBase);
+    MixinVarNames.push_back(VarBase);
 
     uint32_t classId = MulleObjCUniqueIdHashForString(ClassName);
 
@@ -2522,8 +2522,8 @@ std::string RewriteMulleObjC::EmitLoadProtocolClassList() {
       return S;
     };
 
-    // --- loadprotocolclass struct (base fields only) ---
-    OS << "static struct _mulle_objc_loadprotocolclass " << VarBase
+    // --- loadmixin struct (base fields only) ---
+    OS << "static struct _mulle_objc_loadmixin " << VarBase
        << (LangOpts.ObjCNoAsmNames ? "" : " __asm__(\"\\\"" + VarAsmName + "\\\"\")")
        << " __attribute__((used,section(\".data.objc.objc_load_info\"))) =\n{\n"
        << "   .base =\n   {\n"
@@ -2543,17 +2543,17 @@ std::string RewriteMulleObjC::EmitLoadProtocolClassList() {
        << "};\n";
   }
 
-  // --- protocol class list ---
+  // --- mixin list ---
   OS << "static struct {\n"
-     << "  unsigned int n_loadprotocolclasses;\n"
-     << "  struct _mulle_objc_loadprotocolclass *loadprotocolclasses[" << PCVarNames.size() << "];\n"
-     << "} OBJC_PROTOCOLCLASS_LOADS"
+     << "  unsigned int n_loadmixins;\n"
+     << "  struct _mulle_objc_loadmixin *loadmixins[" << MixinVarNames.size() << "];\n"
+     << "} OBJC_MIXIN_LOADS"
      << " __attribute__((used,section(\".data.objc.objc_load_info\"))) =\n{\n"
-     << "   .n_loadprotocolclasses = " << PCVarNames.size() << ",\n"
-     << "   .loadprotocolclasses   =\n   {";
-  for (unsigned i = 0; i < PCVarNames.size(); ++i) {
+     << "   .n_loadmixins = " << MixinVarNames.size() << ",\n"
+     << "   .loadmixins   =\n   {";
+  for (unsigned i = 0; i < MixinVarNames.size(); ++i) {
     if (i) OS << ",";
-    OS << "\n      &" << PCVarNames[i];
+    OS << "\n      &" << MixinVarNames[i];
   }
   OS << "\n   }\n};\n";
 
@@ -2656,7 +2656,7 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
       return S;
     };
 
-    auto EmitCatProtoClassIds = [&]() -> std::string {
+    auto EmitCatMixinIds = [&]() -> std::string {
       if (!CatDecl) return "0";
       std::vector<std::pair<uint32_t,std::string>> PCIds;
       for (auto *P : CatDecl->getReferencedProtocols()) {
@@ -2665,7 +2665,7 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
             DeclarationName(&Context->Idents.get(P->getName())));
         for (auto *R : Results)
           if ((PI = dyn_cast<ObjCInterfaceDecl>(R))) break;
-        if (PI && PI->isProtocolClass())
+        if (PI && PI->isMixin())
           PCIds.push_back({MulleObjCUniqueIdHashForString(P->getNameAsString()),
                            P->getNameAsString()});
       }
@@ -2732,7 +2732,7 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
        << "   .instancemethods  = " << EmitMethodList(IMethods, catId) << ",\n"
        << "   .properties       = " << EmitCatPropList() << ",\n"
        << "   .protocols        = " << EmitCatProtoList() << ",\n"
-       << "   .protocolclassids = " << EmitCatProtoClassIds() << ",\n"
+       << "   .mixinids = " << EmitCatMixinIds() << ",\n"
        // @mulle-objc@ origin >
        << "#ifndef __OPTIMIZE__\n"
        << "   .origin           = (char *) __FILE__,\n"

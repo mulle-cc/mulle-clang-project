@@ -795,13 +795,13 @@ void SemaObjC::ActOnSuperClassOfClassInterface(
                                                          SuperLoc);
     }
 
-    // @mulle-objc@ protocolclass subclass check >
-    if (SuperClassDecl && SuperClassDecl->isProtocolClass()) {
-      Diag(SuperLoc, diag::err_mulle_subclass_of_protocolclass)
+    // @mulle-objc@ mixin subclass check >
+    if (SuperClassDecl && SuperClassDecl->isMixin()) {
+      Diag(SuperLoc, diag::err_mulle_subclass_of_mixin)
         << ClassName << SuperName;
       return;
     }
-    // @mulle-objc@ protocolclass subclass check <
+    // @mulle-objc@ mixin subclass check <
 
     IDecl->setSuperClass(SuperClassTInfo);
     IDecl->setEndOfDefinitionLoc(SuperClassTInfo->getTypeLoc().getEndLoc());
@@ -1125,7 +1125,7 @@ ObjCInterfaceDecl *SemaObjC::ActOnStartClassInterface(
     Decl *const *ProtoRefs, unsigned NumProtoRefs,
     const SourceLocation *ProtoLocs, SourceLocation EndProtoLoc,
     const ParsedAttributesView &AttrList, SkipBodyInfo *SkipBody,
-    bool AllowProtocolClassName) {
+    bool AllowMixinName) {
   assert(ClassName && "Missing class identifier");
 
   ASTContext &Context = getASTContext();
@@ -1213,16 +1213,16 @@ ObjCInterfaceDecl *SemaObjC::ActOnStartClassInterface(
     }
   }
 
-  // @mulle-objc@ protocolclass class conflict check >
-  // A regular @interface must not reuse the name of a protocol class.
-  // AllowProtocolClassName is true when called from ActOnStartProtocolImplementation
-  // (which synthetically creates the backing interface for the protocol class).
-  if (!AllowProtocolClassName && PrevIDecl && PrevIDecl->isProtocolClass()) {
-    Diag(ClassLoc, diag::err_mulle_class_conflicts_protocolclass) << ClassName;
+  // @mulle-objc@ mixin class conflict check >
+  // A regular @interface must not reuse the name of a mixin.
+  // AllowMixinName is true when called from ActOnStartMixinImplementation
+  // (which synthetically creates the backing interface for the mixin).
+  if (!AllowMixinName && PrevIDecl && PrevIDecl->isMixin()) {
+    Diag(ClassLoc, diag::err_mulle_class_conflicts_mixin) << ClassName;
     Diag(PrevIDecl->getLocation(), diag::note_previous_definition);
     IDecl->setInvalidDecl();
   }
-  // @mulle-objc@ protocolclass class conflict check <
+  // @mulle-objc@ mixin class conflict check <
 
   SemaRef.ProcessDeclAttributeList(SemaRef.TUScope, IDecl, AttrList);
   SemaRef.AddPragmaAttributes(SemaRef.TUScope, IDecl);
@@ -1376,25 +1376,25 @@ ObjCProtocolDecl *SemaObjC::ActOnStartProtocolInterface(
     SourceLocation ProtocolLoc, Decl *const *ProtoRefs, unsigned NumProtoRefs,
     const SourceLocation *ProtoLocs, SourceLocation EndProtoLoc,
     const ParsedAttributesView &AttrList, SkipBodyInfo *SkipBody,
-    bool IsProtocolClass) {
+    bool IsMixin) {
   ASTContext &Context = getASTContext();
   bool err = false;
   // FIXME: Deal with AttrList.
   assert(ProtocolName && "Missing protocol identifier");
 
-  // @mulle-objc@ protocolclass protocol def conflict >
-  if (!IsProtocolClass) {
+  // @mulle-objc@ mixin protocol def conflict >
+  if (!IsMixin) {
     NamedDecl *ClassDecl = SemaRef.LookupSingleName(
         SemaRef.TUScope, ProtocolName, ProtocolLoc, Sema::LookupOrdinaryName);
     if (auto *IDecl = dyn_cast_or_null<ObjCInterfaceDecl>(ClassDecl)) {
-      if (IDecl->isProtocolClass()) {
-        Diag(ProtocolLoc, diag::err_mulle_protocol_def_conflicts_protocolclass)
+      if (IDecl->isMixin()) {
+        Diag(ProtocolLoc, diag::err_mulle_protocol_def_conflicts_mixin)
           << ProtocolName;
         Diag(IDecl->getLocation(), diag::note_previous_definition);
       }
     }
   }
-  // @mulle-objc@ protocolclass protocol def conflict <
+  // @mulle-objc@ mixin protocol def conflict <
 
   ObjCProtocolDecl *PrevDecl = LookupProtocol(
       ProtocolName, ProtocolLoc, SemaRef.forRedeclarationInCurContext());
@@ -1967,17 +1967,17 @@ SemaObjC::DeclGroupPtrTy SemaObjC::ActOnForwardProtocolDeclaration(
   for (const IdentifierLoc &IdentPair : IdentList) {
     IdentifierInfo *Ident = IdentPair.getIdentifierInfo();
 
-    // @mulle-objc@ protocolclass protocol fwd conflict >
+    // @mulle-objc@ mixin protocol fwd conflict >
     NamedDecl *ClassDecl = SemaRef.LookupSingleName(
         SemaRef.TUScope, Ident, IdentPair.getLoc(), Sema::LookupOrdinaryName);
     if (auto *IDecl = dyn_cast_or_null<ObjCInterfaceDecl>(ClassDecl)) {
-      if (IDecl->isProtocolClass()) {
+      if (IDecl->isMixin()) {
         Diag(IdentPair.getLoc(),
-             diag::warn_mulle_protocol_fwd_after_protocolclass) << Ident;
+             diag::warn_mulle_protocol_fwd_after_mixin) << Ident;
         Diag(IDecl->getLocation(), diag::note_previous_definition);
       }
     }
-    // @mulle-objc@ protocolclass protocol fwd conflict <
+    // @mulle-objc@ mixin protocol fwd conflict <
 
     ObjCProtocolDecl *PrevDecl = LookupProtocol(
         Ident, IdentPair.getLoc(), SemaRef.forRedeclarationInCurContext());
@@ -2000,8 +2000,8 @@ SemaObjC::DeclGroupPtrTy SemaObjC::ActOnForwardProtocolDeclaration(
   return SemaRef.BuildDeclaratorGroup(DeclsInGroup);
 }
 
-// @mulle-objc@ protocolclass forward decl sema >
-SemaObjC::DeclGroupPtrTy SemaObjC::ActOnProtocolClassForwardDeclaration(
+// @mulle-objc@ mixin forward decl sema >
+SemaObjC::DeclGroupPtrTy SemaObjC::ActOnMixinForwardDeclaration(
     SourceLocation AtLoc, ArrayRef<IdentifierLoc> IdentList,
     const ParsedAttributesView &AttrList) {
   ASTContext &Context = getASTContext();
@@ -2011,17 +2011,17 @@ SemaObjC::DeclGroupPtrTy SemaObjC::ActOnProtocolClassForwardDeclaration(
     IdentifierInfo *Name = IL.getIdentifierInfo();
     SourceLocation Loc = IL.getLoc();
 
-    // Check for existing @class (non-protocolclass)
+    // Check for existing @class (non-mixin)
     NamedDecl *PrevDecl = SemaRef.LookupSingleName(
         SemaRef.TUScope, Name, Loc, Sema::LookupOrdinaryName,
         SemaRef.forRedeclarationInCurContext());
     if (auto *PrevIDecl = dyn_cast_or_null<ObjCInterfaceDecl>(PrevDecl)) {
-      if (PrevIDecl->isProtocolClass()) {
-        // Duplicate @protocolclass forward decl — OK
+      if (PrevIDecl->isMixin()) {
+        // Duplicate @mixin forward decl — OK
         DeclsInGroup.push_back(PrevIDecl);
         continue;
       }
-      Diag(Loc, diag::err_mulle_protocolclass_conflict_class) << Name;
+      Diag(Loc, diag::err_mulle_mixin_conflict_class) << Name;
       Diag(PrevDecl->getLocation(), diag::note_previous_definition);
       continue;
     } else if (PrevDecl) {
@@ -2034,17 +2034,17 @@ SemaObjC::DeclGroupPtrTy SemaObjC::ActOnProtocolClassForwardDeclaration(
     ObjCProtocolDecl *PrevProto = LookupProtocol(
         Name, Loc, SemaRef.forRedeclarationInCurContext());
     if (PrevProto) {
-      Diag(Loc, diag::err_mulle_protocolclass_conflict_protocol) << Name;
+      Diag(Loc, diag::err_mulle_mixin_conflict_protocol) << Name;
       Diag(PrevProto->getLocation(), diag::note_previous_definition);
       continue;
     }
 
-    // Create ObjCInterfaceDecl (forward class), marked as protocolclass
+    // Create ObjCInterfaceDecl (forward class), marked as mixin
     ObjCInterfaceDecl *IDecl = ObjCInterfaceDecl::Create(
         Context, SemaRef.CurContext, AtLoc, Name,
         /*typeParamList=*/nullptr, /*PrevDecl=*/nullptr, Loc);
     IDecl->setAtEndRange(Loc);
-    IDecl->setProtocolClass(true);
+    IDecl->setMixin(true);
     SemaRef.PushOnScopeChains(IDecl, SemaRef.TUScope);
     CheckObjCDeclScope(IDecl);
     DeclsInGroup.push_back(IDecl);
@@ -2059,7 +2059,7 @@ SemaObjC::DeclGroupPtrTy SemaObjC::ActOnProtocolClassForwardDeclaration(
 
   return SemaRef.BuildDeclaratorGroup(DeclsInGroup);
 }
-// @mulle-objc@ protocolclass forward decl sema <
+// @mulle-objc@ mixin forward decl sema <
 
 ObjCCategoryDecl *SemaObjC::ActOnStartCategoryInterface(
     SourceLocation AtInterfaceLoc, const IdentifierInfo *ClassName,
@@ -2156,49 +2156,6 @@ ObjCCategoryDecl *SemaObjC::ActOnStartCategoryInterface(
   ActOnObjCContainerStartDefinition(CDecl);
   return CDecl;
 }
-
-// @mulle-objc@ protocolimplementation sema >
-ObjCImplementationDecl *SemaObjC::ActOnStartProtocolImplementation(
-    SourceLocation AtLoc, const IdentifierInfo *ClassName,
-    SourceLocation ClassLoc, const ParsedAttributesView &Attrs) {
-  // Look up protocol — warn if not found
-  ObjCProtocolDecl *Proto = LookupProtocol(
-      const_cast<IdentifierInfo *>(ClassName), ClassLoc);
-  if (!Proto)
-    Diag(ClassLoc, diag::warn_mulle_protocolimpl_missing_protocol) << ClassName;
-
-  // Synthesize @interface Foo <Foo> @end (root class conforming to own protocol)
-  SmallVector<Decl *, 1> ProtoRefs;
-  SmallVector<SourceLocation, 1> ProtoLocs;
-  if (Proto) {
-    ProtoRefs.push_back(Proto);
-    ProtoLocs.push_back(ClassLoc);
-  }
-
-  ObjCInterfaceDecl *IDecl = ActOnStartClassInterface(
-      SemaRef.TUScope, AtLoc,
-      const_cast<IdentifierInfo *>(ClassName), ClassLoc,
-      /*typeParamList=*/nullptr,
-      /*SuperName=*/nullptr, SourceLocation(),
-      /*SuperTypeArgs=*/{}, SourceRange(),
-      ProtoRefs.data(), ProtoRefs.size(),
-      ProtoLocs.data(), ClassLoc,
-      ParsedAttributesView{}, /*SkipBody=*/nullptr,
-      /*AllowProtocolClassName=*/true);
-
-  if (IDecl) {
-    IDecl->addAttr(ObjCRootClassAttr::CreateImplicit(getASTContext()));
-    IDecl->setProtocolClass(true);
-  }
-
-  ActOnObjCContainerFinishDefinition();
-
-  // Start @implementation Foo (no superclass)
-  return ActOnStartClassImplementation(
-      AtLoc, const_cast<IdentifierInfo *>(ClassName), ClassLoc,
-      /*SuperClassname=*/nullptr, SourceLocation(), Attrs);
-}
-// @mulle-objc@ protocolimplementation sema <
 
 // @mulle-objc@ method_implementation sema >
 Decl *SemaObjC::ActOnMethodImplementationAlias(
@@ -2626,6 +2583,41 @@ ObjCImplementationDecl *SemaObjC::ActOnStartClassImplementation(
     Diag(ClassLoc, diag::err_redefinition_different_kind) << ClassName;
     Diag(PrevDecl->getLocation(), diag::note_previous_definition);
   } else if ((IDecl = dyn_cast_or_null<ObjCInterfaceDecl>(PrevDecl))) {
+    // @mulle-objc@ mixin setup >
+    if (IDecl->isMixin()) {
+      if (SuperClassname) {
+        Diag(SuperClassLoc, diag::err_mulle_subclass_of_mixin)
+            << ClassName << SuperClassname;
+        return nullptr;
+      }
+      // The mixin definition form (@mixin Foo ... @end) only creates the
+      // ObjCProtocolDecl. Require it to be fully defined before @implementation.
+      ObjCProtocolDecl *Proto = LookupProtocol(
+          const_cast<IdentifierInfo *>(ClassName), ClassLoc);
+      if (!Proto || !Proto->hasDefinition()) {
+        Diag(ClassLoc, diag::err_mulle_mixin_no_definition) << ClassName;
+        return nullptr;
+      }
+      // Synthesize @interface Foo <Foo> (root class conforming to its own protocol)
+      Decl *ProtoRef = Proto;
+      IDecl = ActOnStartClassInterface(
+          SemaRef.TUScope, AtClassImplLoc,
+          const_cast<IdentifierInfo *>(ClassName), ClassLoc,
+          /*typeParamList=*/nullptr,
+          /*SuperName=*/nullptr, SourceLocation(),
+          /*SuperTypeArgs=*/{}, SourceRange(),
+          &ProtoRef, 1,
+          &ClassLoc, ClassLoc,
+          ParsedAttributesView{}, /*SkipBody=*/nullptr,
+          /*AllowMixinName=*/true);
+      if (IDecl) {
+        IDecl->addAttr(ObjCRootClassAttr::CreateImplicit(getASTContext()));
+        IDecl->setMixin(true);
+      }
+      ActOnObjCContainerFinishDefinition();
+      // IDecl is now fully defined — fall through to standard implementation setup
+    }
+    // @mulle-objc@ mixin setup <
     // FIXME: This will produce an error if the definition of the interface has
     // been imported from a module but is not visible.
     SemaRef.RequireCompleteType(ClassLoc, Context.getObjCInterfaceType(IDecl),
@@ -2899,10 +2891,19 @@ static void WarnUndefinedMethod(Sema &S, ObjCImplDecl *Impl,
     B << method;
     if (NeededFor)
       B << NeededFor;
+  }
 
-    // @mulle-objc@ skip FixIt for @protocolimplementation — user uses @method_implementation instead >
+  // Issue a note to the original declaration, with a fix-it to add an empty
+  // definition at the end of the @implementation.
+  SourceLocation MethodLoc = method->getBeginLoc();
+  if (MethodLoc.isValid()) {
+    const SemaBase::SemaDiagnosticBuilder &N =
+        S.Diag(MethodLoc, diag::note_method_declared_at);
+    N << method;
+
+    // @mulle-objc@ skip FixIt for mixin implementation — user uses @method_implementation instead >
     const ObjCInterfaceDecl *IFace = Impl->getClassInterface();
-    bool isProtoImpl = IFace && IFace->isProtocolClass();
+    bool isProtoImpl = IFace && IFace->isMixin();
     if (!isProtoImpl) {
       // Add an empty definition at the end of the @implementation.
       std::string FixItStr;
@@ -2911,15 +2912,10 @@ static void WarnUndefinedMethod(Sema &S, ObjCImplDecl *Impl,
       Out << " {\n}\n\n";
 
       SourceLocation Loc = Impl->getAtEndRange().getBegin();
-      B << FixItHint::CreateInsertion(Loc, FixItStr);
+      N << FixItHint::CreateInsertion(Loc, FixItStr);
     }
-    // @mulle-objc@ skip FixIt for @protocolimplementation <
+    // @mulle-objc@ skip FixIt for mixin implementation <
   }
-
-  // Issue a note to the original declaration.
-  SourceLocation MethodLoc = method->getBeginLoc();
-  if (MethodLoc.isValid())
-    S.Diag(MethodLoc, diag::note_method_declared_at) << method;
 }
 
 /// Determines if type B can be substituted for type A.  Returns true if we can
@@ -3374,34 +3370,34 @@ static void findProtocolsWithExplicitImpls(const ObjCInterfaceDecl *Super,
   findProtocolsWithExplicitImpls(Super->getSuperClass(), PNS);
 }
 
-// @mulle-objc@ protocol class implementation check >
-// Returns true if 'Sel' is provided by a @protocol_implementation for any
-// protocol class that IDecl conforms to.  Two paths to credit:
+// @mulle-objc@ mixin implementation check >
+// Returns true if 'Sel' is provided by a @mixin implementation for any
+// mixin that IDecl conforms to.  Two paths to credit:
 //
-//  (a) Same TU: the protocol class implementation is visible and has the method.
-//  (b) Cross TU: the protocol class's own ObjCProtocolDecl declares the method
-//      (as @optional in the @protocol_interface), meaning the
-//      @protocol_implementation provides a default that will be injected at
+//  (a) Same TU: the mixin implementation is visible and has the method.
+//  (b) Cross TU: the mixin's own ObjCProtocolDecl declares the method
+//      (as @optional in the @mixin definition), meaning the
+//      @mixin provides a default that will be injected at
 //      runtime into every class adopting it.
 // CheckedPDecl is the protocol whose method list we are currently verifying.
-// When the matching protocol class corresponds to CheckedPDecl itself, the
-// method was declared @required in that @protocol_interface — "must implement
-// even though a default exists".  Only suppress for a DIFFERENT protocol class
+// When the matching mixin corresponds to CheckedPDecl itself, the
+// method was declared @required in that @mixin definition — "must implement
+// even though a default exists".  Only suppress for a DIFFERENT mixin
 // (e.g. MulleObjCRootObject satisfying the NSObject protocol's requirements).
-static bool isMethodProvidedByProtocolClass(ASTContext &Ctx,
+static bool isMethodProvidedByMixin(ASTContext &Ctx,
                                             const ObjCInterfaceDecl *IDecl,
                                             Selector Sel, bool IsInstance,
                                             const ObjCProtocolDecl *CheckedPDecl) {
   for (const auto *Proto : IDecl->all_referenced_protocols()) {
     IdentifierInfo *II = Proto->getIdentifier();
-    // Look for a class interface with the same name that is a protocol class.
+    // Look for a class interface with the same name that is a mixin.
     DeclContext::lookup_result Res =
         Ctx.getTranslationUnitDecl()->lookup(DeclarationName(II));
     for (NamedDecl *ND : Res) {
       ObjCInterfaceDecl *ProtoIface = dyn_cast<ObjCInterfaceDecl>(ND);
-      if (!ProtoIface || !ProtoIface->isProtocolClass())
+      if (!ProtoIface || !ProtoIface->isMixin())
         continue;
-      // If this protocol class IS the protocol being checked, its @required
+      // If this mixin IS the protocol being checked, its @required
       // methods must still be implemented by adopters — don't suppress.
       if (Proto == CheckedPDecl)
         continue;
@@ -3411,15 +3407,15 @@ static bool isMethodProvidedByProtocolClass(ASTContext &Ctx,
                        : ProtoImpl->getClassMethod(Sel))
           return true;
       }
-      // (b) Cross-TU: if the protocol class's own protocol declares the method,
-      // trust that its @protocol_implementation provides it at runtime.
+      // (b) Cross-TU: if the mixin's own protocol declares the method,
+      // trust that its @mixin implementation provides it at runtime.
       if (Proto->lookupMethod(Sel, IsInstance))
         return true;
     }
   }
   return false;
 }
-// @mulle-objc@ protocol class implementation check <
+// @mulle-objc@ mixin implementation check <
 
 /// CheckProtocolMethodDefs - This routine checks unimplemented methods
 /// Declared in protocol, and those referenced by it.
@@ -3432,16 +3428,16 @@ static void CheckProtocolMethodDefs(
                                : dyn_cast<ObjCInterfaceDecl>(CDecl);
   assert (IDecl && "CheckProtocolMethodDefs - IDecl is null");
 
-  // @mulle-objc@ protocolclass optional method check >
-  // For @protocol_implementation (protocol class), the semantics are inverted:
+  // @mulle-objc@ mixin optional method check >
+  // For @mixin implementation (mixin), the semantics are inverted:
   // @optional methods must be implemented (they are the default implementations),
   // while @required methods are for adaptors/subclasses and need not be present.
-  // Only invert when checking the protocol class's OWN protocol (same name).
-  // Adopted/inherited protocol classes have their own semantics and their
+  // Only invert when checking the mixin's OWN protocol (same name).
+  // Adopted/inherited mixins have their own semantics and their
   // @optional methods do not need to be re-implemented.
-  bool isProtoClassImpl = IDecl->isProtocolClass() &&
+  bool isProtoClassImpl = IDecl->isMixin() &&
                           (PDecl->getIdentifier() == IDecl->getIdentifier());
-  // @mulle-objc@ protocolclass optional method check <
+  // @mulle-objc@ mixin optional method check <
 
   ObjCInterfaceDecl *Super = IDecl->getSuperClass();
   ObjCInterfaceDecl *NSIDecl = nullptr;
@@ -3499,10 +3495,10 @@ static void CheckProtocolMethodDefs(
   // check unimplemented instance methods.
   if (!NSIDecl)
     for (auto *method : PDecl->instance_methods()) {
-      // @mulle-objc@ protocolclass optional method check >
+      // @mulle-objc@ mixin optional method check >
       bool isOptional = (method->getImplementationControl() ==
                          ObjCImplementationControl::Optional);
-      // @mulle-objc@ protocolclass optional method check <
+      // @mulle-objc@ mixin optional method check <
       if ((isProtoClassImpl ? isOptional : !isOptional) &&
           !method->isPropertyAccessor() &&
           !InsMap.count(method->getSelector()) &&
@@ -3527,7 +3523,7 @@ static void CheckProtocolMethodDefs(
               if (C || MethodInClass->isPropertyAccessor())
                 continue;
             // @mulle-objc@ allow protocol methods to be redeclared as optional >
-            // (but not in protocol class impls — there we explicitly want to warn
+            // (but not in mixin impls — there we explicitly want to warn
             // about unimplemented optional methods since they are the defaults)
             if (!isProtoClassImpl)
               if (ObjCMethodDecl *NearestMethod =
@@ -3539,13 +3535,13 @@ static void CheckProtocolMethodDefs(
                   continue;
             // @mulle-objc@ allow protocol methods to be redeclared as optional <
 
-            // @mulle-objc@ skip if method provided by a @protocol_implementation >
+            // @mulle-objc@ skip if method provided by a @mixin >
             if (!isProtoClassImpl &&
-                isMethodProvidedByProtocolClass(S.Context, IDecl,
+                isMethodProvidedByMixin(S.Context, IDecl,
                                                 method->getSelector(), true,
                                                 PDecl))
               continue;
-            // @mulle-objc@ skip if method provided by a @protocol_implementation <
+            // @mulle-objc@ skip if method provided by a @mixin <
 
             unsigned DIAG = diag::warn_unimplemented_protocol_method;
             if (!S.Diags.isIgnored(DIAG, Impl->getLocation())) {
@@ -3555,10 +3551,10 @@ static void CheckProtocolMethodDefs(
     }
   // check unimplemented class methods
   for (auto *method : PDecl->class_methods()) {
-    // @mulle-objc@ protocolclass optional method check >
+    // @mulle-objc@ mixin optional method check >
     bool isOptionalCls = (method->getImplementationControl() ==
                           ObjCImplementationControl::Optional);
-    // @mulle-objc@ protocolclass optional method check <
+    // @mulle-objc@ mixin optional method check <
     if ((isProtoClassImpl ? isOptionalCls : !isOptionalCls) &&
         !ClsMap.count(method->getSelector()) &&
         (!Super || !Super->lookupMethod(
@@ -3582,13 +3578,13 @@ static void CheckProtocolMethodDefs(
             continue;
       // @mulle-objc@ allow protocol methods to be redeclared as optional <
 
-      // @mulle-objc@ skip if method provided by a @protocol_implementation >
+      // @mulle-objc@ skip if method provided by a @mixin >
       if (!isProtoClassImpl &&
-          isMethodProvidedByProtocolClass(S.Context, IDecl,
+          isMethodProvidedByMixin(S.Context, IDecl,
                                           method->getSelector(), false,
                                           PDecl))
         continue;
-      // @mulle-objc@ skip if method provided by a @protocol_implementation <
+      // @mulle-objc@ skip if method provided by a @mixin <
 
       unsigned DIAG = diag::warn_unimplemented_protocol_method;
       if (!S.Diags.isIgnored(DIAG, Impl->getLocation())) {
@@ -3906,14 +3902,14 @@ SemaObjC::DeclGroupPtrTy SemaObjC::ActOnForwardClassDeclaration(
     ObjCInterfaceDecl *PrevIDecl
       = dyn_cast_or_null<ObjCInterfaceDecl>(PrevDecl);
 
-    // @mulle-objc@ protocolclass class conflict check >
-    if (PrevIDecl && PrevIDecl->isProtocolClass()) {
-      Diag(IdentLocs[i], diag::err_mulle_class_conflicts_protocolclass)
+    // @mulle-objc@ mixin class conflict check >
+    if (PrevIDecl && PrevIDecl->isMixin()) {
+      Diag(IdentLocs[i], diag::err_mulle_class_conflicts_mixin)
         << IdentList[i];
       Diag(PrevIDecl->getLocation(), diag::note_previous_definition);
       continue;
     }
-    // @mulle-objc@ protocolclass class conflict check <
+    // @mulle-objc@ mixin class conflict check <
 
     IdentifierInfo *ClassName = IdentList[i];
     if (PrevIDecl && PrevIDecl->getIdentifier() != ClassName) {

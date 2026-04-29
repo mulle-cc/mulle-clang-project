@@ -57,11 +57,9 @@ Parser::ParseObjCAtDirectives(ParsedAttributes &DeclAttrs,
   case tok::objc_interface:
   case tok::objc_protocol:
   case tok::objc_implementation:
-  // @mulle-objc@ protocolclass dispatch >
-  case tok::objc_protocol_class:
-  case tok::objc_protocol_interface:
-  case tok::objc_protocol_implementation:
-  // @mulle-objc@ protocolclass dispatch <
+  // @mulle-objc@ mixin dispatch >
+  case tok::objc_mixin:
+  // @mulle-objc@ mixin dispatch <
     break;
   default:
     for (const auto &Attr : DeclAttrs) {
@@ -81,14 +79,10 @@ Parser::ParseObjCAtDirectives(ParsedAttributes &DeclAttrs,
     return ParseObjCAtProtocolDeclaration(AtLoc, DeclAttrs);
   case tok::objc_implementation:
     return ParseObjCAtImplementationDeclaration(AtLoc, DeclAttrs);
-  // @mulle-objc@ protocolclass dispatch >
-  case tok::objc_protocol_class:
-    return ParseObjCAtProtocolClassForwardDeclaration(AtLoc, DeclAttrs);
-  case tok::objc_protocol_interface:
-    return ParseObjCAtProtocolInterfaceDeclaration(AtLoc, DeclAttrs);
-  case tok::objc_protocol_implementation:
-    return ParseObjCAtProtocolImplementation(AtLoc, DeclAttrs);
-  // @mulle-objc@ protocolclass dispatch <
+  // @mulle-objc@ mixin dispatch >
+  case tok::objc_mixin:
+    return ParseObjCAtMixinDeclaration(AtLoc, DeclAttrs);
+  // @mulle-objc@ mixin dispatch <
   case tok::objc_end:
     return ParseObjCAtEndDeclaration(AtLoc);
   case tok::objc_compatibility_alias:
@@ -602,9 +596,9 @@ void Parser::ParseObjCInterfaceDeclList(tok::ObjCKeywordKind contextKey,
                                         tok::ObjCKeywordKind DefaultMethodImplKind) {
   SmallVector<Decl *, 32> allMethods;
   SmallVector<DeclGroupPtrTy, 8> allTUVariables;
-  // @mulle-objc@ protocolclass default optional >
+  // @mulle-objc@ mixin default optional >
   tok::ObjCKeywordKind MethodImplKind = DefaultMethodImplKind;
-  // @mulle-objc@ protocolclass default optional <
+  // @mulle-objc@ mixin default optional <
 
   SourceRange AtEnd;
 
@@ -2046,45 +2040,14 @@ Decl *Parser::ParseObjCMethodImplementation(SourceLocation AtLoc,
 }
 // @mulle-objc@ method_implementation parser <
 
-// @mulle-objc@ protocolclass parser >
+// @mulle-objc@ mixin parser >
 Parser::DeclGroupPtrTy
-Parser::ParseObjCAtProtocolClassForwardDeclaration(SourceLocation AtLoc,
-                                                   ParsedAttributes &attrs) {
-  assert(Tok.isObjCAtKeyword(tok::objc_protocol_class));
-  ConsumeToken(); // "protocol_class"
+Parser::ParseObjCAtMixinDeclaration(SourceLocation AtLoc,
+                                    ParsedAttributes &attrs) {
+  assert(Tok.isObjCAtKeyword(tok::objc_mixin));
+  ConsumeToken(); // "mixin"
 
-  MaybeSkipAttributes(tok::objc_protocol_class);
-
-  if (expectIdentifier())
-    return nullptr;
-
-  SmallVector<IdentifierLoc, 8> IdentList;
-  IdentList.emplace_back(Tok.getLocation(), Tok.getIdentifierInfo());
-  ConsumeToken();
-
-  while (Tok.is(tok::comma)) {
-    ConsumeToken(); // ','
-    if (expectIdentifier()) {
-      SkipUntil(tok::semi);
-      return nullptr;
-    }
-    IdentList.emplace_back(Tok.getLocation(), Tok.getIdentifierInfo());
-    ConsumeToken();
-  }
-
-  if (ExpectAndConsume(tok::semi, diag::err_expected_after, "@protocol_class"))
-    return nullptr;
-  return Actions.ObjC().ActOnProtocolClassForwardDeclaration(
-      AtLoc, IdentList, attrs);
-}
-
-Parser::DeclGroupPtrTy
-Parser::ParseObjCAtProtocolInterfaceDeclaration(SourceLocation AtLoc,
-                                                ParsedAttributes &attrs) {
-  assert(Tok.isObjCAtKeyword(tok::objc_protocol_interface));
-  ConsumeToken(); // "protocol_interface"
-
-  MaybeSkipAttributes(tok::objc_protocol_class);
+  MaybeSkipAttributes(tok::objc_mixin);
 
   if (expectIdentifier())
     return nullptr;
@@ -2092,12 +2055,33 @@ Parser::ParseObjCAtProtocolInterfaceDeclaration(SourceLocation AtLoc,
   IdentifierInfo *name = Tok.getIdentifierInfo();
   SourceLocation nameLoc = ConsumeToken();
 
+  // Forward declaration: @mixin Foo, Bar, Baz;
+  if (Tok.is(tok::comma) || Tok.is(tok::semi)) {
+    SmallVector<IdentifierLoc, 8> IdentList;
+    IdentList.emplace_back(nameLoc, name);
+
+    while (Tok.is(tok::comma)) {
+      ConsumeToken(); // ','
+      if (expectIdentifier()) {
+        SkipUntil(tok::semi);
+        return nullptr;
+      }
+      IdentList.emplace_back(Tok.getLocation(), Tok.getIdentifierInfo());
+      ConsumeToken();
+    }
+
+    if (ExpectAndConsume(tok::semi, diag::err_expected_after, "@mixin"))
+      return nullptr;
+    return Actions.ObjC().ActOnMixinForwardDeclaration(AtLoc, IdentList, attrs);
+  }
+
+  // Definition: @mixin Foo <Protocols> { ... } @end
   CheckNestedObjCContexts(AtLoc);
 
-  // First create the class+protocol forward decls (marks as protocolclass)
+  // First create the forward decl (marks as mixin)
   {
     IdentifierLoc Info(nameLoc, name);
-    Actions.ObjC().ActOnProtocolClassForwardDeclaration(AtLoc, Info, attrs);
+    Actions.ObjC().ActOnMixinForwardDeclaration(AtLoc, Info, attrs);
   }
 
   // Then parse protocol references and create the protocol definition
@@ -2114,12 +2098,12 @@ Parser::ParseObjCAtProtocolInterfaceDeclaration(SourceLocation AtLoc,
   ObjCProtocolDecl *ProtoType = Actions.ObjC().ActOnStartProtocolInterface(
       AtLoc, name, nameLoc, ProtocolRefs.data(), ProtocolRefs.size(),
       ProtocolLocs.data(), EndProtoLoc, attrs, &SkipBody,
-      /*IsProtocolClass=*/true);
+      /*IsMixin=*/true);
 
   ParseObjCInterfaceDeclList(tok::objc_protocol, ProtoType,
-                             // @mulle-objc@ protocolclass default optional >
+                             // @mulle-objc@ mixin default optional >
                              tok::objc_optional
-                             // @mulle-objc@ protocolclass default optional <
+                             // @mulle-objc@ mixin default optional <
                              );
 
   if (SkipBody.CheckSameAsPrevious) {
@@ -2135,45 +2119,7 @@ Parser::ParseObjCAtProtocolInterfaceDeclaration(SourceLocation AtLoc,
   }
   return Actions.ConvertDeclToDeclGroup(ProtoType);
 }
-
-Parser::DeclGroupPtrTy
-Parser::ParseObjCAtProtocolImplementation(SourceLocation AtLoc,
-                                          ParsedAttributes &Attrs) {
-  assert(Tok.isObjCAtKeyword(tok::objc_protocol_implementation));
-  CheckNestedObjCContexts(AtLoc);
-  ConsumeToken(); // "protocol_implementation"
-
-  if (expectIdentifier())
-    return nullptr;
-
-  IdentifierInfo *nameId = Tok.getIdentifierInfo();
-  SourceLocation nameLoc = ConsumeToken();
-
-  ObjCImplDecl *ObjCImpDecl =
-      Actions.ObjC().ActOnStartProtocolImplementation(
-          AtLoc, nameId, nameLoc, Attrs);
-  if (!ObjCImpDecl)
-    return nullptr;
-
-  SmallVector<Decl *, 8> DeclsInGroup;
-  {
-    ObjCImplParsingDataRAII ObjCImplParsing(*this, ObjCImpDecl);
-    while (!ObjCImplParsing.isFinished() && !isEofOrEom()) {
-      ParsedAttributes DeclAttrs(AttrFactory);
-      MaybeParseCXX11Attributes(DeclAttrs);
-      ParsedAttributes EmptyDeclSpecAttrs(AttrFactory);
-      if (DeclGroupPtrTy DGP =
-              ParseExternalDeclaration(DeclAttrs, EmptyDeclSpecAttrs)) {
-        DeclGroupRef DG = DGP.get();
-        DeclsInGroup.append(DG.begin(), DG.end());
-      }
-    }
-  }
-
-  return Actions.ObjC().ActOnFinishObjCImplementation(ObjCImpDecl,
-                                                      DeclsInGroup);
-}
-// @mulle-objc@ protocolclass parser <
+// @mulle-objc@ mixin parser <
 
 Parser::DeclGroupPtrTy
 Parser::ParseObjCAtProtocolDeclaration(SourceLocation AtLoc,

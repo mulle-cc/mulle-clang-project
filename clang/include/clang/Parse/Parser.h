@@ -5584,9 +5584,9 @@ private:
   /// \endverbatim
   ///
   void ParseObjCInterfaceDeclList(tok::ObjCKeywordKind contextKey, Decl *CDecl,
-      // @mulle-objc@ protocolclass default optional >
+      // @mulle-objc@ mixin default optional >
       tok::ObjCKeywordKind DefaultMethodImplKind = tok::objc_not_keyword
-      // @mulle-objc@ protocolclass default optional <
+      // @mulle-objc@ mixin default optional <
       );
 
   /// \verbatim
@@ -5650,14 +5650,10 @@ private:
   /// \endverbatim
   DeclGroupPtrTy ParseObjCAtImplementationDeclaration(SourceLocation AtLoc,
                                                       ParsedAttributes &Attrs);
-  // @mulle-objc@ protocolclass declarations >
-  DeclGroupPtrTy ParseObjCAtProtocolClassForwardDeclaration(SourceLocation AtLoc,
-                                                            ParsedAttributes &Attrs);
-  DeclGroupPtrTy ParseObjCAtProtocolInterfaceDeclaration(SourceLocation AtLoc,
-                                                         ParsedAttributes &Attrs);
-  DeclGroupPtrTy ParseObjCAtProtocolImplementation(SourceLocation AtLoc,
-                                                   ParsedAttributes &Attrs);
-  // @mulle-objc@ protocolclass declarations <
+  // @mulle-objc@ mixin declarations >
+  DeclGroupPtrTy ParseObjCAtMixinDeclaration(SourceLocation AtLoc,
+                                             ParsedAttributes &attrs);
+  // @mulle-objc@ mixin declarations <
   // @mulle-objc@ method_implementation declaration >
   Decl *ParseObjCMethodImplementation(SourceLocation AtLoc, Decl *ClassDecl);
   // @mulle-objc@ method_implementation declaration <

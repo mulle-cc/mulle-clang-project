@@ -8368,24 +8368,23 @@ def err_mulle_confined_return_in_nested_loop : Error<
   "mulle_confined_return only allowed in the outermost mulle_confined_loop, not inside a nested mulle_confined_loop">;
 // @mulle-objc@ mulle_confined_return diagnostics <
 
-// @mulle-objc@ protocolclass diagnostics >
-def err_mulle_protocolclass_conflict_class : Error<
-  "%0 was already forward-declared as a class; cannot redeclare as protocol class">;
-def err_mulle_protocolclass_conflict_protocol : Error<
-  "%0 was already forward-declared as a protocol; cannot redeclare as protocol class">;
-def err_mulle_class_conflicts_protocolclass : Error<
-  "%0 is a protocol class; use @protocol_class for forward declaration">;
-def err_mulle_protocol_def_conflicts_protocolclass : Error<
-  "%0 is a protocol class; use @protocol_interface for protocol definition">;
-def warn_mulle_protocol_fwd_after_protocolclass : Warning<
-  "%0 is a protocol class; @protocol forward declaration is redundant">,
-  InGroup<MulleProtocolClass>;
-def warn_mulle_protocolimpl_missing_protocol : Warning<
-  "protocol %0 not found for @protocol_implementation">,
-  InGroup<MulleProtocolClass>;
-def err_mulle_subclass_of_protocolclass : Error<
-  "%0 cannot subclass %1 because it is a protocol class">;
-// @mulle-objc@ protocolclass diagnostics <
+// @mulle-objc@ mixin diagnostics >
+def err_mulle_mixin_conflict_class : Error<
+  "%0 was already forward-declared as a class; cannot redeclare as mixin">;
+def err_mulle_mixin_conflict_protocol : Error<
+  "%0 was already forward-declared as a protocol; cannot redeclare as mixin">;
+def err_mulle_class_conflicts_mixin : Error<
+  "%0 is a mixin; use @mixin for forward declaration">;
+def err_mulle_protocol_def_conflicts_mixin : Error<
+  "%0 is a mixin; use @mixin for definition">;
+def warn_mulle_protocol_fwd_after_mixin : Warning<
+  "%0 is a mixin; @protocol forward declaration is redundant">,
+  InGroup<MulleMixin>;
+def err_mulle_mixin_no_definition : Error<
+  "mixin %0 has no definition; add @mixin %0 ... @end before @implementation">;
+def err_mulle_subclass_of_mixin : Error<
+  "%0 cannot subclass %1 because it is a mixin">;
+// @mulle-objc@ mixin diagnostics <
 
 // @mulle-objc@ method_implementation diagnostics >
 def err_mulle_method_impl_not_in_implementation : Error<

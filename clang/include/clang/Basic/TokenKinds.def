@@ -864,11 +864,9 @@ OBJC_AT_KEYWORD(dynamic)
 OBJC_AT_KEYWORD(import)
 OBJC_AT_KEYWORD(available)
 
-// @mulle-objc@ protocolclass keywords >
-OBJC_AT_KEYWORD(protocol_class)           // forward declaration (like @class)
-OBJC_AT_KEYWORD(protocol_interface)       // protocol definition (like @interface)
-OBJC_AT_KEYWORD(protocol_implementation)  // implementation
-// @mulle-objc@ protocolclass keywords <
+// @mulle-objc@ mixin keywords >
+OBJC_AT_KEYWORD(mixin)                    // mixin forward declaration or definition
+// @mulle-objc@ mixin keywords <
 
 // @mulle-objc@ method_implementation keyword >
 OBJC_AT_KEYWORD(method_implementation)

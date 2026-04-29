@@ -1374,10 +1374,10 @@ class ObjCInterfaceDecl : public ObjCContainerDecl
   /// declarations. It will be set unless modules are enabled.
   llvm::PointerIntPair<DefinitionData *, 1, bool> Data;
 
-  // @mulle-objc@ protocolclass decl bit >
-  /// True if this class was declared with @protocolclass.
-  bool IsProtocolClassDecl = false;
-  // @mulle-objc@ protocolclass decl bit <
+  // @mulle-objc@ mixin decl bit >
+  /// True if this class was declared with @mixin.
+  bool IsMixinDecl = false;
+  // @mulle-objc@ mixin decl bit <
 
   ObjCInterfaceDecl(const ASTContext &C, DeclContext *DC, SourceLocation AtLoc,
                     const IdentifierInfo *Id, ObjCTypeParamList *typeParamList,
@@ -1463,10 +1463,10 @@ public:
   /// Returns true if this interface decl declares a designated initializer
   /// or it inherites one from its super class.
 
-  // @mulle-objc@ protocolclass bit >
-  bool isProtocolClass() const { return IsProtocolClassDecl; }
-  void setProtocolClass(bool V = true) { IsProtocolClassDecl = V; }
-  // @mulle-objc@ protocolclass bit <
+  // @mulle-objc@ mixin bit >
+  bool isMixin() const { return IsMixinDecl; }
+  void setMixin(bool V = true) { IsMixinDecl = V; }
+  // @mulle-objc@ mixin bit <
   bool declaresOrInheritsDesignatedInitializers() const {
     return hasDesignatedInitializers() || inheritsDesignatedInitializers();
   }

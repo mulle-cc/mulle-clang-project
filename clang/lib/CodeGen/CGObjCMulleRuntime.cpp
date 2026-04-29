@@ -677,10 +677,10 @@ namespace {
       llvm::StructType *ClassTy;
       /// ClassPtrTy - LLVM type for struct objc_class *.
       llvm::Type *ClassPtrTy;
-      /// ProtocolClassTy - LLVM type for struct _mulle_objc_loadprotocolclass.
-      llvm::StructType *ProtocolClassTy;
-      /// ProtocolClassPtrTy - LLVM type for struct _mulle_objc_loadprotocolclass *.
-      llvm::Type *ProtocolClassPtrTy;
+      /// MixinTy - LLVM type for struct _mulle_objc_loadmixin.
+      llvm::StructType *MixinTy;
+      /// MixinPtrTy - LLVM type for struct _mulle_objc_loadmixin *.
+      llvm::Type *MixinPtrTy;
       /// ClassExtensionTy - LLVM type for struct objc_class_ext.
       llvm::StructType *ClassExtensionTy;
       /// ClassExtensionPtrTy - LLVM type for struct objc_class_ext *.
@@ -968,8 +968,8 @@ namespace {
       /// DefinedClasses - List of defined classes.
       SmallVector<llvm::GlobalValue*, 16> DefinedClasses;
 
-      /// DefinedProtocolClasses - List of defined protocol classes.
-      SmallVector<llvm::GlobalValue*, 16> DefinedProtocolClasses;
+      /// DefinedMixins - List of defined protocol classes.
+      SmallVector<llvm::GlobalValue*, 16> DefinedMixins;
 
       /// ImplementedClasses - List of @implemented classes.
       SmallVector<const ObjCInterfaceDecl*, 16> ImplementedClasses;
@@ -1232,9 +1232,9 @@ namespace {
                                        const char *Section,
                                          ObjCProtocolDecl::protocol_iterator begin,
                                          ObjCProtocolDecl::protocol_iterator end);
-      /// EmitProtocolClassIDList - Generate the list of referenced
+      /// EmitMixinIDList - Generate the list of referenced
       /// protocol classes. The return value has type
-      llvm::Constant *EmitProtocolClassIDList(Twine Name,
+      llvm::Constant *EmitMixinIDList(Twine Name,
                                          const char *Section,
                                          ObjCProtocolDecl::protocol_iterator begin,
                                          ObjCProtocolDecl::protocol_iterator end);
@@ -1262,9 +1262,9 @@ namespace {
       llvm::Constant *EmitClassList(Twine Name,
                                     const char *Section,
                                     ArrayRef<llvm::Constant*> Classes);
-      llvm::Constant *EmitProtocolClassList(Twine Name,
+      llvm::Constant *EmitMixinList(Twine Name,
                                     const char *Section,
-                                    ArrayRef<llvm::Constant*> ProtocolClasses);
+                                    ArrayRef<llvm::Constant*> Mixins);
       llvm::Constant *EmitCategoryList(Twine Name,
                                        const char *Section,
                                        ArrayRef<llvm::Constant*> Categories);
@@ -1284,7 +1284,7 @@ namespace {
                                           const char *Section,
                                           llvm::Constant *Universe,
                                           llvm::Constant *ClassList,
-                                          llvm::Constant *ProtocolClassList,
+                                          llvm::Constant *MixinList,
                                           llvm::Constant *CategoryList,
                                           llvm::Constant *SuperList,
                                           llvm::Constant *StringList,
@@ -4873,7 +4873,7 @@ CGObjCMulleRuntime::EmitProtocolList(Twine Name,
    TODO: It would be nice to check that the class is a root class.
  */
 llvm::Constant *
-CGObjCMulleRuntime::EmitProtocolClassIDList(Twine Name,
+CGObjCMulleRuntime::EmitMixinIDList(Twine Name,
                                             const char *Section,
                                             ObjCProtocolDecl::protocol_iterator begin,
                                             ObjCProtocolDecl::protocol_iterator end)
@@ -4885,14 +4885,14 @@ CGObjCMulleRuntime::EmitProtocolClassIDList(Twine Name,
    for (; begin != end; ++begin)
    {
       identifier = (*begin)->getIdentifier();
-      // emit if the class is actually a @protocol_class
+      // emit if the class is actually a @mixin
       auto Results = CGM.getContext().getTranslationUnitDecl()->lookup(
                         DeclarationName( identifier));
       ObjCInterfaceDecl *IDecl = nullptr;
       for( auto *R : Results)
          if( (IDecl = dyn_cast<ObjCInterfaceDecl>( R)))
             break;
-      if( IDecl && IDecl->isProtocolClass())
+      if( IDecl && IDecl->isMixin())
       {
          classID = _HashConstantForString( identifier->getNameStart());
          ClassIds.push_back( classID);
@@ -5121,7 +5121,7 @@ llvm::Constant *CGObjCCommonMulleRuntime::GetSourceLocationDescription( SourceLo
 //      struct _mulle_objc_propertylist  *properties;
 //
 //      mulle_objc_protocolid_t          *protocolids;
-//      mulle_objc_classid_t             *protocolclassids;
+//      mulle_objc_classid_t             *mixinids;
 //   };
 void CGObjCMulleRuntime::GenerateCategory(const ObjCCategoryImplDecl *OCD) {
 //   unsigned Size = CGM.getDataLayout().getTypeAllocSize(ObjCTypes.CategoryTy);
@@ -5191,7 +5191,7 @@ void CGObjCMulleRuntime::GenerateCategory(const ObjCCategoryImplDecl *OCD) {
                        Section,
                        Category->protocol_begin(), Category->protocol_end());
       Values[ 9] =
-      EmitProtocolClassIDList("OBJC_CATEGORY_PROTOCOLCLASSES_" + ExtName.str(),
+      EmitMixinIDList("OBJC_CATEGORY_MIXINS_" + ExtName.str(),
                                Section,
                                Category->protocol_begin(), Category->protocol_end());
    }
@@ -5298,11 +5298,11 @@ void CGObjCMulleRuntime::GenerateClass(const ObjCImplementationDecl *ID) {
    llvm::array_pod_sort( InstanceMethods.begin(), InstanceMethods.end(),
                          uniqueid_comparator);
 
-   bool isProtocolClass = Interface->isProtocolClass();
+   bool isMixin = Interface->isMixin();
 
-   if( isProtocolClass)
+   if( isMixin)
    {
-//   struct _mulle_objc_loadprotocolclass
+//   struct _mulle_objc_loadmixin
 //   {
 //      struct _mulle_objc_loadclassbase  base;
 //   };
@@ -5330,14 +5330,14 @@ void CGObjCMulleRuntime::GenerateClass(const ObjCImplementationDecl *ID) {
 
       assert( i == sizeof( Values) / sizeof( llvm::Constant *));
 
-      llvm::Constant *Init = llvm::ConstantStruct::get(ObjCTypes.ProtocolClassTy,
+      llvm::Constant *Init = llvm::ConstantStruct::get(ObjCTypes.MixinTy,
                                                        Values);
       std::string Name("OBJC_CLASS_$_");
       Name += ClassName;
 
       llvm::GlobalVariable *GV = CGM.getModule().getGlobalVariable(Name, true);
       if (GV) {
-         assert(GV->getValueType() == ObjCTypes.ProtocolClassTy &&
+         assert(GV->getValueType() == ObjCTypes.MixinTy &&
               "Forward metaclass reference has incorrect type.");
          GV->setInitializer(Init);
          GV->setSection(Section);
@@ -5347,13 +5347,13 @@ void CGObjCMulleRuntime::GenerateClass(const ObjCImplementationDecl *ID) {
          GV = CreateMetadataVar(Name, Init, Section, CGM.getPointerAlign(), true, true);
 
       DeclaredClassNames.insert( ID->getIdentifier());
-      DefinedProtocolClasses.push_back(GV);
+      DefinedMixins.push_back(GV);
       ImplementedClasses.push_back(Interface);
    }
    else
    {
-      llvm::Constant *ProtocolClasses =
-      EmitProtocolClassIDList("OBJC_CLASS_PROTOCOLCLASSES_" + ID->getName(),
+      llvm::Constant *MixinList =
+      EmitMixinIDList("OBJC_CLASS_MIXINS_" + ID->getName(),
                         Section,
                          Interface->all_referenced_protocol_begin(),
                          Interface->all_referenced_protocol_end());
@@ -5383,7 +5383,7 @@ void CGObjCMulleRuntime::GenerateClass(const ObjCImplementationDecl *ID) {
 //      int                               fastclassindex;
 //      int                               instancesize;
 //      struct _mulle_objc_ivarlist       *instancevariables;
-//      mulle_objc_classid_t              *protocolclassids;
+//      mulle_objc_classid_t              *mixinids;
 //   };
 
       llvm::Constant *Values[15];
@@ -5451,7 +5451,7 @@ void CGObjCMulleRuntime::GenerateClass(const ObjCImplementationDecl *ID) {
 
       Values[ i++] = EmitIvarList( ID, Section, InstanceVariables, false);
 
-      Values[ i++] = ProtocolClasses;
+      Values[ i++] = MixinList;
 
       assert( i == sizeof( Values) / sizeof( llvm::Constant *));
 
@@ -5868,19 +5868,19 @@ llvm::Constant *CGObjCMulleRuntime::EmitClassList(Twine Name,
 }
 
 
-llvm::Constant *CGObjCMulleRuntime::EmitProtocolClassList(Twine Name,
+llvm::Constant *CGObjCMulleRuntime::EmitMixinList(Twine Name,
                                           const char *Section,
-                                          ArrayRef<llvm::Constant*> ProtocolClasses)
+                                          ArrayRef<llvm::Constant*> Mixins)
 {
    // Return null for empty list.
-   if (ProtocolClasses.empty())
+   if (Mixins.empty())
       return llvm::Constant::getNullValue( llvm::PointerType::get(CGM.getLLVMContext(), 0));
 
    llvm::Constant *Values[2];
-   Values[0] = llvm::ConstantInt::get(ObjCTypes.IntTy, ProtocolClasses.size());
-   llvm::ArrayType *AT = llvm::ArrayType::get(ObjCTypes.ProtocolClassPtrTy,
-                                              ProtocolClasses.size());
-   Values[1] = llvm::ConstantArray::get(AT, ProtocolClasses);
+   Values[0] = llvm::ConstantInt::get(ObjCTypes.IntTy, Mixins.size());
+   llvm::ArrayType *AT = llvm::ArrayType::get(ObjCTypes.MixinPtrTy,
+                                              Mixins.size());
+   Values[1] = llvm::ConstantArray::get(AT, Mixins);
    llvm::Constant *Init = llvm::ConstantStruct::getAnon(Values);
 
    llvm::GlobalVariable *GV = CreateMetadataVar( Name, Init, Section, CGM.getPointerAlign());
@@ -5976,7 +5976,7 @@ llvm::Constant *CGObjCMulleRuntime::EmitLoadInfoList(Twine Name,
                                                      const char *Section,
                                                      llvm::Constant *Universe,
                                                      llvm::Constant *ClassList,
-                                                     llvm::Constant *ProtocolClassList,
+                                                     llvm::Constant *MixinList,
                                                      llvm::Constant *CategoryList,
                                                      llvm::Constant *SuperList,
                                                      llvm::Constant *StringList,
@@ -6020,7 +6020,7 @@ llvm::Constant *CGObjCMulleRuntime::EmitLoadInfoList(Twine Name,
 
    Values[5] = Universe;
    Values[6] = ClassList;
-   Values[7] = ProtocolClassList;
+   Values[7] = MixinList;
    Values[8] = CategoryList;
    Values[9] = SuperList;
    Values[10] = StringList;
@@ -6045,7 +6045,7 @@ llvm::Function *CGObjCMulleRuntime::ModuleInitFunction() {
    llvm::Constant  *expr;
 
    SmallVector<llvm::Constant *, 16> LoadClasses;
-   SmallVector<llvm::Constant *, 16> LoadProtocolClasses;
+   SmallVector<llvm::Constant *, 16> LoadMixins;
    SmallVector<llvm::Constant *, 16> LoadCategories;
    SmallVector<llvm::Constant *, 16> LoadStrings;
    SmallVector<llvm::Constant *, 16> LoadSupers;
@@ -6058,10 +6058,10 @@ llvm::Function *CGObjCMulleRuntime::ModuleInitFunction() {
       LoadClasses.push_back( expr);
    }
 
-   for (auto *I : DefinedProtocolClasses)
+   for (auto *I : DefinedMixins)
    {
       expr = llvm::ConstantExpr::getBitCast( I, llvm::PointerType::get(CGM.getLLVMContext(), 0));
-      LoadProtocolClasses.push_back( expr);
+      LoadMixins.push_back( expr);
    }
 
    for (auto *I : DefinedCategories)
@@ -6127,7 +6127,7 @@ llvm::Function *CGObjCMulleRuntime::ModuleInitFunction() {
    // always emit to check for code compatability
    // supers w/o classes or categories are uninteresting
    //
-   if( ! LoadClasses.size() && ! LoadProtocolClasses.size() && ! LoadCategories.size() && \
+   if( ! LoadClasses.size() && ! LoadMixins.size() && ! LoadCategories.size() && \
        ! LoadStrings.size() && ! EmitHashes.size())
    {
       // if nothing is emitted, and no runtime versions has been set emit
@@ -6174,12 +6174,12 @@ llvm::Function *CGObjCMulleRuntime::ModuleInitFunction() {
 
   llvm::Constant *Universe          = EmitUniverse( "OBJC_UNIVERSE_LOAD", Section);
   llvm::Constant *ClassList         = EmitClassList( "OBJC_CLASS_LOADS", Section, LoadClasses);
-  llvm::Constant *ProtocolClassList = EmitProtocolClassList( "OBJC_PROTOCOLCLASS_LOADS", Section, LoadProtocolClasses);
+  llvm::Constant *MixinList = EmitMixinList( "OBJC_MIXIN_LOADS", Section, LoadMixins);
   llvm::Constant *CategoryList      = EmitCategoryList( "OBJC_CATEGORY_LOADS", Section, LoadCategories);
   llvm::Constant *SuperList         = EmitSuperList( "OBJC_SUPER_LOADS", Section, LoadSupers);
   llvm::Constant *StringList        = EmitStaticStringList( "OBJC_STATICSTRING_LOADS", Section, LoadStrings);
   llvm::Constant *HashNameList      = EmitHashNameList( "OBJC_HASHNAME_LOADS", Section, EmitHashes);
-  llvm::Constant *LoadInfo          = EmitLoadInfoList( "OBJC_LOAD_INFO", Section, Universe, ClassList, ProtocolClassList, CategoryList, SuperList, StringList, HashNameList, FileName);
+  llvm::Constant *LoadInfo          = EmitLoadInfoList( "OBJC_LOAD_INFO", Section, Universe, ClassList, MixinList, CategoryList, SuperList, StringList, HashNameList, FileName);
 
    // take collected initializers and create a __attribute__(constructor)
    // static void   __load_mulle_objc() function
@@ -7713,7 +7713,7 @@ ObjCTypesHelper::ObjCTypesHelper(CodeGen::CodeGenModule &cgm)
 //      int                               fastclassindex;
 //      int                               instancesize;
 //      struct _mulle_objc_ivarlist       *instancevariables;
-//      mulle_objc_classid_t              *protocolclassids;
+//      mulle_objc_classid_t              *mixinids;
 //   };
 
    ClassTy->setBody(
@@ -7732,18 +7732,18 @@ ObjCTypesHelper::ObjCTypesHelper(CodeGen::CodeGenModule &cgm)
                     IntTy,             // fastclassindex
                     IntTy,             // instancesize
                     IvarListPtrTy,     // instancevariables
-                    ClassIDPtrTy       // protocolclassids
+                    ClassIDPtrTy       // mixinids
                     });
 
    ClassPtrTy = llvm::PointerType::get(CGM.getLLVMContext(), 0);
 
-//   struct _mulle_objc_loadprotocolclass
+//   struct _mulle_objc_loadmixin
 //   {
 //      struct _mulle_objc_loadclassbase  base;
 //   };
 
-   ProtocolClassTy = llvm::StructType::create(VMContext, "struct._mulle_objc_loadprotocolclass");
-   ProtocolClassTy->setBody(
+   MixinTy = llvm::StructType::create(VMContext, "struct._mulle_objc_loadmixin");
+   MixinTy->setBody(
                     {ClassIDTy,         // base.classid
                     Int8PtrTy,         // base.classname
                     MethodListPtrTy,   // base.classmethods
@@ -7753,7 +7753,7 @@ ObjCTypesHelper::ObjCTypesHelper(CodeGen::CodeGenModule &cgm)
                     Int8PtrTy          // base.origin
                     });
 
-   ProtocolClassPtrTy = llvm::PointerType::get(CGM.getLLVMContext(), 0);
+   MixinPtrTy = llvm::PointerType::get(CGM.getLLVMContext(), 0);
 
 
 //   struct _mulle_objc_loadcategory
@@ -7770,7 +7770,7 @@ ObjCTypesHelper::ObjCTypesHelper(CodeGen::CodeGenModule &cgm)
 //      struct _mulle_objc_propertylist   *properties;
 //
 //      struct _mulle_objc_protocollist   *protocols;
-//      mulle_objc_classid_t              *protocolclassids;
+//      mulle_objc_classid_t              *mixinids;
 //
 //      char                              *origin;
 //   };

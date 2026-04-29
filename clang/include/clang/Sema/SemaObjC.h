@@ -253,7 +253,7 @@ public:
       Decl *const *ProtoRefs, unsigned NumProtoRefs,
       const SourceLocation *ProtoLocs, SourceLocation EndProtoLoc,
       const ParsedAttributesView &AttrList, SkipBodyInfo *SkipBody,
-      bool AllowProtocolClassName = false);
+      bool AllowMixinName = false);
 
   void ActOnSuperClassOfClassInterface(
       Scope *S, SourceLocation AtInterfaceLoc, ObjCInterfaceDecl *IDecl,
@@ -282,9 +282,9 @@ public:
       unsigned NumProtoRefs, const SourceLocation *ProtoLocs,
       SourceLocation EndProtoLoc, const ParsedAttributesView &AttrList,
       SkipBodyInfo *SkipBody,
-      // @mulle-objc@ protocolclass param >
-      bool IsProtocolClass = false
-      // @mulle-objc@ protocolclass param <
+      // @mulle-objc@ mixin param >
+      bool IsMixin = false
+      // @mulle-objc@ mixin param <
       );
 
   ObjCCategoryDecl *ActOnStartCategoryInterface(
@@ -315,16 +315,12 @@ public:
                                   ArrayRef<IdentifierLoc> IdentList,
                                   const ParsedAttributesView &attrList);
 
-  // @mulle-objc@ protocolclass sema declarations >
+  // @mulle-objc@ mixin sema declarations >
   DeclGroupPtrTy
-  ActOnProtocolClassForwardDeclaration(SourceLocation AtLoc,
+  ActOnMixinForwardDeclaration(SourceLocation AtLoc,
                                        ArrayRef<IdentifierLoc> IdentList,
                                        const ParsedAttributesView &AttrList);
-
-  ObjCImplementationDecl *ActOnStartProtocolImplementation(
-      SourceLocation AtLoc, const IdentifierInfo *ClassName,
-      SourceLocation ClassLoc, const ParsedAttributesView &Attrs);
-  // @mulle-objc@ protocolclass sema declarations <
+  // @mulle-objc@ mixin sema declarations <
 
   // @mulle-objc@ method_implementation sema declaration >
   Decl *ActOnMethodImplementationAlias(

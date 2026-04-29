@@ -39,7 +39,7 @@ class MulleObjCDepsEmitter : public ASTConsumer {
 
   struct Entry {
     std::string ClassName;
-    std::string CategoryName; // empty for plain class / protocolclass impls
+    std::string CategoryName; // empty for plain class / mixin impls
   };
   std::vector<Entry> Entries;
 

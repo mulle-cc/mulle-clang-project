@@ -2450,18 +2450,18 @@ ExprResult SemaObjC::ActOnSuperMessage(Scope *S, SourceLocation SuperLoc,
     // message to the superclass instance.
     SuperTy = Context.getObjCObjectPointerType(SuperTy);
 
-    // @mulle-objc@ protocolclass super lookup >
-    // Check protocolclasses that Class directly conforms to before
+    // @mulle-objc@ mixin super lookup >
+    // Check mixins that Class directly conforms to before
     // falling back to the superclass lookup. This suppresses false
     // "method not found" warnings when the method is provided by a
-    // protocolclass default implementation.
+    // mixin default implementation.
     ObjCMethodDecl *ProtoClassMethod = nullptr;
     for (auto *Proto : Class->protocols()) {
       NamedDecl *PD = SemaRef.LookupSingleName(
           SemaRef.TUScope, Proto->getIdentifier(),
           SuperLoc, Sema::LookupOrdinaryName);
       if (auto *IDecl = dyn_cast_or_null<ObjCInterfaceDecl>(PD)) {
-        if (IDecl->isProtocolClass()) {
+        if (IDecl->isMixin()) {
           if (ObjCMethodDecl *M = IDecl->lookupInstanceMethod(Sel)) {
             ProtoClassMethod = M;
             break;
@@ -2475,7 +2475,7 @@ ExprResult SemaObjC::ActOnSuperMessage(Scope *S, SourceLocation SuperLoc,
         }
       }
     }
-    // @mulle-objc@ protocolclass super lookup <
+    // @mulle-objc@ mixin super lookup <
 
     return BuildInstanceMessage(nullptr, SuperTy, SuperLoc,
                                 Sel, ProtoClassMethod,
@@ -2485,14 +2485,14 @@ ExprResult SemaObjC::ActOnSuperMessage(Scope *S, SourceLocation SuperLoc,
   // Since we are in a class method, this is a class message to
   // the superclass.
 
-  // @mulle-objc@ protocolclass super lookup class >
+  // @mulle-objc@ mixin super lookup class >
   ObjCMethodDecl *ProtoClassMethod = nullptr;
   for (auto *Proto : Class->protocols()) {
     NamedDecl *PD = SemaRef.LookupSingleName(
         SemaRef.TUScope, Proto->getIdentifier(),
         SuperLoc, Sema::LookupOrdinaryName);
     if (auto *IDecl = dyn_cast_or_null<ObjCInterfaceDecl>(PD)) {
-      if (IDecl->isProtocolClass()) {
+      if (IDecl->isMixin()) {
         if (ObjCMethodDecl *M = IDecl->lookupClassMethod(Sel)) {
           ProtoClassMethod = M;
           break;
@@ -2506,7 +2506,7 @@ ExprResult SemaObjC::ActOnSuperMessage(Scope *S, SourceLocation SuperLoc,
       }
     }
   }
-  // @mulle-objc@ protocolclass super lookup class <
+  // @mulle-objc@ mixin super lookup class <
 
   return BuildClassMessage(/*ReceiverTypeInfo=*/nullptr,
                            SuperTy,
