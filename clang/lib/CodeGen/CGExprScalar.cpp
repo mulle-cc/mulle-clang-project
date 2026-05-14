@@ -965,6 +965,11 @@ public:
   Value *VisitObjCBoxedExpr(ObjCBoxedExpr *E) {
     return CGF.EmitObjCBoxedExpr(E);
   }
+  // @mulle-objc@ @signature >
+  Value *VisitObjCSignatureExpr(const ObjCSignatureExpr *E) {
+    return CGF.EmitObjCSignatureExpr(E);
+  }
+  // @mulle-objc@ @signature <
   Value *VisitObjCArrayLiteral(ObjCArrayLiteral *E) {
     return CGF.EmitObjCArrayLiteral(E);
   }

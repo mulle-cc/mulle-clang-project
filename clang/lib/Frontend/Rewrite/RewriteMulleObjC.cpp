@@ -544,7 +544,7 @@ public:
       LOS << "\nstatic struct {\n"
           << "   unsigned int n_loadstrings;\n"
           << "   struct _mulle_objc_object *loadstrings[" << NSStringPtrs.size() << "];\n"
-          << "} OBJC_STATICSTRING_LOADS __attribute__((used, section(\".data.objc.objc_load_info\"))) = {\n"
+          << "} OBJC_STATICINSTANCE_LOADS __attribute__((used, section(\".data.objc.objc_load_info\"))) = {\n"
           << "   " << NSStringPtrs.size() << ",\n   {";
       for (unsigned i = 0; i < NSStringPtrs.size(); ++i) {
         if (i) LOS << ",";
@@ -616,7 +616,7 @@ public:
         << "   .loadmixinlist    = " << (hasMixins ? "(struct _mulle_objc_loadmixinlist *) &OBJC_MIXIN_LOADS" : "0") << ",\n"
         << "   .loadcategorylist         = " << (hasCategories      ? "(struct _mulle_objc_loadcategorylist *) &OBJC_CATEGORY_LOADS" : "0") << ",\n"
         << "   .loadsuperlist            = " << (LoadSupers.empty()     ? "0" : "(struct _mulle_objc_superlist *) &OBJC_SUPER_LOADS") << ",\n"
-        << "   .loadstringlist           = " << (NSStringPtrs.empty()   ? "0" : "(struct _mulle_objc_loadstringlist *) &OBJC_STATICSTRING_LOADS") << ",\n"
+        << "   .loadstringlist           = " << (NSStringPtrs.empty()   ? "0" : "(struct _mulle_objc_loadstringlist *) &OBJC_STATICINSTANCE_LOADS") << ",\n"
         << "   .loadhashedstringlist     = " << ((hasClasses || hasMixins) ? "(struct _mulle_objc_loadhashedstringlist *) &OBJC_HASHNAME_LOADS" : "0") << ",\n"
         // @mulle-objc@ origin >
         << "#ifndef __OPTIMIZE__\n"
@@ -672,6 +672,7 @@ private:
   std::string EmitHashNameList();
   void RewriteStringLiteral(ObjCStringLiteral *E);
   void RewriteSelectorExpr(ObjCSelectorExpr *E);
+  void RewriteSignatureExpr(ObjCSignatureExpr *E); // @mulle-objc@
 
   // Helper: replace source range with text
   void ReplaceText(SourceRange R, StringRef Text) {
@@ -837,6 +838,10 @@ void RewriteMulleObjC::RewriteStmt(Stmt *S) {
     RewriteStringLiteral(E);
   else if (auto *E = dyn_cast<ObjCSelectorExpr>(S))
     RewriteSelectorExpr(E);
+  // @mulle-objc@ @signature >
+  else if (auto *E = dyn_cast<ObjCSignatureExpr>(S))
+    RewriteSignatureExpr(E);
+  // @mulle-objc@ @signature <
   else if (auto *RS = dyn_cast<ReturnStmt>(S))
     RewriteReturnStmt(RS);
   else if (auto *EE = dyn_cast<ObjCEncodeExpr>(S)) {
@@ -2130,6 +2135,59 @@ void RewriteMulleObjC::RewriteStringLiteral(ObjCStringLiteral *E) {
 
   ReplaceText(E->getSourceRange(), OS.str());
 }
+
+// @mulle-objc@ @signature >
+void RewriteMulleObjC::RewriteSignatureExpr(ObjCSignatureExpr *E) {
+  StringRef Encoding = E->getTypeEncoding();
+  uint32_t  Bits     = E->getBits();
+  uint16_t  Count    = E->getCount();
+
+  std::string Out;
+  llvm::raw_string_ostream OS(Out);
+
+  std::string VarName = "__nssig_" + std::to_string(NSStringCount++);
+  std::string Def;
+  llvm::raw_string_ostream DS(Def);
+
+  // Emit the encoding string as a separate static so VarName._types points to it.
+  std::string TypesName = VarName + "_types";
+  DS << "static const char " << TypesName << "[] = \"";
+  for (char c : Encoding) { if (c == '"' || c == '\\') DS << '\\'; DS << c; }
+  DS << "\";\n";
+
+  // Emit the _NSConstantMethodSignature struct with TAO-conditional layout.
+  // Without TAO: { intptr_t _rc; void *_isa; uint32_t _bits; uint16_t _count; uint16_t _extra; const char *_types; void *_infos; }
+  // With TAO: two extra void* prepended.
+  DS << "#ifdef __MULLE_OBJC_TAO__\n"
+     << "static struct { void *_tao0; void *_tao1; intptr_t _rc; void *_isa;"
+     << " unsigned int _bits; unsigned short _count; unsigned short _extra;"
+     << " const char *_types; void *_infos; } " << VarName << " = {\n"
+     << "   (void *) 0, (void *) 0,\n";
+  DS << "   (intptr_t) 0x";
+  DS.write_hex((uint64_t)(INTPTR_MAX - 1));
+  DS << ", (void *) 4,\n"
+     << "   " << Bits << "u, " << Count << "u, 0u,\n"
+     << "   " << TypesName << ", (void *) 0\n"
+     << "};\n"
+     << "#else\n"
+     << "static struct { intptr_t _rc; void *_isa;"
+     << " unsigned int _bits; unsigned short _count; unsigned short _extra;"
+     << " const char *_types; void *_infos; } " << VarName << " = {\n";
+  DS << "   (intptr_t) 0x";
+  DS.write_hex((uint64_t)(INTPTR_MAX - 1));
+  DS << ", (void *) 4,\n"
+     << "   " << Bits << "u, " << Count << "u, 0u,\n"
+     << "   " << TypesName << ", (void *) 0\n"
+     << "};\n"
+     << "#endif\n";
+
+  NSStringPtrs.push_back("(struct _mulle_objc_object *) &" + VarName + "._bits");
+  NSStringDefs += Def;
+  OS << "((void *) &" << VarName << "._bits) /* @signature(" << Encoding << ") */";
+
+  ReplaceText(E->getSourceRange(), OS.str());
+}
+// @mulle-objc@ @signature <
 
 } // anonymous namespace
 

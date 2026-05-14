@@ -312,6 +312,9 @@ public:
   VisitCXXDependentScopeMemberExpr(const CXXDependentScopeMemberExpr *Node);
   void VisitObjCAtCatchStmt(const ObjCAtCatchStmt *Node);
   void VisitObjCEncodeExpr(const ObjCEncodeExpr *Node);
+  // @mulle-objc@ @signature >
+  void VisitObjCSignatureExpr(const ObjCSignatureExpr *Node);
+  // @mulle-objc@ @signature <
   void VisitObjCMessageExpr(const ObjCMessageExpr *Node);
   void VisitObjCBoxedExpr(const ObjCBoxedExpr *Node);
   void VisitObjCSelectorExpr(const ObjCSelectorExpr *Node);

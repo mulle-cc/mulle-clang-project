@@ -2963,6 +2963,10 @@ DEF_TRAVERSE_STMT(ObjCEncodeExpr, {
     TRY_TO(TraverseTypeLoc(TInfo->getTypeLoc()));
 })
 
+// @mulle-objc@ @signature >
+DEF_TRAVERSE_STMT(ObjCSignatureExpr, {})
+// @mulle-objc@ @signature <
+
 DEF_TRAVERSE_STMT(ObjCIsaExpr, {})
 DEF_TRAVERSE_STMT(ObjCIvarRefExpr, {})
 

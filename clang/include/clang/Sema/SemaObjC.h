@@ -745,6 +745,33 @@ public:
                                          SourceLocation RParenLoc,
                                          bool WarnMultipleSelectors);
 
+  // @mulle-objc@ @signature >
+  /// ParseObjCSignatureExpression - Build signature expression for \@signature
+  ExprResult ParseObjCSignatureExpression(Selector Sel, SourceLocation AtLoc,
+                                          SourceLocation SigLoc,
+                                          SourceLocation LParenLoc,
+                                          SourceLocation RParenLoc);
+
+  /// ParseObjCSignatureExpressionFromPrototype - Build signature expression
+  /// from an ObjCMethodDecl parsed for @signature prototype form.
+  ExprResult ActOnSignatureFromMethodDecl(ObjCMethodDecl *Method,
+                                          SourceLocation AtLoc,
+                                          SourceLocation SigLoc,
+                                          SourceLocation LParenLoc,
+                                          SourceLocation RParenLoc);
+
+  /// ActOnMethodDeclarationForSignature - Create a temporary ObjCMethodDecl
+  /// for use by @signature prototype parsing.  Does not require an ObjC
+  /// container context; uses TUDecl as the declaration context.
+  ObjCMethodDecl *ActOnMethodDeclarationForSignature(
+      Scope *S, SourceLocation MethodLoc, SourceLocation EndLoc,
+      tok::TokenKind MethodType, ObjCDeclSpec &ReturnQT, ParsedType ReturnType,
+      ArrayRef<SourceLocation> SelectorLocs, Selector Sel,
+      ParmVarDecl **ArgInfo, DeclaratorChunk::ParamInfo *CParamInfo,
+      unsigned CNumArgs, const ParsedAttributesView &AttrList,
+      bool isVariadic);
+  // @mulle-objc@ @signature <
+
   /// ParseObjCProtocolExpression - Build protocol expression for \@protocol
   ExprResult ParseObjCProtocolExpression(IdentifierInfo *ProtocolName,
                                          SourceLocation AtLoc,

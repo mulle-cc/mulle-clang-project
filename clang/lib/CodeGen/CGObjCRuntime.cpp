@@ -18,6 +18,9 @@
 #include "CGRecordLayout.h"
 #include "CodeGenFunction.h"
 #include "CodeGenModule.h"
+// @mulle-objc@ @signature >
+#include "clang/AST/ExprObjC.h"
+// @mulle-objc@ @signature <
 #include "clang/AST/RecordLayout.h"
 #include "clang/AST/StmtObjC.h"
 #include "clang/CodeGen/CGFunctionInfo.h"
@@ -522,6 +525,14 @@ llvm::Constant  *CGObjCRuntime::GenerateConstantProtocol( ObjCProtocolDecl *prot
    // shouldn't be called for non-participating runtimes
    return( nullptr);
 }
+
+// @mulle-objc@ @signature >
+llvm::Constant *CGObjCRuntime::GenerateConstantSignature(const ObjCSignatureExpr *E)
+{
+   // shouldn't be called for non-participating runtimes
+   return( nullptr);
+}
+// @mulle-objc@ @signature <
 // @mulle-objc@ MetaABI: to generate LLVM method argument list <
 
 

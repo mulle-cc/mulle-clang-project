@@ -5770,10 +5770,12 @@ private:
   ///     __attribute__((unused))
   /// \endverbatim
   ///
+  // @mulle-objc@ @signature >
   Decl *ParseObjCMethodDecl(
       SourceLocation mLoc, tok::TokenKind mType,
       tok::ObjCKeywordKind MethodImplKind = tok::objc_not_keyword,
-      bool MethodDefinition = true);
+      bool MethodDefinition = true, bool ForSignature = false);
+  // @mulle-objc@ @signature <
 
   ///   Parse property attribute declarations.
   ///
@@ -5856,6 +5858,14 @@ private:
   ///      \@encode ( type-name )
   /// \endverbatim
   ExprResult ParseObjCEncodeExpression(SourceLocation AtLoc);
+
+  // @mulle-objc@ @signature >
+  /// \verbatim
+  ///     objc-signature-expression
+  ///       \@signature ( objc-selector )
+  /// \endverbatim
+  ExprResult ParseObjCSignatureExpression(SourceLocation AtLoc);
+  // @mulle-objc@ @signature <
 
   /// \verbatim
   ///     objc-selector-expression

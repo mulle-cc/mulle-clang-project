@@ -2827,6 +2827,12 @@ void StmtPrinter::VisitObjCEncodeExpr(ObjCEncodeExpr *Node) {
   OS << ')';
 }
 
+// @mulle-objc@ @signature >
+void StmtPrinter::VisitObjCSignatureExpr(ObjCSignatureExpr *Node) {
+  OS << "@signature(" << Node->getTypeEncoding() << ')';
+}
+// @mulle-objc@ @signature <
+
 void StmtPrinter::VisitObjCSelectorExpr(ObjCSelectorExpr *Node) {
   OS << "@selector(";
   Node->getSelector().print(OS);

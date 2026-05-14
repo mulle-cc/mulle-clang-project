@@ -55,6 +55,9 @@ class ObjCProtocolDecl;
 class Selector;
 class ObjCIvarDecl;
 class ObjCStringLiteral;
+// @mulle-objc@ @signature >
+class ObjCSignatureExpr;
+// @mulle-objc@ @signature <
 class BlockDeclRefExpr;
 
 namespace CodeGen {
@@ -165,6 +168,10 @@ public:
    /// Generate a constant selector for participating runtimes
   virtual llvm::Constant  *GenerateConstantSelector(Selector);
   virtual llvm::Constant  *GenerateConstantProtocol(ObjCProtocolDecl *protocol);
+  // @mulle-objc@ @signature >
+  /// Generate a constant method signature object. (@signature)
+  virtual llvm::Constant  *GenerateConstantSignature(const ObjCSignatureExpr *E);
+  // @mulle-objc@ @signature <
    // @mulle-objc@: emit constant selectors <-
 
   /// Generate a category.  A category contains a list of methods (and

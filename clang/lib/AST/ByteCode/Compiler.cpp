@@ -2647,6 +2647,16 @@ bool Compiler<Emitter>::VisitObjCEncodeExpr(const ObjCEncodeExpr *E) {
   return this->delegate(SL);
 }
 
+// @mulle-objc@ @signature >
+template <class Emitter>
+bool Compiler<Emitter>::VisitObjCSignatureExpr(const ObjCSignatureExpr *E) {
+  // @signature produces an object pointer; constant evaluation not supported.
+  if (DiscardResult)
+    return true;
+  return this->emitDummyPtr(E, E);
+}
+// @mulle-objc@ @signature <
+
 template <class Emitter>
 bool Compiler<Emitter>::VisitSYCLUniqueStableNameExpr(
     const SYCLUniqueStableNameExpr *E) {

@@ -2099,6 +2099,9 @@ static bool IsGlobalLValue(APValue::LValueBase B) {
   case Expr::PredefinedExprClass:
   case Expr::ObjCStringLiteralClass:
   case Expr::ObjCEncodeExprClass:
+  // @mulle-objc@ @signature >
+  case Expr::ObjCSignatureExprClass:
+  // @mulle-objc@ @signature <
     return true;
   case Expr::ObjCBoxedExprClass:
     return cast<ObjCBoxedExpr>(E)->isExpressibleAsConstantInitializer();
@@ -9505,6 +9508,9 @@ public:
         E, 0, Info.getASTContext().getNextStringLiteralVersion()));
   }
   bool VisitObjCEncodeExpr(const ObjCEncodeExpr *E) { return Success(E); }
+  // @mulle-objc@ @signature >
+  bool VisitObjCSignatureExpr(const ObjCSignatureExpr *E) { return false; }
+  // @mulle-objc@ @signature <
   bool VisitCXXTypeidExpr(const CXXTypeidExpr *E);
   bool VisitCXXUuidofExpr(const CXXUuidofExpr *E);
   bool VisitArraySubscriptExpr(const ArraySubscriptExpr *E);
@@ -21247,6 +21253,9 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
   case Expr::ObjCArrayLiteralClass:
   case Expr::ObjCDictionaryLiteralClass:
   case Expr::ObjCEncodeExprClass:
+  // @mulle-objc@ @signature >
+  case Expr::ObjCSignatureExprClass:
+  // @mulle-objc@ @signature <
   case Expr::ObjCMessageExprClass:
   // @mulle-objc@ uniqueid: make @selector() and @protocol() constants integers >
     return ICEDiag(IK_NotICE, E->getBeginLoc());

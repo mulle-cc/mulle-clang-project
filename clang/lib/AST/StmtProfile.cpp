@@ -2430,6 +2430,13 @@ void StmtProfiler::VisitObjCEncodeExpr(const ObjCEncodeExpr *S) {
   VisitType(S->getEncodedType());
 }
 
+// @mulle-objc@ @signature >
+void StmtProfiler::VisitObjCSignatureExpr(const ObjCSignatureExpr *S) {
+  VisitExpr(S);
+  ID.AddString(S->getTypeEncoding());
+}
+// @mulle-objc@ @signature <
+
 void StmtProfiler::VisitObjCSelectorExpr(const ObjCSelectorExpr *S) {
   VisitExpr(S);
   VisitName(S->getSelector());

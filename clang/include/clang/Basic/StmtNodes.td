@@ -185,6 +185,9 @@ def ObjCBoxedExpr : StmtNode<Expr>;
 def ObjCArrayLiteral : StmtNode<Expr>;
 def ObjCDictionaryLiteral : StmtNode<Expr>;
 def ObjCEncodeExpr : StmtNode<Expr>;
+// @mulle-objc@ @signature >
+def ObjCSignatureExpr : StmtNode<Expr>;
+// @mulle-objc@ @signature <
 def ObjCMessageExpr : StmtNode<Expr>;
 def ObjCSelectorExpr : StmtNode<Expr>;
 def ObjCProtocolExpr : StmtNode<Expr>;

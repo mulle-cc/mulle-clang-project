@@ -1273,6 +1273,12 @@ void JSONNodeDumper::VisitObjCEncodeExpr(const ObjCEncodeExpr *OEE) {
   JOS.attribute("encodedType", createQualType(OEE->getEncodedType()));
 }
 
+// @mulle-objc@ @signature >
+void JSONNodeDumper::VisitObjCSignatureExpr(const ObjCSignatureExpr *E) {
+  JOS.attribute("typeEncoding", E->getTypeEncoding());
+}
+// @mulle-objc@ @signature <
+
 void JSONNodeDumper::VisitObjCMessageExpr(const ObjCMessageExpr *OME) {
   std::string Str;
   llvm::raw_string_ostream OS(Str);

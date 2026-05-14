@@ -1785,6 +1785,11 @@ enum StmtCode {
   /// An ObjCEncodeExpr record.
   EXPR_OBJC_ENCODE,
 
+  // @mulle-objc@ @signature >
+  /// An ObjCSignatureExpr record.
+  EXPR_OBJC_SIGNATURE_EXPR,
+  // @mulle-objc@ @signature <
+
   /// An ObjCSelectorExpr record.
   EXPR_OBJC_SELECTOR_EXPR,
 

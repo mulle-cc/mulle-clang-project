@@ -1687,6 +1687,14 @@ def warn_undeclared_selector : Warning<
 def warn_undeclared_selector_with_typo : Warning<
   "undeclared selector %0; did you mean %1?">,
   InGroup<UndeclaredSelector>, DefaultIgnore;
+// @mulle-objc@ @signature >
+def err_signature_undeclared_selector : Error<
+  "@signature: undeclared selector %0">;
+def err_signature_ambiguous_selector : Error<
+  "@signature: ambiguous selector %0; use a full method prototype to disambiguate">;
+def err_signature_not_available : Error<
+  "@signature is only available with the mulle-objc runtime">;
+// @mulle-objc@ @signature <
 def warn_implicit_atomic_property : Warning<
   "property is assumed atomic by default">, InGroup<ImplicitAtomic>, DefaultIgnore;
 def note_auto_readonly_iboutlet_fixup_suggest : Note<

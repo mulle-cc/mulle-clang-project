@@ -4986,6 +4986,9 @@ public:
   llvm::Value *EmitObjCProtocolExpr(const ObjCProtocolExpr *E);
   llvm::Value *EmitObjCStringLiteral(const ObjCStringLiteral *E);
   llvm::Value *EmitObjCBoxedExpr(const ObjCBoxedExpr *E);
+  // @mulle-objc@ @signature >
+  llvm::Value *EmitObjCSignatureExpr(const ObjCSignatureExpr *E);
+  // @mulle-objc@ @signature <
   llvm::Value *EmitObjCArrayLiteral(const ObjCArrayLiteral *E);
   llvm::Value *EmitObjCDictionaryLiteral(const ObjCDictionaryLiteral *E);
   llvm::Value *

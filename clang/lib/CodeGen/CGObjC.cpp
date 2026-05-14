@@ -59,6 +59,15 @@ llvm::Value *CodeGenFunction::EmitObjCStringLiteral(const ObjCStringLiteral *E)
   return C;
 }
 
+// @mulle-objc@ @signature >
+llvm::Value *
+CodeGenFunction::EmitObjCSignatureExpr(const ObjCSignatureExpr *E) {
+  llvm::Constant *C =
+      CGM.getObjCRuntime().GenerateConstantSignature(E);
+  return C;
+}
+// @mulle-objc@ @signature <
+
 /// EmitObjCBoxedExpr - This routine generates code to call
 /// the appropriate expression boxing method. This will either be
 /// one of +[NSNumber numberWith<Type>:], or +[NSString stringWithUTF8String:],

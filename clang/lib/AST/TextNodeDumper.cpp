@@ -1867,6 +1867,12 @@ void TextNodeDumper::VisitObjCEncodeExpr(const ObjCEncodeExpr *Node) {
   dumpType(Node->getEncodedType());
 }
 
+// @mulle-objc@ @signature >
+void TextNodeDumper::VisitObjCSignatureExpr(const ObjCSignatureExpr *Node) {
+  OS << " \"" << Node->getTypeEncoding() << '"';
+}
+// @mulle-objc@ @signature <
+
 void TextNodeDumper::VisitObjCSelectorExpr(const ObjCSelectorExpr *Node) {
   OS << " ";
   Node->getSelector().print(OS);

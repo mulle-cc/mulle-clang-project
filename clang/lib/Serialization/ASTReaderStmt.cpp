@@ -57,6 +57,9 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+// @mulle-objc@ @signature >
+#include <cstring>
+// @mulle-objc@ @signature <
 #include <optional>
 #include <string>
 
@@ -1531,6 +1534,21 @@ void ASTStmtReader::VisitObjCEncodeExpr(ObjCEncodeExpr *E) {
   E->setAtLoc(readSourceLocation());
   E->setRParenLoc(readSourceLocation());
 }
+
+// @mulle-objc@ @signature >
+void ASTStmtReader::VisitObjCSignatureExpr(ObjCSignatureExpr *E) {
+  VisitExpr(E);
+  std::string Enc = Record.readString();
+  ASTContext &Ctx = Record.getContext();
+  char *Buf = new (Ctx) char[Enc.size() + 1];
+  std::memcpy(Buf, Enc.c_str(), Enc.size() + 1);
+  E->setTypeEncoding(Buf);
+  E->setBits((uint32_t) Record.readInt());
+  E->setCount((uint16_t) Record.readInt());
+  E->setAtLoc(readSourceLocation());
+  E->setRParenLoc(readSourceLocation());
+}
+// @mulle-objc@ @signature <
 
 void ASTStmtReader::VisitObjCSelectorExpr(ObjCSelectorExpr *E) {
   VisitExpr(E);
@@ -3479,6 +3497,12 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
     case EXPR_OBJC_ENCODE:
       S = new (Context) ObjCEncodeExpr(Empty);
       break;
+
+    // @mulle-objc@ @signature >
+    case EXPR_OBJC_SIGNATURE_EXPR:
+      S = new (Context) ObjCSignatureExpr(Empty);
+      break;
+    // @mulle-objc@ @signature <
 
     case EXPR_OBJC_SELECTOR_EXPR:
       S = new (Context) ObjCSelectorExpr(Empty);

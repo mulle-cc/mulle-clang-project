@@ -4968,6 +4968,9 @@ recurse:
   case Expr::ExtVectorElementExprClass:
   case Expr::GenericSelectionExprClass:
   case Expr::ObjCEncodeExprClass:
+  // @mulle-objc@ @signature >
+  case Expr::ObjCSignatureExprClass:
+  // @mulle-objc@ @signature <
   case Expr::ObjCIsaExprClass:
   case Expr::ObjCIvarRefExprClass:
   case Expr::ObjCMessageExprClass:

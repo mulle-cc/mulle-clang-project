@@ -1410,6 +1410,125 @@ ExprResult SemaObjC::ParseObjCSelectorExpression(Selector Sel,
   return new (Context) ObjCSelectorExpr(Ty, Sel, AtLoc, RParenLoc);
 }
 
+// @mulle-objc@ @signature >
+
+// Compute metaABI rType/pType bits (bits 22-25) from a method declaration.
+// Encoding matches MulleObjCMetaABIType: VoidPointer=0, Void=1, ParameterBlock=2.
+static uint32_t ComputeMetaABIBitsForMethod(ASTContext &Context,
+                                             const ObjCMethodDecl *Method) {
+  // rType: what kind of metaABI slot holds the return value
+  unsigned rType;
+  QualType RetTy = Method->getReturnType();
+  if (RetTy->isVoidType())
+    rType = 1; // Void
+  else if (Context.typeNeedsMetaABIAlloca(RetTy, /*isParam=*/false))
+    rType = 2; // ParameterBlock
+  else
+    rType = 0; // VoidPointer
+
+  // pType: what kind of metaABI slot holds the parameters
+  unsigned pType;
+  if (Method->isVariadic())
+    pType = 2; // ParameterBlock
+  else if (Method->param_size() == 0)
+    pType = 1; // Void
+  else if (Method->param_size() == 1 &&
+           !Context.typeNeedsMetaABIAlloca(
+               (*Method->param_begin())->getType(), /*isParam=*/true))
+    pType = 0; // VoidPointer
+  else
+    pType = 2; // ParameterBlock
+
+  return (rType << 22) | (pType << 24);
+}
+
+ExprResult SemaObjC::ParseObjCSignatureExpression(Selector Sel,
+                                                  SourceLocation AtLoc,
+                                                  SourceLocation SigLoc,
+                                                  SourceLocation LParenLoc,
+                                                  SourceLocation RParenLoc) {
+  ASTContext &Context = getASTContext();
+
+  // @signature is only meaningful with the mulle-objc runtime.
+  if (!getLangOpts().ObjCRuntime.hasMulleMetaABI()) {
+    Diag(AtLoc, diag::err_signature_not_available);
+    return ExprError();
+  }
+
+  // Look up instance method first, then factory method.
+  ObjCMethodDecl *Method = LookupInstanceMethodInGlobalPool(
+      Sel, SourceRange(LParenLoc, RParenLoc));
+  if (!Method)
+    Method = LookupFactoryMethodInGlobalPool(
+        Sel, SourceRange(LParenLoc, RParenLoc));
+
+  if (!Method) {
+    Diag(SigLoc, diag::err_signature_undeclared_selector) << Sel;
+    return ExprError();
+  }
+
+  // Check for multiple methods with different type encodings.
+  SmallVector<ObjCMethodDecl *, 4> Methods;
+  if (CollectMultipleMethodsInGlobalPool(Sel, Methods, /*InstanceFirst=*/true,
+                                         /*CheckTheOther=*/true)) {
+    std::string BaseEnc = Context.getObjCEncodingForMethodDecl(Methods[0]);
+    for (ObjCMethodDecl *M : Methods) {
+      if (Context.getObjCEncodingForMethodDecl(M) != BaseEnc) {
+        Diag(SigLoc, diag::err_signature_ambiguous_selector) << Sel;
+        return ExprError();
+      }
+    }
+    // All encodings match — use the first method's.
+    Method = Methods[0];
+  }
+
+  // Compute the type encoding string.
+  std::string EncStr = Context.getObjCEncodingForMethodDecl(Method);
+
+  // Copy into ASTContext so the string pointer outlives this Sema call.
+  char *EncBuf = new (Context) char[EncStr.size() + 1];
+  std::memcpy(EncBuf, EncStr.c_str(), EncStr.size() + 1);
+
+  // _count: rval + self + _cmd + explicit params.
+  uint16_t Count = (uint16_t)(3 + Method->param_size());
+  // _bits: variadic flag + metaABI rType/pType (bits 22-25).
+  uint32_t Bits = Method->isVariadic() ? 0x08u : 0u;
+  Bits |= ComputeMetaABIBitsForMethod(Context, Method);
+
+  // Return type is id (the runtime will patch the real class pointer in).
+  QualType Ty = Context.getObjCIdType();
+  return new (Context)
+      ObjCSignatureExpr(Ty, EncBuf, Bits, Count, AtLoc, RParenLoc);
+}
+
+ExprResult SemaObjC::ActOnSignatureFromMethodDecl(
+    ObjCMethodDecl *Method,
+    SourceLocation AtLoc, SourceLocation SigLoc,
+    SourceLocation LParenLoc, SourceLocation RParenLoc) {
+  ASTContext &Context = getASTContext();
+
+  if (!getLangOpts().ObjCRuntime.hasMulleMetaABI()) {
+    Diag(AtLoc, diag::err_signature_not_available);
+    return ExprError();
+  }
+
+  std::string EncStr = Context.getObjCEncodingForMethodDecl(Method);
+
+  char *EncBuf = new (Context) char[EncStr.size() + 1];
+  std::memcpy(EncBuf, EncStr.c_str(), EncStr.size() + 1);
+
+  // _count: rval + self + _cmd + explicit params.
+  uint16_t Count = (uint16_t)(3 + Method->param_size());
+  // _bits: variadic flag + metaABI rType/pType (bits 22-25).
+  uint32_t Bits = Method->isVariadic() ? 0x08u : 0u;
+  Bits |= ComputeMetaABIBitsForMethod(Context, Method);
+
+  QualType Ty = Context.getObjCIdType();
+  return new (Context)
+      ObjCSignatureExpr(Ty, EncBuf, Bits, Count, AtLoc, RParenLoc);
+}
+// @mulle-objc@ @signature <
+
 ExprResult SemaObjC::ParseObjCProtocolExpression(IdentifierInfo *ProtocolId,
                                                  SourceLocation AtLoc,
                                                  SourceLocation ProtoLoc,

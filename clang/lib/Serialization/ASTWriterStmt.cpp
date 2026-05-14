@@ -1495,6 +1495,18 @@ void ASTStmtWriter::VisitObjCEncodeExpr(ObjCEncodeExpr *E) {
   Code = serialization::EXPR_OBJC_ENCODE;
 }
 
+// @mulle-objc@ @signature >
+void ASTStmtWriter::VisitObjCSignatureExpr(ObjCSignatureExpr *E) {
+  VisitExpr(E);
+  Record.AddString(E->getTypeEncoding());
+  Record.push_back(E->getBits());
+  Record.push_back(E->getCount());
+  Record.AddSourceLocation(E->getAtLoc());
+  Record.AddSourceLocation(E->getRParenLoc());
+  Code = serialization::EXPR_OBJC_SIGNATURE_EXPR;
+}
+// @mulle-objc@ @signature <
+
 void ASTStmtWriter::VisitObjCSelectorExpr(ObjCSelectorExpr *E) {
   VisitExpr(E);
   Record.AddSelectorRef(E->getSelector());

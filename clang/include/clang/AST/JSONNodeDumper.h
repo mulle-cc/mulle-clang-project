@@ -318,6 +318,9 @@ public:
   void VisitLambdaExpr(const LambdaExpr *LE);
 
   void VisitObjCEncodeExpr(const ObjCEncodeExpr *OEE);
+  // @mulle-objc@ @signature >
+  void VisitObjCSignatureExpr(const ObjCSignatureExpr *E);
+  // @mulle-objc@ @signature <
   void VisitObjCMessageExpr(const ObjCMessageExpr *OME);
   void VisitObjCBoxedExpr(const ObjCBoxedExpr *OBE);
   void VisitObjCSelectorExpr(const ObjCSelectorExpr *OSE);

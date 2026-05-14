@@ -6245,6 +6245,102 @@ Decl *SemaObjC::ActOnMethodDeclaration(
   return ObjCMethod;
 }
 
+// @mulle-objc@ @signature >
+// ActOnMethodDeclarationForSignature - Create a temporary ObjCMethodDecl for
+// @signature prototype parsing.  Identical to ActOnMethodDeclaration but does
+// not require an ObjC container context and does not register the method
+// anywhere — it exists only long enough to compute the type encoding.
+ObjCMethodDecl *SemaObjC::ActOnMethodDeclarationForSignature(
+    Scope *S, SourceLocation MethodLoc, SourceLocation EndLoc,
+    tok::TokenKind MethodType, ObjCDeclSpec &ReturnQT, ParsedType ReturnType,
+    ArrayRef<SourceLocation> SelectorLocs, Selector Sel,
+    ParmVarDecl **ArgInfo, DeclaratorChunk::ParamInfo *CParamInfo,
+    unsigned CNumArgs, const ParsedAttributesView &AttrList, bool isVariadic) {
+  ASTContext &Context = getASTContext();
+
+  QualType resultDeclType;
+  bool HasRelatedResultType = false;
+  TypeSourceInfo *ReturnTInfo = nullptr;
+  if (ReturnType) {
+    resultDeclType = SemaRef.GetTypeFromParser(ReturnType, &ReturnTInfo);
+    if (SemaRef.CheckFunctionReturnType(resultDeclType, MethodLoc))
+      return nullptr;
+    QualType bareResultType = resultDeclType;
+    (void)AttributedType::stripOuterNullability(bareResultType);
+    HasRelatedResultType = (bareResultType == Context.getObjCInstanceType());
+  } else {
+    // Default to void for @signature (no warning — prototype form always
+    // specifies the return type explicitly; silently default otherwise).
+    resultDeclType = Context.VoidTy;
+  }
+
+  // Use TranslationUnitDecl as DC — the method is not added to any container.
+  DeclContext *DC = Context.getTranslationUnitDecl();
+
+  ObjCMethodDecl *ObjCMethod = ObjCMethodDecl::Create(
+      Context, MethodLoc, EndLoc, Sel, resultDeclType, ReturnTInfo,
+      DC, MethodType == tok::minus, isVariadic,
+      /*isPropertyAccessor=*/false, /*isSynthesizedAccessorStub=*/false,
+      /*isImplicitlyDeclared=*/false, /*isDefined=*/false,
+      ObjCImplementationControl::Required, HasRelatedResultType);
+
+  SmallVector<ParmVarDecl *, 16> Params;
+  for (unsigned I = 0; I < Sel.getNumArgs(); ++I) {
+    ParmVarDecl *Param = ArgInfo[I];
+    Param->setDeclContext(ObjCMethod);
+    Params.push_back(Param);
+  }
+
+  for (unsigned i = 0, e = CNumArgs; i != e; ++i) {
+    ParmVarDecl *Param = cast<ParmVarDecl>(CParamInfo[i].Param);
+    QualType ArgType = Param->getType();
+    if (ArgType.isNull())
+      ArgType = Context.getObjCIdType();
+    else
+      ArgType = Context.getAdjustedParameterType(ArgType);
+    Param->setDeclContext(ObjCMethod);
+    Params.push_back(Param);
+  }
+
+  ObjCMethod->setMethodParams(Context, Params, SelectorLocs);
+
+  // MetaABI: set up param record so getObjCEncodingForMethodDecl produces
+  // the correct encoding (same logic as ActOnMethodDeclaration).
+  if (getLangOpts().ObjCRuntime.hasMulleMetaABI()) {
+    unsigned int desc = metaABIDescription(Params, resultDeclType);
+    if (isVariadic)
+      desc |= MetaABIParamAsStruct;
+
+    if (desc == MetaABIVoidPtrParam) {
+      ParmVarDecl *Param = Params[0];
+      S->AddDecl(Param);
+      const IdentifierInfo *II = Param->getIdentifier();
+      if (II != nullptr)
+        SemaRef.IdResolver.AddDecl(Param);
+      ObjCMethod->setMetaABIVoidPointerParam(true);
+
+      ImplicitParamDecl *ParamDecl = ImplicitParamDecl::Create(
+          Context, ObjCMethod, MethodLoc,
+          &Context.Idents.get("_param"), Context.VoidPtrTy,
+          ImplicitParamKind::Other);
+      ObjCMethod->setParamDecl(ParamDecl);
+    } else if (desc) {
+      SetMulleObjCParam(ObjCMethod, Sel, &Params, resultDeclType, desc,
+                        MethodLoc);
+    }
+  }
+
+  ObjCMethod->setObjCDeclQualifier(
+      CvtQTToAstBitMask(ReturnQT.getObjCDeclQualifier()));
+
+  // Insert the implicit self and _cmd parameters so the encoding includes
+  // the correct total frame size.
+  ObjCMethod->createImplicitParams(Context, /*ClassDecl=*/nullptr);
+
+  return ObjCMethod;
+}
+// @mulle-objc@ @signature <
+
 bool SemaObjC::CheckObjCDeclScope(Decl *D) {
   // Following is also an error. But it is caused by a missing @end
   // and diagnostic is issued elsewhere.

@@ -1310,7 +1310,9 @@ ParsedType Parser::ParseObjCTypeName(ObjCDeclSpec &DS,
 Decl *Parser::ParseObjCMethodDecl(SourceLocation mLoc,
                                   tok::TokenKind mType,
                                   tok::ObjCKeywordKind MethodImplKind,
-                                  bool MethodDefinition) {
+                                  // @mulle-objc@ @signature >
+                                  bool MethodDefinition, bool ForSignature) {
+                                  // @mulle-objc@ @signature <
   ParsingDeclRAIIObject PD(*this, ParsingDeclRAIIObject::NoParent);
 
   if (Tok.is(tok::code_completion)) {
@@ -1360,11 +1362,21 @@ Decl *Parser::ParseObjCMethodDecl(SourceLocation mLoc,
                          methodAttrs);
 
     Selector Sel = PP.getSelectorTable().getNullarySelector(SelIdent);
-    Decl *Result = Actions.ObjC().ActOnMethodDeclaration(
-        getCurScope(), mLoc, Tok.getLocation(), mType, DSRet, ReturnType,
-        selLoc, Sel, nullptr, CParamInfo.data(), CParamInfo.size(), methodAttrs,
-        MethodImplKind, false, MethodDefinition);
-    PD.complete(Result);
+    // @mulle-objc@ @signature >
+    Decl *Result;
+    if (ForSignature)
+      Result = Actions.ObjC().ActOnMethodDeclarationForSignature(
+          getCurScope(), mLoc, Tok.getLocation(), mType, DSRet, ReturnType,
+          selLoc, Sel, nullptr, CParamInfo.data(), CParamInfo.size(),
+          methodAttrs, false);
+    else
+      Result = Actions.ObjC().ActOnMethodDeclaration(
+          getCurScope(), mLoc, Tok.getLocation(), mType, DSRet, ReturnType,
+          selLoc, Sel, nullptr, CParamInfo.data(), CParamInfo.size(), methodAttrs,
+          MethodImplKind, false, MethodDefinition);
+    if (!ForSignature)
+      PD.complete(Result);
+    // @mulle-objc@ @signature <
     return Result;
   }
 
@@ -1496,12 +1508,21 @@ Decl *Parser::ParseObjCMethodDecl(SourceLocation mLoc,
 
   Selector Sel = PP.getSelectorTable().getSelector(KeyIdents.size(),
                                                    &KeyIdents[0]);
-  Decl *Result = Actions.ObjC().ActOnMethodDeclaration(
-      getCurScope(), mLoc, Tok.getLocation(), mType, DSRet, ReturnType, KeyLocs,
-      Sel, ObjCParamInfo.data(), CParamInfo.data(), CParamInfo.size(),
-      methodAttrs, MethodImplKind, isVariadic, MethodDefinition);
-
-  PD.complete(Result);
+  // @mulle-objc@ @signature >
+  Decl *Result;
+  if (ForSignature)
+    Result = Actions.ObjC().ActOnMethodDeclarationForSignature(
+        getCurScope(), mLoc, Tok.getLocation(), mType, DSRet, ReturnType,
+        KeyLocs, Sel, ObjCParamInfo.data(), CParamInfo.data(), CParamInfo.size(),
+        methodAttrs, isVariadic);
+  else
+    Result = Actions.ObjC().ActOnMethodDeclaration(
+        getCurScope(), mLoc, Tok.getLocation(), mType, DSRet, ReturnType, KeyLocs,
+        Sel, ObjCParamInfo.data(), CParamInfo.data(), CParamInfo.size(),
+        methodAttrs, MethodImplKind, isVariadic, MethodDefinition);
+  if (!ForSignature)
+    PD.complete(Result);
+  // @mulle-objc@ @signature <
   return Result;
 }
 
@@ -2956,6 +2977,10 @@ ExprResult Parser::ParseObjCAtExpression(SourceLocation AtLoc) {
       return ParsePostfixExpressionSuffix(ParseObjCProtocolExpression(AtLoc));
     case tok::objc_selector:
       return ParsePostfixExpressionSuffix(ParseObjCSelectorExpression(AtLoc));
+    // @mulle-objc@ @signature >
+    case tok::objc_signature:
+      return ParsePostfixExpressionSuffix(ParseObjCSignatureExpression(AtLoc));
+    // @mulle-objc@ @signature <
     case tok::objc_available:
       return ParseAvailabilityCheckExpr(AtLoc);
       default: {
@@ -3642,6 +3667,74 @@ ExprResult Parser::ParseObjCSelectorExpression(SourceLocation AtLoc) {
       Sel, AtLoc, SelectorLoc, T.getOpenLocation(), T.getCloseLocation(),
       !HasOptionalParen);
 }
+
+// @mulle-objc@ @signature >
+/// \verbatim
+///   @signature ( objc-selector )
+/// \endverbatim
+ExprResult Parser::ParseObjCSignatureExpression(SourceLocation AtLoc) {
+  assert(Tok.isObjCAtKeyword(tok::objc_signature) &&
+         "Not an @signature expression!");
+
+  SourceLocation SigLoc = ConsumeToken();
+
+  if (Tok.isNot(tok::l_paren))
+    return ExprError(Diag(Tok, diag::err_expected_lparen_after) << "@signature");
+
+  BalancedDelimiterTracker T(*this, tok::l_paren);
+  T.consumeOpen();
+
+  // Prototype form: @signature(-(returntype) sel:(paramtype) name ...)
+  if (Tok.isOneOf(tok::minus, tok::plus)) {
+    tok::TokenKind mType = Tok.getKind();
+    SourceLocation mLoc = ConsumeToken(); // consume - or +
+    Decl *MethodDecl =
+        ParseObjCMethodDecl(mLoc, mType, tok::objc_not_keyword,
+                            /*MethodDefinition=*/false, /*ForSignature=*/true);
+    T.consumeClose();
+    if (!MethodDecl)
+      return ExprError();
+    return Actions.ObjC().ActOnSignatureFromMethodDecl(
+        cast<ObjCMethodDecl>(MethodDecl), AtLoc, SigLoc,
+        T.getOpenLocation(), T.getCloseLocation());
+  }
+
+  // Selector form: @signature(bar:)
+  SmallVector<const IdentifierInfo *, 12> KeyIdents;
+  SourceLocation sLoc;
+
+  IdentifierInfo *SelIdent = ParseObjCSelectorPiece(sLoc);
+  if (!SelIdent && Tok.isNot(tok::colon) && Tok.isNot(tok::coloncolon))
+    return ExprError(Diag(Tok, diag::err_expected) << tok::identifier);
+
+  KeyIdents.push_back(SelIdent);
+
+  unsigned nColons = 0;
+  if (Tok.isNot(tok::r_paren)) {
+    while (true) {
+      if (TryConsumeToken(tok::coloncolon)) {
+        ++nColons;
+        KeyIdents.push_back(nullptr);
+      } else if (ExpectAndConsume(tok::colon))
+        return ExprError();
+      ++nColons;
+
+      if (Tok.is(tok::r_paren))
+        break;
+
+      SourceLocation Loc;
+      SelIdent = ParseObjCSelectorPiece(Loc);
+      KeyIdents.push_back(SelIdent);
+      if (!SelIdent && Tok.isNot(tok::colon) && Tok.isNot(tok::coloncolon))
+        break;
+    }
+  }
+  T.consumeClose();
+  Selector Sel = PP.getSelectorTable().getSelector(nColons, &KeyIdents[0]);
+  return Actions.ObjC().ParseObjCSignatureExpression(
+      Sel, AtLoc, SigLoc, T.getOpenLocation(), T.getCloseLocation());
+}
+// @mulle-objc@ @signature <
 
 void Parser::ParseLexedObjCMethodDefs(LexedMethod &LM, bool parseMethod) {
   // MCDecl might be null due to error in method or c-function  prototype, etc.

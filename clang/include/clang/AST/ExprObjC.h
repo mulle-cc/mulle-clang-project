@@ -448,6 +448,66 @@ public:
   }
 };
 
+// @mulle-objc@ @signature >
+/// ObjCSignatureExpr, used for \@signature in mulle-objc.
+/// Produces a static NSMethodSignature* instance for a given selector.
+/// The type encoding is resolved at compile time via selector lookup.
+class ObjCSignatureExpr : public Expr {
+  // Pre-computed ObjC type encoding string (allocated in ASTContext).
+  // Format: same as getObjCEncodingForMethodDecl (e.g. "v16@0:8").
+  const char *TypeEncoding;
+  // Method descriptor bits (e.g. _mulle_objc_method_variadic = 0x08).
+  uint32_t Bits;
+  // Number of type info entries: 3 + param_count (rval + self + cmd + params).
+  uint16_t Count;
+  SourceLocation AtLoc, RParenLoc;
+
+public:
+  ObjCSignatureExpr(QualType T, const char *Enc, uint32_t Bits, uint16_t Count,
+                    SourceLocation AtLoc, SourceLocation RParenLoc)
+      : Expr(ObjCSignatureExprClass, T, VK_PRValue, OK_Ordinary),
+        TypeEncoding(Enc), Bits(Bits), Count(Count),
+        AtLoc(AtLoc), RParenLoc(RParenLoc) {
+    setDependence(ExprDependence::None);
+  }
+
+  explicit ObjCSignatureExpr(EmptyShell Empty)
+      : Expr(ObjCSignatureExprClass, Empty), TypeEncoding(nullptr),
+        Bits(0), Count(0) {}
+
+  StringRef getTypeEncoding() const {
+    return TypeEncoding ? TypeEncoding : "";
+  }
+  void setTypeEncoding(const char *E) { TypeEncoding = E; }
+
+  uint32_t getBits() const { return Bits; }
+  void setBits(uint32_t B) { Bits = B; }
+
+  uint16_t getCount() const { return Count; }
+  void setCount(uint16_t C) { Count = C; }
+
+  SourceLocation getAtLoc() const { return AtLoc; }
+  void setAtLoc(SourceLocation L) { AtLoc = L; }
+  SourceLocation getRParenLoc() const { return RParenLoc; }
+  void setRParenLoc(SourceLocation L) { RParenLoc = L; }
+
+  SourceLocation getBeginLoc() const LLVM_READONLY { return AtLoc; }
+  SourceLocation getEndLoc() const LLVM_READONLY { return RParenLoc; }
+
+  child_range children() {
+    return child_range(child_iterator(), child_iterator());
+  }
+
+  const_child_range children() const {
+    return const_child_range(const_child_iterator(), const_child_iterator());
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == ObjCSignatureExprClass;
+  }
+};
+// @mulle-objc@ @signature <
+
 /// ObjCSelectorExpr used for \@selector in Objective-C.
 class ObjCSelectorExpr : public Expr {
   Selector SelName;

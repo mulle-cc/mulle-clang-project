@@ -32,6 +32,7 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclObjC.h"
+#include "clang/AST/ExprObjC.h"
 #include "clang/AST/ParentMap.h"
 #include "clang/AST/RecordLayout.h"
 #include "clang/AST/StmtObjC.h"
@@ -1499,6 +1500,13 @@ namespace {
                                   const ObjCIvarDecl *Ivar) override;
 
       llvm::ConstantStruct *CreateNSConstantStringStruct( StringRef S, unsigned StringLength, MulleNSStringTier Tier) override;
+
+      // @mulle-objc@ @signature >
+      llvm::DenseMap<unsigned, llvm::StructType *> NSConstantSignatureTypeCache;
+      llvm::StringMap<llvm::GlobalAlias *> NSConstantSignatureMap;
+      llvm::StructType *GetOrCreateNSConstantSignatureType(unsigned Count);
+      llvm::Constant   *GenerateConstantSignature(const ObjCSignatureExpr *E) override;
+      // @mulle-objc@ @signature <
    };
 }
 
@@ -1715,6 +1723,7 @@ ObjCTypes(cgm) {
    _trace_fastids = getenv( "MULLE_CLANG_TRACE_FASTCLASS") ? 1 : 0;  // need compiler flag
 
    NSConstantStringType = nullptr;
+   // @mulle-objc@ @signature: NSConstantSignatureTypeCache default-initializes to empty
 
    const char *Section;
 
@@ -2902,7 +2911,430 @@ ConstantAddress CGObjCCommonMulleRuntime::GenerateConstantString( const StringLi
 }
 
 
-#pragma mark - message sending
+
+
+// @mulle-objc@ @signature >
+
+// ─── Arginfo computation helpers ─────────────────────────────────────────────
+//
+// These mirror the mulle-objc-runtime's mulle_objc_signature_fill_arginfos()
+// logic, but run at compile time inside the compiler.
+
+namespace {
+
+// Per-arg type descriptor, matching mulle_methodsignature_arginfo.
+struct SigArgInfo {
+   uint32_t invocation_offset;
+   uint32_t natural_size;
+   uint16_t type_offset;
+   uint8_t  natural_alignment;
+   uint8_t  has_retainable_type;
+};
+
+struct EncTypeResult {
+   uint32_t natural_size;
+   uint32_t natural_alignment;  // bytes
+   uint8_t  has_retainable_type;
+};
+
+static uint32_t alignUpU32( uint32_t v, uint32_t align)
+{
+   return align ? (v + align - 1u) & ~(align - 1u) : v;
+}
+
+// Returns size/alignment/retainability for a single-character type code.
+static EncTypeResult encTypeForChar( char c, const ASTContext &Ctx)
+{
+   auto SZ = [&]( QualType T) -> uint32_t { return (uint32_t)(Ctx.getTypeSize( T) >> 3); };
+   auto AL = [&]( QualType T) -> uint32_t { return (uint32_t)(Ctx.getTypeAlign( T) >> 3); };
+   uint32_t ptrSz = SZ( Ctx.VoidPtrTy);
+   uint32_t ptrAl = AL( Ctx.VoidPtrTy);
+   switch( c) {
+   case 'v':  return {0,    0,     0};
+   case '@':  return {ptrSz, ptrAl, 1};  // retain_id
+   case '#':  return {ptrSz, ptrAl, 0};
+   case ':':  return {ptrSz, ptrAl, 0};
+   case '*':  return {ptrSz, ptrAl, 1};  // char*
+   case '%':  return {ptrSz, ptrAl, 0};  // atom (static char*)
+   case '~':  return {ptrSz, ptrAl, 1};  // copy_id
+   case '=':  return {ptrSz, ptrAl, 0};  // assign_id
+   case '?':  return {ptrSz, ptrAl, 0};  // function pointer
+   case 'c':
+   case 'C':  return {SZ( Ctx.CharTy),          AL( Ctx.CharTy),          0};
+   case 's':
+   case 'S':  return {SZ( Ctx.ShortTy),          AL( Ctx.ShortTy),         0};
+   case 'i':
+   case 'I':  return {SZ( Ctx.IntTy),            AL( Ctx.IntTy),           0};
+   case 'l':
+   case 'L':  return {SZ( Ctx.LongTy),           AL( Ctx.LongTy),          0};
+   case 'q':
+   case 'Q':  return {SZ( Ctx.LongLongTy),       AL( Ctx.LongLongTy),      0};
+   case 'f':  return {SZ( Ctx.FloatTy),          AL( Ctx.FloatTy),         0};
+   case 'd':  return {SZ( Ctx.DoubleTy),         AL( Ctx.DoubleTy),        0};
+   case 'D':  return {SZ( Ctx.LongDoubleTy),     AL( Ctx.LongDoubleTy),    0};
+   case 'B':  return {SZ( Ctx.IntTy),            AL( Ctx.IntTy),           0};  // _Bool=int enum
+   default:   return {ptrSz, ptrAl, 0};
+   }
+}
+
+// Forward declaration for recursion.
+static EncTypeResult parseEncType( const char *&p, const ASTContext &Ctx);
+
+// Parse one complete ObjC type encoding starting at *p.
+// Advances p past the full type encoding (body + optional @"ClassName" + Apple digits).
+// Does NOT advance into the next argument; skips the Apple-format offset digits.
+static EncTypeResult parseEncType( const char *&p, const ASTContext &Ctx)
+{
+   // Skip type qualifiers (r=const, n=in, N=inout, o=out, O=bycopy, R=byref, V=oneway)
+   while( *p == 'r' || *p == 'n' || *p == 'N' || *p == 'o' ||
+          *p == 'O' || *p == 'R' || *p == 'V')
+      ++p;
+   if( !*p) return {0, 0, 0};
+
+   char tc = *p++;
+   EncTypeResult fi = {0, 0, 0};
+
+   switch( tc) {
+   case '{':
+   case '(': {
+      // Struct or union: {name=member1 member2 ...} / (name=member1 member2 ...)
+      char close    = (tc == '{') ? '}' : ')';
+      bool isUnion  = (tc == '(');
+      // Skip struct/union name up to '=' or close brace
+      while( *p && *p != '=' && *p != close)
+         ++p;
+      if( *p == '=') {
+         ++p;  // skip '='
+         uint32_t bitsSize        = 0;
+         uint32_t bitsStructAlign = 0;
+         uint32_t natAlign        = 1;
+         uint8_t  hasRetain       = 0;
+         while( *p && *p != close) {
+            EncTypeResult mfi = parseEncType( p, Ctx);
+            uint32_t mAlignBits = mfi.natural_alignment * 8;
+            if( !isUnion) {
+               bitsSize = alignUpU32( bitsSize, mAlignBits);
+               bitsSize += mfi.natural_size * 8;
+            } else {
+               if( mfi.natural_size * 8 > bitsSize) bitsSize = mfi.natural_size * 8;
+            }
+            if( mfi.natural_alignment > natAlign)    natAlign        = mfi.natural_alignment;
+            if( mAlignBits > bitsStructAlign)         bitsStructAlign = mAlignBits;
+            if( mfi.has_retainable_type)              hasRetain       = 1;
+         }
+         if( bitsStructAlign > 0)
+            bitsSize = alignUpU32( bitsSize, bitsStructAlign);
+         fi.natural_size        = bitsSize / 8;
+         fi.natural_alignment   = natAlign;
+         fi.has_retainable_type = hasRetain;
+      } else {
+         // Opaque (no '='): treat as pointer-sized.
+         uint32_t pSz = (uint32_t)(Ctx.getTypeSize( Ctx.VoidPtrTy) >> 3);
+         fi = {pSz, pSz, 0};
+      }
+      if( *p == close) ++p;
+      break;
+   }
+
+   case '[': {
+      // Array: [count element_type]
+      int cnt = 0;
+      while( *p >= '0' && *p <= '9') cnt = cnt * 10 + (*p++ - '0');
+      EncTypeResult efi = parseEncType( p, Ctx);
+      if( *p == ']') ++p;
+      fi = {(uint32_t)cnt * efi.natural_size, efi.natural_alignment, efi.has_retainable_type};
+      break;
+   }
+
+   case '^': {
+      // Pointer: skip pointed-to type (info is always pointer-sized)
+      parseEncType( p, Ctx);
+      uint32_t pSz = (uint32_t)(Ctx.getTypeSize( Ctx.VoidPtrTy) >> 3);
+      fi = {pSz, pSz, 0};
+      break;
+   }
+
+   case 'b': {
+      // Bitfield: 'b' followed by bit count
+      int bits = 0;
+      while( *p >= '0' && *p <= '9') bits = bits * 10 + (*p++ - '0');
+      fi = {(uint32_t)((bits + 7) / 8), 1, 0};
+      break;
+   }
+
+   case '@': {
+      uint32_t pSz = (uint32_t)(Ctx.getTypeSize( Ctx.VoidPtrTy) >> 3);
+      if( *p == '?') {
+         ++p;                    // @? = blocks = function-pointer sized
+         fi = {pSz, pSz, 0};
+      } else {
+         fi = {pSz, pSz, 1};    // regular ObjC object (retain_id)
+      }
+      // Skip optional @"ClassName" or @"<Protocol>" annotation
+      if( *p == '"') {
+         ++p;
+         while( *p && *p != '"') ++p;
+         if( *p == '"') ++p;
+      }
+      break;
+   }
+
+   default:
+      fi = encTypeForChar( tc, Ctx);
+      break;
+   }
+
+   // Skip optional blocks extension <...>
+   if( *p == '<') {
+      while( *p && *p != '>') ++p;
+      if( *p == '>') ++p;
+   }
+
+   // Skip trailing Apple-format frame offset digits (sign then digits)
+   if( *p == '-' || *p == '+') ++p;
+   while( *p >= '0' && *p <= '9') ++p;
+
+   return fi;
+}
+
+// Compute all count arginfo entries from a mulle ObjC method type encoding.
+//
+// Encoding format (Apple-style):  rvalType[frameSize] selfType[off] cmdType[off] arg0Type[off] ...
+//
+// Output layout:
+//   out[0] = rval (invocation_offset = total frame size after all args)
+//   out[1] = self
+//   out[2] = _cmd
+//   out[3..count-1] = explicit params
+//
+// Mirrors mulle_objc_signature_fill_arginfos() from the runtime.
+static SmallVector<SigArgInfo, 8>
+computeArgInfosFromEncoding( StringRef Encoding, unsigned count,
+                              const ASTContext &Ctx)
+{
+   SmallVector<SigArgInfo, 8> out( count, SigArgInfo{});
+   const char *p     = Encoding.data();
+   const char *start = p;
+
+   // ── Rval ────────────────────────────────────────────────────────────────
+   // Parse return type to get natural_size/alignment; invocation_offset is set last.
+   const char *rvalBase = p;
+   while( *rvalBase == 'r' || *rvalBase == 'n' || *rvalBase == 'N' || *rvalBase == 'o' ||
+          *rvalBase == 'O' || *rvalBase == 'R' || *rvalBase == 'V')
+      ++rvalBase;
+   EncTypeResult rvalFI = parseEncType( p, Ctx);
+   out[0].type_offset         = (uint16_t)(rvalBase - start);
+   out[0].natural_size        = rvalFI.natural_size;
+   out[0].natural_alignment   = (uint8_t)rvalFI.natural_alignment;
+   out[0].has_retainable_type = rvalFI.has_retainable_type;
+   // out[0].invocation_offset  is filled after iterating all other args.
+
+   // ── Self, _cmd, params ──────────────────────────────────────────────────
+   uint32_t invOffset = 0;
+   for( unsigned idx = 0; idx < count - 1 && *p; ++idx) {
+      // Find start of type char (after qualifiers) for type_offset
+      const char *argBase = p;
+      while( *argBase == 'r' || *argBase == 'n' || *argBase == 'N' || *argBase == 'o' ||
+             *argBase == 'O' || *argBase == 'R' || *argBase == 'V')
+         ++argBase;
+      uint16_t typeOff = (uint16_t)(argBase - start);
+
+      EncTypeResult afi = parseEncType( p, Ctx);
+
+      // idx==2 is the first explicit parameter (after self=0, _cmd=1).
+      // The runtime uses alignof(long double) for the first param to keep
+      // the MetaABI block safely aligned for all possible types.
+      uint32_t align;
+      if( idx == 2)
+         align = (uint32_t)(Ctx.getTypeAlign( Ctx.LongDoubleTy) >> 3);
+      else
+         align = afi.natural_alignment ? afi.natural_alignment : 1u;
+
+      invOffset = alignUpU32( invOffset, align);
+
+      unsigned outIdx                    = idx + 1;
+      out[outIdx].invocation_offset      = invOffset;
+      out[outIdx].natural_size           = afi.natural_size;
+      out[outIdx].type_offset            = typeOff;
+      out[outIdx].natural_alignment      = (uint8_t)afi.natural_alignment;
+      out[outIdx].has_retainable_type    = afi.has_retainable_type;
+
+      invOffset += afi.natural_size;
+   }
+
+   // Rval's invocation_offset = total frame size after all args
+   out[0].invocation_offset = invOffset;
+
+   return out;
+}
+
+}  // anonymous namespace
+
+// ─── Struct type for _NSConstantMethodSignature ───────────────────────────────
+
+/// Build (and cache by Count) the LLVM struct type for _NSConstantMethodSignature.
+///
+/// Without TAO:  { uintptr_t, void*, i32, i16, i16, ptr, [Count x {i32,i32,i16,i8,i8}] }
+/// With    TAO:  { void*, void*, uintptr_t, void*, i32, i16, i16, ptr, [Count x ...] }
+///
+/// The [Count x ArgInfoTy] tail replaces the old single void* _infos field.
+llvm::StructType *CGObjCMulleRuntime::GetOrCreateNSConstantSignatureType( unsigned Count)
+{
+   auto &Entry = NSConstantSignatureTypeCache[Count];
+   if( Entry) return Entry;
+
+   llvm::Type *I32Ty   = llvm::Type::getInt32Ty( VMContext);
+   llvm::Type *I16Ty   = llvm::Type::getInt16Ty( VMContext);
+   llvm::Type *I8Ty    = llvm::Type::getInt8Ty( VMContext);
+   llvm::Type *PtrTy   = CGM.VoidPtrTy;
+
+   llvm::Type *UIntPtrTy = CGM.getTypes().ConvertType( CGM.getContext().getUIntPtrType());
+
+   // mulle_methodsignature_arginfo: {i32, i32, i16, i8, i8}  (12 bytes, natural alignment)
+   llvm::StructType *ArgInfoTy = llvm::StructType::get( VMContext,
+      {I32Ty, I32Ty, I16Ty, I8Ty, I8Ty}, /*isPacked=*/false);
+
+   SmallVector<llvm::Type *, 12> fields;
+   if( haveTAOObjectHeader) {
+      fields.push_back( PtrTy);      // tao_0
+      fields.push_back( PtrTy);      // tao_1
+   }
+   fields.push_back( UIntPtrTy);     // _retaincount_1
+   fields.push_back( PtrTy);         // _isa
+   fields.push_back( I32Ty);         // _bits
+   fields.push_back( I16Ty);         // _count
+   fields.push_back( I16Ty);         // _extra
+   fields.push_back( PtrTy);         // _types
+   fields.push_back( llvm::ArrayType::get( ArgInfoTy, Count));  // _infos[Count]
+
+   Entry = llvm::StructType::create( VMContext, fields,
+      "NSConstantMethodSignature." + std::to_string( Count));
+   return Entry;
+}
+
+
+
+
+/// Emit a @signature literal as a _NSConstantMethodSignature struct in
+/// .data.objc.objc_load_info and return a pointer to the first ivar (_bits).
+llvm::Constant *CGObjCMulleRuntime::GenerateConstantSignature( const ObjCSignatureExpr *E)
+{
+   StringRef Encoding = E->getTypeEncoding();
+
+   // Check cache first
+   auto CacheIt = NSConstantSignatureMap.find( Encoding);
+   if( CacheIt != NSConstantSignatureMap.end())
+      return CacheIt->second;
+
+   unsigned Count = E->getCount();
+   llvm::StructType *StructTy = GetOrCreateNSConstantSignatureType( Count);
+
+   llvm::Type *UIntPtrTy = CGM.getTypes().ConvertType( CGM.getContext().getUIntPtrType());
+   llvm::Type *I32Ty     = llvm::Type::getInt32Ty( VMContext);
+   llvm::Type *I16Ty     = llvm::Type::getInt16Ty( VMContext);
+   llvm::Type *I8Ty      = llvm::Type::getInt8Ty( VMContext);
+
+   // Maximum struct fields: 2 (TAO) + 7 fixed + 1 array = 10
+   SmallVector<llvm::Constant *, 12> Fields;
+
+   if( haveTAOObjectHeader) {
+      Fields.push_back( llvm::Constant::getNullValue( CGM.VoidPtrTy)); // tao_0
+      Fields.push_back( llvm::Constant::getNullValue( CGM.VoidPtrTy)); // tao_1
+   }
+
+   // _retaincount_1 = INTPTR_MAX-1  (= MULLE_OBJC_NEVER_RELEASE)
+   Fields.push_back( llvm::ConstantInt::get( UIntPtrTy, (uint64_t)(INTPTR_MAX - 1)));
+
+   // _isa = inttoptr(MULLE_OBJC_STATICINSTANCE_METHODSIGNATURE_INDEX = 4)
+   Fields.push_back( llvm::ConstantExpr::getIntToPtr(
+      llvm::ConstantInt::get( UIntPtrTy, 4u), CGM.VoidPtrTy));
+
+   // _bits
+   Fields.push_back( llvm::ConstantInt::get( I32Ty, E->getBits()));
+
+   // _count
+   Fields.push_back( llvm::ConstantInt::get( I16Ty, Count));
+
+   // _extra = 0  (static instances never use the heap extra area)
+   Fields.push_back( llvm::ConstantInt::get( I16Ty, 0u));
+
+   // _types → static NUL-terminated encoding string
+   const char *Section;
+   if( CGM.getTriple().isOSBinFormatMachO())
+      Section = "__DATA,__objc_load_info,regular,no_dead_strip";
+   else
+      Section = ".data.objc.objc_load_info";
+
+   auto *TypesGV = new llvm::GlobalVariable(
+      CGM.getModule(),
+      llvm::ArrayType::get( I8Ty, Encoding.size() + 1),
+      /*isConstant=*/true,
+      llvm::GlobalValue::PrivateLinkage,
+      llvm::ConstantDataArray::getString( VMContext, Encoding),
+      "__sig_types");
+   TypesGV->setUnnamedAddr( llvm::GlobalValue::UnnamedAddr::Global);
+   TypesGV->setSection( Section);
+   Fields.push_back( getConstantGEP( VMContext, TypesGV, 0, 0));
+
+   // _infos[Count] — compute all arginfo entries from the encoding string
+   SmallVector<SigArgInfo, 8> argInfos =
+      computeArgInfosFromEncoding( Encoding, Count, CGM.getContext());
+
+   // Build ArgInfoTy matching the one used in GetOrCreateNSConstantSignatureType()
+   llvm::StructType *ArgInfoTy = llvm::StructType::get( VMContext,
+      {I32Ty, I32Ty, I16Ty, I8Ty, I8Ty}, /*isPacked=*/false);
+
+   SmallVector<llvm::Constant *, 8> ArgInfoConsts;
+   for( unsigned j = 0; j < Count; ++j) {
+      const SigArgInfo &ai = argInfos[j];
+      llvm::Constant *Agg[] = {
+         llvm::ConstantInt::get( I32Ty, ai.invocation_offset),
+         llvm::ConstantInt::get( I32Ty, ai.natural_size),
+         llvm::ConstantInt::get( I16Ty, ai.type_offset),
+         llvm::ConstantInt::get( I8Ty,  ai.natural_alignment),
+         llvm::ConstantInt::get( I8Ty,  ai.has_retainable_type),
+      };
+      ArgInfoConsts.push_back( llvm::ConstantStruct::get( ArgInfoTy, Agg));
+   }
+   Fields.push_back( llvm::ConstantArray::get(
+      llvm::ArrayType::get( ArgInfoTy, Count),
+      ArgInfoConsts));
+
+   // Build the struct constant
+   llvm::Constant *StructVal = llvm::ConstantStruct::get(
+      StructTy, llvm::ArrayRef<llvm::Constant *>( Fields));
+
+   auto *GV = new llvm::GlobalVariable(
+      CGM.getModule(),
+      StructVal->getType(),
+      /*isConstant=*/false,
+      llvm::GlobalValue::PrivateLinkage,
+      StructVal,
+      "__unnamed_nssignature");
+   GV->setSection( Section);
+   GV->setConstant( false);
+
+   // Return pointer to first ivar (_bits): GEP to offset 2 (or 4 with TAO)
+   unsigned GEPIndex = haveTAOObjectHeader ? 4u : 2u;
+   llvm::Constant *ObjPtr = getConstantGEP( VMContext, GV, 0, GEPIndex);
+
+   QualType IdTy = CGM.getContext().getObjCIdType();
+   llvm::Type *IdLLVMTy = CGM.getTypes().ConvertTypeForMem( IdTy);
+
+   llvm::GlobalAlias *GA = llvm::GlobalAlias::create(
+      IdLLVMTy,
+      0,
+      llvm::GlobalValue::InternalLinkage,
+      Twine( "_unnamed_nssignature"),
+      ObjPtr,
+      &CGM.getModule());
+
+   NSConstantSignatureMap.insert( {Encoding, GA});
+   return GA;
+}
+
+// @mulle-objc@ @signature <
+
 
 
 const CGFunctionInfo   &CGObjCMulleRuntime::GenerateFunctionInfo( QualType arg0Ty,
@@ -5594,6 +6026,34 @@ static bool startsWithWord(StringRef name, StringRef word) {
           name.starts_with(word));
 }
 
+// Compute metaABI rType/pType bits (bits 22-25) for a method descriptor.
+// Matches MulleObjCMetaABIType: VoidPointer=0, Void=1, ParameterBlock=2.
+static uint32_t ComputeMetaABIBitsForMethod(ASTContext &Context,
+                                             const ObjCMethodDecl *MD) {
+  unsigned rType;
+  QualType RetTy = MD->getReturnType();
+  if (RetTy->isVoidType())
+    rType = 1; // Void
+  else if (Context.typeNeedsMetaABIAlloca(RetTy, /*isParam=*/false))
+    rType = 2; // ParameterBlock
+  else
+    rType = 0; // VoidPointer
+
+  unsigned pType;
+  if (MD->isVariadic())
+    pType = 2; // ParameterBlock
+  else if (MD->param_size() == 0)
+    pType = 1; // Void
+  else if (MD->param_size() == 1 &&
+           !Context.typeNeedsMetaABIAlloca(
+               (*MD->param_begin())->getType(), /*isParam=*/true))
+    pType = 0; // VoidPointer
+  else
+    pType = 2; // ParameterBlock
+
+  return (rType << 22) | (pType << 24);
+}
+
 /// GetMethodConstant - Return a struct objc_method constant for the
 /// given method if it has been defined. The result is null if the
 /// method has not been defined. The return value has type MethodPtrTy.
@@ -5676,6 +6136,7 @@ llvm::Constant *CGObjCMulleRuntime::GetMethodConstant(const ObjCMethodDecl *MD) 
       }
    }
    bits |= family << 16;
+   bits |= (int)ComputeMetaABIBitsForMethod(CGM.getContext(), MD);
 
    llvm::Constant *Imp;
    if (IsRuntimeAlias) {
@@ -6083,6 +6544,16 @@ llvm::Function *CGObjCMulleRuntime::ModuleInitFunction() {
       LoadStrings.push_back( expr);
    }
 
+   // @mulle-objc@ @signature: register constant signature objects
+   for( llvm::StringMap<llvm::GlobalAlias *>::const_iterator
+        I = NSConstantSignatureMap.begin(), E = NSConstantSignatureMap.end();
+        I != E; ++I)
+   {
+      expr = llvm::ConstantExpr::getBitCast( I->getValue(), CGM.VoidPtrTy);
+      LoadStrings.push_back( expr);
+   }
+   // @mulle-objc@ @signature <
+
    const char  *Section;
    
    if (CGM.getTriple().isOSBinFormatMachO())
@@ -6177,7 +6648,7 @@ llvm::Function *CGObjCMulleRuntime::ModuleInitFunction() {
   llvm::Constant *MixinList = EmitMixinList( "OBJC_MIXIN_LOADS", Section, LoadMixins);
   llvm::Constant *CategoryList      = EmitCategoryList( "OBJC_CATEGORY_LOADS", Section, LoadCategories);
   llvm::Constant *SuperList         = EmitSuperList( "OBJC_SUPER_LOADS", Section, LoadSupers);
-  llvm::Constant *StringList        = EmitStaticStringList( "OBJC_STATICSTRING_LOADS", Section, LoadStrings);
+  llvm::Constant *StringList        = EmitStaticStringList( "OBJC_STATICINSTANCE_LOADS", Section, LoadStrings);
   llvm::Constant *HashNameList      = EmitHashNameList( "OBJC_HASHNAME_LOADS", Section, EmitHashes);
   llvm::Constant *LoadInfo          = EmitLoadInfoList( "OBJC_LOAD_INFO", Section, Universe, ClassList, MixinList, CategoryList, SuperList, StringList, HashNameList, FileName);
 
