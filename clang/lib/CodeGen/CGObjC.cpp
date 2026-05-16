@@ -68,6 +68,13 @@ CodeGenFunction::EmitObjCSignatureExpr(const ObjCSignatureExpr *E) {
 }
 // @mulle-objc@ @signature <
 
+// @mulle-objc@ @invocation >
+llvm::Value *
+CodeGenFunction::EmitObjCInvocationExpr(const ObjCInvocationExpr *E) {
+  return CGM.getObjCRuntime().EmitInvocationExpr(*this, E);
+}
+// @mulle-objc@ @invocation <
+
 /// EmitObjCBoxedExpr - This routine generates code to call
 /// the appropriate expression boxing method. This will either be
 /// one of +[NSNumber numberWith<Type>:], or +[NSString stringWithUTF8String:],

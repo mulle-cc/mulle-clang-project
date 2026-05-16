@@ -772,6 +772,40 @@ public:
       bool isVariadic);
   // @mulle-objc@ @signature <
 
+  // @mulle-objc@ @invocation >
+  /// ActOnInvocationFromMethodDecl - Build @invocation from Form 2
+  /// (explicit prototype).
+  ExprResult ActOnInvocationFromMethodDecl(ObjCMethodDecl *Method,
+                                           Expr *Target,
+                                           ArrayRef<Expr *> Args,
+                                           SourceLocation AtLoc,
+                                           SourceLocation RParenLoc);
+
+  /// ActOnInvocationWithSelectorAndSignature - Build @invocation from Form 3
+  /// (explicit @selector + @signature).
+  ExprResult ActOnInvocationWithSelectorAndSignature(Selector Sel,
+                                                     ObjCSignatureExpr *SigE,
+                                                     Expr *Target,
+                                                     ArrayRef<Expr *> Args,
+                                                     SourceLocation AtLoc,
+                                                     SourceLocation RParenLoc);
+
+  /// ActOnInvocationWithRuntimeSelectorAndSignature - Build @invocation from
+  /// Mode 3 (runtime SEL variable + NSMethodSignature* variable).
+  ExprResult ActOnInvocationWithRuntimeSelectorAndSignature(
+      SourceLocation AtLoc, SourceLocation RParenLoc,
+      Expr *Target, Expr *SelExpr, Expr *SigExpr,
+      MultiExprArg Args);
+
+  /// ActOnInvocationWithIMP - Handle @invocation(...) = IMP suffix.
+  ExprResult ActOnInvocationWithIMP(Expr *InvExpr, Expr *ImpExpr,
+                                    SourceLocation AtLoc);
+
+  /// ActOnInvocationWithBody - Handle @invocation(...) { body } suffix.
+  ExprResult ActOnInvocationWithBody(Expr *InvExpr, ObjCMethodDecl *Method,
+                                     SourceLocation AtLoc);
+  // @mulle-objc@ @invocation <
+
   /// ParseObjCProtocolExpression - Build protocol expression for \@protocol
   ExprResult ParseObjCProtocolExpression(IdentifierInfo *ProtocolName,
                                          SourceLocation AtLoc,

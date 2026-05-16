@@ -58,6 +58,9 @@ class ObjCStringLiteral;
 // @mulle-objc@ @signature >
 class ObjCSignatureExpr;
 // @mulle-objc@ @signature <
+// @mulle-objc@ @invocation >
+class ObjCInvocationExpr;
+// @mulle-objc@ @invocation <
 class BlockDeclRefExpr;
 
 namespace CodeGen {
@@ -172,6 +175,12 @@ public:
   /// Generate a constant method signature object. (@signature)
   virtual llvm::Constant  *GenerateConstantSignature(const ObjCSignatureExpr *E);
   // @mulle-objc@ @signature <
+  // @mulle-objc@ @invocation >
+  /// Emit an @invocation expression, building the MetaABI frame and calling
+  /// NSInvocationCreateWithMetaABIFrame.
+  virtual llvm::Value *EmitInvocationExpr(CodeGenFunction &CGF,
+                                          const ObjCInvocationExpr *E);
+  // @mulle-objc@ @invocation <
    // @mulle-objc@: emit constant selectors <-
 
   /// Generate a category.  A category contains a list of methods (and

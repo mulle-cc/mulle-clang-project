@@ -1507,6 +1507,10 @@ namespace {
       llvm::StructType *GetOrCreateNSConstantSignatureType(unsigned Count);
       llvm::Constant   *GenerateConstantSignature(const ObjCSignatureExpr *E) override;
       // @mulle-objc@ @signature <
+      // @mulle-objc@ @invocation >
+      llvm::Value *EmitInvocationExpr(CodeGenFunction &CGF,
+                                      const ObjCInvocationExpr *E) override;
+      // @mulle-objc@ @invocation <
    };
 }
 
@@ -3205,6 +3209,8 @@ llvm::StructType *CGObjCMulleRuntime::GetOrCreateNSConstantSignatureType( unsign
    fields.push_back( I16Ty);         // _count
    fields.push_back( I16Ty);         // _extra
    fields.push_back( PtrTy);         // _types
+   fields.push_back( I32Ty);         // _invocationSize
+   fields.push_back( I32Ty);         // _reserved
    fields.push_back( llvm::ArrayType::get( ArgInfoTy, Count));  // _infos[Count]
 
    Entry = llvm::StructType::create( VMContext, fields,
@@ -3280,6 +3286,21 @@ llvm::Constant *CGObjCMulleRuntime::GenerateConstantSignature( const ObjCSignatu
    SmallVector<SigArgInfo, 8> argInfos =
       computeArgInfosFromEncoding( Encoding, Count, CGM.getContext());
 
+   // _invocationSize — precompute mulleInvocationSize
+   {
+      unsigned ptrSize = CGM.getContext().getTargetInfo().getPointerWidth(LangAS::Default) / 8;
+      unsigned voidptr5 = ptrSize * 5;
+      const SigArgInfo &lastArg = argInfos[Count - 1];
+      uint32_t frameSize = lastArg.invocation_offset + lastArg.natural_size;
+      frameSize = ((frameSize + voidptr5 - 1) / voidptr5) * voidptr5; // mulle_metaabi_sizeof_union
+      frameSize += argInfos[0].natural_size;  // methodReturnLength
+      frameSize += 8;  // alignof(double)
+      Fields.push_back( llvm::ConstantInt::get( I32Ty, frameSize));
+   }
+
+   // _reserved = 0
+   Fields.push_back( llvm::ConstantInt::get( I32Ty, 0u));
+
    // Build ArgInfoTy matching the one used in GetOrCreateNSConstantSignatureType()
    llvm::StructType *ArgInfoTy = llvm::StructType::get( VMContext,
       {I32Ty, I32Ty, I16Ty, I8Ty, I8Ty}, /*isPacked=*/false);
@@ -3334,6 +3355,197 @@ llvm::Constant *CGObjCMulleRuntime::GenerateConstantSignature( const ObjCSignatu
 }
 
 // @mulle-objc@ @signature <
+
+// @mulle-objc@ @invocation >
+llvm::Value *CGObjCMulleRuntime::EmitInvocationExpr(CodeGenFunction &CGF,
+                                                    const ObjCInvocationExpr *E)
+{
+   // explicit form: selExpr + sigExpr are explicit.
+   // If sigExpr is a compile-time @signature and selExpr is a compile-time
+   // @selector, build the MetaABI frame statically and call
+   // NSInvocationCreateWithMetaABIFrame.  Otherwise call NSInvocationCreateDynamic.
+   if (E->isExplicit()) {
+      const ObjCSignatureExpr *SigE =
+          dyn_cast<ObjCSignatureExpr>(E->getSigExpr()->IgnoreParenCasts());
+      const ObjCSelectorExpr *SelE =
+          dyn_cast<ObjCSelectorExpr>(E->getSelExpr()->IgnoreParenCasts());
+
+      if (SigE && SelE) {
+         // Static path: build MetaABI frame from compile-time sig.
+         ASTContext &Ctx     = CGM.getContext();
+         auto       &Builder = CGF.Builder;
+
+         llvm::Constant *SigVal = GenerateConstantSignature(SigE);
+
+         llvm::Type *IdTy = CGM.getTypes().ConvertType(Ctx.getObjCIdType());
+         llvm::Value *TargetVal = CGF.EmitScalarExpr(E->getTarget());
+         if (TargetVal->getType() != IdTy)
+            TargetVal = Builder.CreateBitCast(TargetVal, IdTy);
+
+         llvm::Value *SelVal = EmitSelector(CGF, SelE->getSelector());
+
+         unsigned pType = (SigE->getBits() >> 24) & 0x3;
+         llvm::Value *FrameVal = nullptr;
+
+         if (pType == 1) {
+            FrameVal = llvm::Constant::getNullValue(CGM.VoidPtrTy);
+         } else if (pType == 0) {
+            if (E->getNumArgs() >= 1) {
+               llvm::Value *Arg0 = CGF.EmitScalarExpr(E->getArg(0));
+               if (Arg0->getType() != CGM.VoidPtrTy)
+                  Arg0 = Builder.CreateBitCast(Arg0, CGM.VoidPtrTy);
+               FrameVal = Arg0;
+            } else {
+               FrameVal = llvm::Constant::getNullValue(CGM.VoidPtrTy);
+            }
+         } else {
+            // ParameterBlock: need method decl to build frame.
+            // For explicit form, method decl may have been stored at Sema time.
+            ObjCMethodDecl *Method = E->getMethodDecl();
+            FrameVal = llvm::Constant::getNullValue(CGM.VoidPtrTy);
+            if (E->getNumArgs() > 0 && Method) {
+               CallArgList MArgs;
+               for (unsigned I = 0, N = E->getNumArgs(); I < N; ++I) {
+                  const Expr *ArgExpr = E->getArg(I);
+                  RValue ArgRV = CGF.EmitAnyExprToTemp(ArgExpr);
+                  MArgs.add(ArgRV, ArgExpr->getType());
+               }
+               ConvertToMetaABIArgsIfNeeded(CGF, Method, MArgs);
+               if (!MArgs.empty())
+                  FrameVal = MArgs[0].getRValue(CGF).getScalarVal();
+            }
+         }
+
+         llvm::Type *SelectorTy = CGM.getTypes().ConvertType(Ctx.getObjCSelType());
+         llvm::FunctionType *FnTy = llvm::FunctionType::get(
+             IdTy, {IdTy, IdTy, SelectorTy, CGM.VoidPtrTy, CGM.VoidPtrTy}, /*isVarArg=*/false);
+         llvm::FunctionCallee Fn =
+             CGM.CreateRuntimeFunction(FnTy, "NSInvocationCreateWithMetaABIFrame");
+
+         llvm::Value *SigAsId = Builder.CreateBitCast(SigVal, IdTy);
+         llvm::Value *ImpNull = llvm::Constant::getNullValue(CGM.VoidPtrTy);
+         llvm::Value *CallArgs[] = {SigAsId, TargetVal, SelVal, FrameVal, ImpNull};
+         return CGF.EmitCallOrInvoke(Fn, CallArgs);
+      }
+
+      // Dynamic path: emit call to NSInvocationCreateDynamic C function.
+      // The runtime implements this by forwarding to
+      // +[NSInvocation mulleInvocationWithTarget:selector:methodSignature:,...].
+      llvm::Value *TargetVal = CGF.EmitScalarExpr(E->getTarget());
+      llvm::Value *SelVal    = CGF.EmitScalarExpr(E->getSelExpr());
+      llvm::Value *SigVal    = CGF.EmitScalarExpr(E->getSigExpr());
+
+      SmallVector<llvm::Value *, 8> Args;
+      Args.push_back(TargetVal);
+      Args.push_back(SelVal);
+      Args.push_back(SigVal);
+      for (unsigned i = 0; i < E->getNumArgs(); ++i)
+         Args.push_back(CGF.EmitScalarExpr(E->getArg(i)));
+
+      llvm::FunctionType *FnTy = llvm::FunctionType::get(
+          CGM.VoidPtrTy, {CGM.VoidPtrTy, CGM.VoidPtrTy, CGM.VoidPtrTy},
+          /*isVarArg=*/true);
+      llvm::FunctionCallee Fn =
+          CGM.CreateRuntimeFunction(FnTy, "NSInvocationCreateDynamic");
+      return CGF.EmitCallOrInvoke(Fn, Args);
+   }
+
+   ASTContext        &Ctx     = CGM.getContext();
+   auto              &Builder = CGF.Builder;
+
+   // 1. Build the @signature constant for this invocation.
+   //    Reuse GenerateConstantSignature via a temporary ObjCSignatureExpr.
+   ObjCSignatureExpr TmpSig(Ctx.getObjCIdType(),
+                            E->getTypeEncoding().data(),
+                            E->getBits(), E->getCount(),
+                            E->getAtLoc(), E->getRParenLoc());
+   llvm::Constant *SigVal = GenerateConstantSignature(&TmpSig);
+
+   // 2. Emit target expression.
+   llvm::Type *IdTy = CGM.getTypes().ConvertType(Ctx.getObjCIdType());
+   llvm::Value *TargetVal = CGF.EmitScalarExpr(E->getTarget());
+   if (TargetVal->getType() != IdTy)
+      TargetVal = Builder.CreateBitCast(TargetVal, IdTy);
+
+   // 3. Emit selector.
+   llvm::Value *SelVal = EmitSelector(CGF, E->getSelector());
+
+   // 4. Build the MetaABI frame according to pType (bits[24:25]).
+   unsigned pType = (E->getBits() >> 24) & 0x3;
+   llvm::Value *FrameVal = nullptr;
+
+   if (pType == 1) {
+      // Void — no frame.
+      FrameVal = llvm::Constant::getNullValue(CGM.VoidPtrTy);
+   } else if (pType == 0) {
+      // VoidPointer — single id arg passed as void*.
+      if (E->getNumArgs() >= 1) {
+         llvm::Value *Arg0 = CGF.EmitScalarExpr(E->getArg(0));
+         if (Arg0->getType() != CGM.VoidPtrTy)
+            Arg0 = Builder.CreateBitCast(Arg0, CGM.VoidPtrTy);
+         FrameVal = Arg0;
+      } else {
+         FrameVal = llvm::Constant::getNullValue(CGM.VoidPtrTy);
+      }
+   } else {
+      // ParameterBlock (pType == 2) — build parameter block frame.
+      ObjCMethodDecl *Method = E->getMethodDecl();
+      assert(Method && "ObjCInvocationExpr: missing method decl for ParameterBlock");
+
+      if (E->getNumArgs() == 0) {
+         // No explicit args: create invocation with null frame (args set later
+         // via -setArgument:atIndex:).
+         FrameVal = llvm::Constant::getNullValue(CGM.VoidPtrTy);
+      } else {
+         CallArgList Args;
+         for (unsigned I = 0, N = E->getNumArgs(); I < N; ++I) {
+            const Expr *ArgExpr = E->getArg(I);
+            QualType ArgTy = ArgExpr->getType();
+            RValue ArgRV = CGF.EmitAnyExprToTemp(ArgExpr);
+            Args.add(ArgRV, ArgTy);
+         }
+
+         ConvertToMetaABIArgsIfNeeded(CGF, Method, Args);
+         if (!Args.empty())
+            FrameVal = Args[0].getRValue(CGF).getScalarVal();
+         else
+            FrameVal = llvm::Constant::getNullValue(CGM.VoidPtrTy);
+      }
+   }
+
+   // 5. Compute IMP value (null if no = IMP or { body } suffix).
+   llvm::Value *ImpVal = llvm::Constant::getNullValue(CGM.VoidPtrTy);
+   // @mulle-objc@ @invocation = IMP >
+   if (E->getImpExpr()) {
+      ImpVal = CGF.EmitScalarExpr(E->getImpExpr());
+      ImpVal = Builder.CreateBitCast(ImpVal, CGM.VoidPtrTy);
+   }
+   // @mulle-objc@ @invocation = IMP <
+   // @mulle-objc@ @invocation { body } >
+   ObjCMethodDecl *BodyMethod = E->getMethodDecl();
+   if (BodyMethod && BodyMethod->hasBody() && !E->getImpExpr()) {
+      // Emit the method body as a static function.
+      CodeGenFunction BodyCGF(CGM);
+      BodyCGF.GenerateObjCMethod(BodyMethod);
+      // Retrieve the emitted function from MethodDefinitions.
+      llvm::Function *ImpFn = GetMethodDefinition(BodyMethod);
+      assert(ImpFn && "body method not found after GenerateObjCMethod");
+      ImpVal = Builder.CreateBitCast(ImpFn, CGM.VoidPtrTy);
+   }
+   // @mulle-objc@ @invocation { body } <
+
+   // 6. Call NSInvocationCreateWithMetaABIFrame(sig, target, sel, frame, imp) -> id.
+   llvm::Type *SelectorTy = CGM.getTypes().ConvertType(Ctx.getObjCSelType());
+   llvm::FunctionType *FnTy = llvm::FunctionType::get(
+       IdTy, {IdTy, IdTy, SelectorTy, CGM.VoidPtrTy, CGM.VoidPtrTy}, /*isVarArg=*/false);
+   llvm::FunctionCallee Fn =
+       CGM.CreateRuntimeFunction(FnTy, "NSInvocationCreateWithMetaABIFrame");
+
+   llvm::Value *SigAsId = Builder.CreateBitCast(SigVal, IdTy);
+   llvm::Value *CallArgs[] = {SigAsId, TargetVal, SelVal, FrameVal, ImpVal};
+   return CGF.EmitCallOrInvoke(Fn, CallArgs);
+}
+// @mulle-objc@ @invocation <
 
 
 

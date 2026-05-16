@@ -1507,6 +1507,26 @@ void ASTStmtWriter::VisitObjCSignatureExpr(ObjCSignatureExpr *E) {
 }
 // @mulle-objc@ @signature <
 
+// @mulle-objc@ @invocation >
+void ASTStmtWriter::VisitObjCInvocationExpr(ObjCInvocationExpr *E) {
+  VisitExpr(E);
+  Record.push_back(E->getNumArgs());
+  Record.push_back(E->isExplicit() ? 1 : 0);
+  Record.AddString(E->getTypeEncoding());
+  Record.push_back(E->getBits());
+  Record.push_back(E->getCount());
+  Record.AddSelectorRef(E->getSelector());
+  Record.AddDeclRef(E->getMethodDecl());
+  Record.AddStmt(E->getImpExpr());
+  Record.AddSourceLocation(E->getAtLoc());
+  Record.AddSourceLocation(E->getRParenLoc());
+  // Write target + (selExpr + sigExpr for explicit form) + positional args.
+  for (auto *SE : E->children())
+    Record.AddStmt(SE);
+  Code = serialization::EXPR_OBJC_INVOCATION_EXPR;
+}
+// @mulle-objc@ @invocation <
+
 void ASTStmtWriter::VisitObjCSelectorExpr(ObjCSelectorExpr *E) {
   VisitExpr(E);
   Record.AddSelectorRef(E->getSelector());

@@ -673,6 +673,9 @@ private:
   void RewriteStringLiteral(ObjCStringLiteral *E);
   void RewriteSelectorExpr(ObjCSelectorExpr *E);
   void RewriteSignatureExpr(ObjCSignatureExpr *E); // @mulle-objc@
+  // @mulle-objc@ @invocation >
+  void RewriteInvocationExpr(ObjCInvocationExpr *E);
+  // @mulle-objc@ @invocation <
 
   // Helper: replace source range with text
   void ReplaceText(SourceRange R, StringRef Text) {
@@ -842,6 +845,10 @@ void RewriteMulleObjC::RewriteStmt(Stmt *S) {
   else if (auto *E = dyn_cast<ObjCSignatureExpr>(S))
     RewriteSignatureExpr(E);
   // @mulle-objc@ @signature <
+  // @mulle-objc@ @invocation >
+  else if (auto *E = dyn_cast<ObjCInvocationExpr>(S))
+    RewriteInvocationExpr(E);
+  // @mulle-objc@ @invocation <
   else if (auto *RS = dyn_cast<ReturnStmt>(S))
     RewriteReturnStmt(RS);
   else if (auto *EE = dyn_cast<ObjCEncodeExpr>(S)) {
@@ -2189,6 +2196,90 @@ void RewriteMulleObjC::RewriteSignatureExpr(ObjCSignatureExpr *E) {
 }
 // @mulle-objc@ @signature <
 
+// @mulle-objc@ @invocation >
+void RewriteMulleObjC::RewriteInvocationExpr(ObjCInvocationExpr *E) {
+  std::string Out;
+  llvm::raw_string_ostream OS(Out);
+
+  auto SubText = [&](Expr *Sub) -> std::string {
+    CharSourceRange R = CharSourceRange::getTokenRange(Sub->getSourceRange());
+    return Rewrite.getRewrittenText(R);
+  };
+
+  if (E->isExplicit()) {
+    // explicit form: sig is a compile-time @signature (already rewritten to
+    // ((void*)&__nssig_N._bits)), sel may be compile-time or runtime.
+    // Use NSInvocationCreateWithMetaABIFrame — same as prototype form.
+    // frame: null (caller sets args via -setArgument:atIndex: if needed).
+    OS << "NSInvocationCreateWithMetaABIFrame(";
+    OS << SubText(E->getSigExpr()) << ", ";
+    OS << SubText(E->getTarget()) << ", ";
+    OS << SubText(E->getSelExpr()) << ", ";
+    OS << "(void *) 0";  // frame — args not demoted in rewriter output
+    for (unsigned i = 0, n = E->getNumArgs(); i < n; ++i)
+      OS << " /* arg" << i << ": " << SubText(E->getArg(i)) << " */";
+    OS << ", (void *) 0";  // imp
+    OS << ")";
+  } else {
+    // prototype form (or nil-sig upgrade): we have the method decl and encoding.
+    // Emit a static signature constant and call NSInvocationCreateWithMetaABIFrame.
+    std::string VarName = "__nssig_" + std::to_string(NSStringCount++);
+    std::string TypesName = VarName + "_types";
+    StringRef Encoding = E->getTypeEncoding();
+    uint32_t  Bits     = E->getBits();
+    uint16_t  Count    = E->getCount();
+
+    std::string Def;
+    llvm::raw_string_ostream DS(Def);
+    DS << "static const char " << TypesName << "[] = \"";
+    for (char c : Encoding) { if (c == '"' || c == '\\') DS << '\\'; DS << c; }
+    DS << "\";\n";
+    DS << "#ifdef __MULLE_OBJC_TAO__\n"
+       << "static struct { void *_tao0; void *_tao1; intptr_t _rc; void *_isa;"
+       << " unsigned int _bits; unsigned short _count; unsigned short _extra;"
+       << " const char *_types; void *_infos; } " << VarName << " = {\n"
+       << "   (void *) 0, (void *) 0,\n"
+       << "   (intptr_t) 0x7ffffffffffffffe, (void *) 4,\n"
+       << "   " << Bits << "u, " << Count << "u, 0u,\n"
+       << "   " << TypesName << ", (void *) 0\n"
+       << "};\n#else\n"
+       << "static struct { intptr_t _rc; void *_isa;"
+       << " unsigned int _bits; unsigned short _count; unsigned short _extra;"
+       << " const char *_types; void *_infos; } " << VarName << " = {\n"
+       << "   (intptr_t) 0x7ffffffffffffffe, (void *) 4,\n"
+       << "   " << Bits << "u, " << Count << "u, 0u,\n"
+       << "   " << TypesName << ", (void *) 0\n"
+       << "};\n#endif\n";
+    NSStringPtrs.push_back("(struct _mulle_objc_object *) &" + VarName + "._bits");
+    NSStringDefs += Def;
+
+    uint32_t selHash = MulleObjCUniqueIdHashForString(E->getSelector().getAsString());
+    OS << "NSInvocationCreateWithMetaABIFrame(";
+    OS << "((void *) &" << VarName << "._bits), ";
+    OS << SubText(E->getTarget()) << ", ";
+    OS << "(mulle_objc_methodid_t) 0x";
+    OS.write_hex(selHash);
+    OS << "UL /* @selector(" << E->getSelector().getAsString() << ") */";
+    // frame: first arg as void* for VoidPointer pType, else null
+    unsigned pType = (Bits >> 24) & 0x3;
+    if (pType == 0 && E->getNumArgs() >= 1)
+      OS << ", (void *) " << SubText(E->getArg(0));
+    else
+      OS << ", (void *) 0";
+    // imp: emit actual IMP if = IMP suffix, else null
+    if (E->getImpExpr())
+      OS << ", (void *) " << SubText(E->getImpExpr());
+    else
+      OS << ", (void *) 0";
+    OS << ")";
+  }
+
+  // @mulle-objc@ @invocation = IMP — imp already passed as 5th arg above.
+
+  ReplaceText(E->getSourceRange(), Out);
+}
+// @mulle-objc@ @invocation <
+
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -2293,7 +2384,13 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
         uint32_t selId  = MulleObjCUniqueIdHashForString(sel);
         std::string cname;
         if (M->isAlias()) {
-          if (auto *TM = M->getAliasMethod())
+          // Follow alias chain to terminal method or C function.
+          const ObjCMethodDecl *TM = M;
+          while (TM->isAlias() && TM->getAliasMethod())
+            TM = TM->getAliasMethod();
+          if (TM->isAlias() && TM->getAliasFunction())
+            cname = TM->getAliasFunction()->getNameAsString();
+          else if (TM != M)
             cname = MethodCName(TM, D->getClassInterface());
           else if (auto *FD = M->getAliasFunction())
             cname = FD->getNameAsString();
@@ -2506,7 +2603,13 @@ std::string RewriteMulleObjC::EmitLoadMixinList() {
         uint32_t selId  = MulleObjCUniqueIdHashForString(sel);
         std::string cname;
         if (M->isAlias()) {
-          if (auto *TM = M->getAliasMethod())
+          // Follow alias chain to terminal method or C function.
+          const ObjCMethodDecl *TM = M;
+          while (TM->isAlias() && TM->getAliasMethod())
+            TM = TM->getAliasMethod();
+          if (TM->isAlias() && TM->getAliasFunction())
+            cname = TM->getAliasFunction()->getNameAsString();
+          else if (TM != M)
             cname = MethodCName(TM, D->getClassInterface());
           else if (auto *FD = M->getAliasFunction())
             cname = FD->getNameAsString();
@@ -2671,7 +2774,13 @@ std::string RewriteMulleObjC::EmitLoadCategoryList() {
         uint32_t selId  = MulleObjCUniqueIdHashForString(sel);
         std::string cname;
         if (M->isAlias()) {
-          if (auto *TM = M->getAliasMethod())
+          // Follow alias chain to terminal method or C function.
+          const ObjCMethodDecl *TM = M;
+          while (TM->isAlias() && TM->getAliasMethod())
+            TM = TM->getAliasMethod();
+          if (TM->isAlias() && TM->getAliasFunction())
+            cname = TM->getAliasFunction()->getNameAsString();
+          else if (TM != M)
             cname = MethodCName(TM, D->getClassInterface());
           else if (auto *FD = M->getAliasFunction())
             cname = FD->getNameAsString();

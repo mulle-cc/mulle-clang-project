@@ -1394,6 +1394,10 @@ CanThrowResult Sema::canThrow(const Stmt *S) {
   case Expr::ArrayInitIndexExprClass:
   case Expr::NoInitExprClass:
   case Expr::ObjCEncodeExprClass:
+  // @mulle-objc@ @invocation >
+  case Expr::ObjCSignatureExprClass:
+  case Expr::ObjCInvocationExprClass:
+  // @mulle-objc@ @invocation <
   case Expr::ObjCStringLiteralClass:
   case Expr::ObjCBoolLiteralExprClass:
   case Expr::OpaqueValueExprClass:

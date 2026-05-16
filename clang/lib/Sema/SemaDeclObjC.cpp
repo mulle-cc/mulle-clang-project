@@ -3614,6 +3614,7 @@ void SemaObjC::MatchAllMethodDeclarations(
     if (!I->isPropertyAccessor() &&
         !InsMap.count(I->getSelector())) {
       if (ImmediateClass)
+      {
          // @mulle-objc@ language: remove warnings for unimplemented instance methods like -retain, -release which are always defined >
          if( getLangOpts().ObjCRuntime.hasMulleMetaABI())
          {
@@ -3629,6 +3630,7 @@ void SemaObjC::MatchAllMethodDeclarations(
          // @mulle-objc@ language: remove warnings for unimplemented instance methods like -retain, -release which are always defined <
            WarnUndefinedMethod(SemaRef, IMPDecl, I, IncompleteImpl,
                                diag::warn_undef_method_impl);
+      }
       continue;
     } else {
       ObjCMethodDecl *ImpMethodDecl =

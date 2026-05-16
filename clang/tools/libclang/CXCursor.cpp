@@ -552,6 +552,12 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
     K = CXCursor_ObjCEncodeExpr;
     break;
 
+  // @mulle-objc@ @signature/@invocation — no dedicated CXCursor kind; fall through to UnexposedExpr
+  case Stmt::ObjCSignatureExprClass:
+  case Stmt::ObjCInvocationExprClass:
+    K = CXCursor_UnexposedExpr;
+    break;
+
   case Stmt::ObjCSelectorExprClass:
     K = CXCursor_ObjCSelectorExpr;
     break;

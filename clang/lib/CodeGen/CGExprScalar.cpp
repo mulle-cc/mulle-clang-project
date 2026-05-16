@@ -970,6 +970,11 @@ public:
     return CGF.EmitObjCSignatureExpr(E);
   }
   // @mulle-objc@ @signature <
+  // @mulle-objc@ @invocation >
+  Value *VisitObjCInvocationExpr(const ObjCInvocationExpr *E) {
+    return CGF.EmitObjCInvocationExpr(E);
+  }
+  // @mulle-objc@ @invocation <
   Value *VisitObjCArrayLiteral(ObjCArrayLiteral *E) {
     return CGF.EmitObjCArrayLiteral(E);
   }

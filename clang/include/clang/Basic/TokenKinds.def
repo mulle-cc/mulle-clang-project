@@ -880,6 +880,10 @@ OBJC_AT_KEYWORD(dependency)
 OBJC_AT_KEYWORD(signature)
 // @mulle-objc@ signature keyword <
 
+// @mulle-objc@ invocation keyword >
+OBJC_AT_KEYWORD(invocation)
+// @mulle-objc@ invocation keyword <
+
 //===----------------------------------------------------------------------===//
 // Notable identifiers.
 //===----------------------------------------------------------------------===//

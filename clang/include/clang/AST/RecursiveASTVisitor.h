@@ -2967,6 +2967,13 @@ DEF_TRAVERSE_STMT(ObjCEncodeExpr, {
 DEF_TRAVERSE_STMT(ObjCSignatureExpr, {})
 // @mulle-objc@ @signature <
 
+// @mulle-objc@ @invocation >
+DEF_TRAVERSE_STMT(ObjCInvocationExpr, {
+  if (S->getImpExpr())
+    TRY_TO(TraverseStmt(S->getImpExpr()));
+})
+// @mulle-objc@ @invocation <
+
 DEF_TRAVERSE_STMT(ObjCIsaExpr, {})
 DEF_TRAVERSE_STMT(ObjCIvarRefExpr, {})
 

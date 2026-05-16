@@ -3456,6 +3456,7 @@ bool Expr::isConstantInitializer(ASTContext &Ctx, bool IsForRef,
   case ObjCEncodeExprClass:
   // @mulle-objc@ @signature >
   case ObjCSignatureExprClass:
+  case ObjCInvocationExprClass:
   // @mulle-objc@ @signature <
     return true;
   // @mulle-objc@: allow @selector as compile-time constant
@@ -3815,6 +3816,7 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
   case ObjCEncodeExprClass:
   // @mulle-objc@ @signature >
   case ObjCSignatureExprClass:
+  case ObjCInvocationExprClass:
   // @mulle-objc@ @signature <
   case ObjCBoolLiteralExprClass:
   case ObjCAvailabilityCheckExprClass:

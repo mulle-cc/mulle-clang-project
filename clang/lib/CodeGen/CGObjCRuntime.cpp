@@ -533,6 +533,14 @@ llvm::Constant *CGObjCRuntime::GenerateConstantSignature(const ObjCSignatureExpr
    return( nullptr);
 }
 // @mulle-objc@ @signature <
+// @mulle-objc@ @invocation >
+llvm::Value *CGObjCRuntime::EmitInvocationExpr(CodeGenFunction &CGF,
+                                               const ObjCInvocationExpr *E)
+{
+  // Not supported for non-MulleObjC runtimes.
+  return llvm::Constant::getNullValue(CGF.ConvertType(E->getType()));
+}
+// @mulle-objc@ @invocation <
 // @mulle-objc@ MetaABI: to generate LLVM method argument list <
 
 

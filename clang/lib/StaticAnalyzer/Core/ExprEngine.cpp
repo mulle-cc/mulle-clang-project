@@ -1939,6 +1939,10 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     case Stmt::ObjCIsaExprClass:
     case Stmt::ObjCProtocolExprClass:
     case Stmt::ObjCSelectorExprClass:
+    // @mulle-objc@ @invocation >
+    case Stmt::ObjCSignatureExprClass:
+    case Stmt::ObjCInvocationExprClass:
+    // @mulle-objc@ @invocation <
     case Stmt::ParenListExprClass:
     case Stmt::ShuffleVectorExprClass:
     case Stmt::ConvertVectorExprClass:

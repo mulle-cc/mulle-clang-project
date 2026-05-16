@@ -1695,6 +1695,17 @@ def err_signature_ambiguous_selector : Error<
 def err_signature_not_available : Error<
   "@signature is only available with the mulle-objc runtime">;
 // @mulle-objc@ @signature <
+// @mulle-objc@ @invocation >
+def err_invocation_nil_selector : Error<
+  "@invocation: selector expression is a null constant; use a valid SEL">;
+def err_invocation_nil_target_nil_sig : Error<
+  "@invocation: target and methodSignature are both nil; signature cannot be resolved at creation time">;
+def err_objc_invocation_body_requires_typed_target : Error<
+  "@invocation { body } requires a target with a known Objective-C class type">;
+def warn_invocation_imp_signature : Warning<
+  "@invocation = IMP: function should have signature 'void *(id, SEL, void *)'">,
+  InGroup<DiagGroup<"objc-invocation-imp-signature">>;
+// @mulle-objc@ @invocation <
 def warn_implicit_atomic_property : Warning<
   "property is assumed atomic by default">, InGroup<ImplicitAtomic>, DefaultIgnore;
 def note_auto_readonly_iboutlet_fixup_suggest : Note<

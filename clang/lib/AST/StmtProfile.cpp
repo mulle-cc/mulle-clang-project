@@ -2437,6 +2437,17 @@ void StmtProfiler::VisitObjCSignatureExpr(const ObjCSignatureExpr *S) {
 }
 // @mulle-objc@ @signature <
 
+// @mulle-objc@ @invocation >
+void StmtProfiler::VisitObjCInvocationExpr(const ObjCInvocationExpr *S) {
+  VisitExpr(S);
+  VisitName(S->getSelector());
+  ID.AddString(S->getTypeEncoding());
+  ID.AddBoolean(S->getImpExpr() != nullptr);
+  if (S->getImpExpr())
+    Visit(S->getImpExpr());
+}
+// @mulle-objc@ @invocation <
+
 void StmtProfiler::VisitObjCSelectorExpr(const ObjCSelectorExpr *S) {
   VisitExpr(S);
   VisitName(S->getSelector());

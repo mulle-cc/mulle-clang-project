@@ -4970,6 +4970,7 @@ recurse:
   case Expr::ObjCEncodeExprClass:
   // @mulle-objc@ @signature >
   case Expr::ObjCSignatureExprClass:
+  case Expr::ObjCInvocationExprClass:
   // @mulle-objc@ @signature <
   case Expr::ObjCIsaExprClass:
   case Expr::ObjCIvarRefExprClass:

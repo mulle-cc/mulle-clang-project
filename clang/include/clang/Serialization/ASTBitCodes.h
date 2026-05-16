@@ -1790,6 +1790,11 @@ enum StmtCode {
   EXPR_OBJC_SIGNATURE_EXPR,
   // @mulle-objc@ @signature <
 
+  // @mulle-objc@ @invocation >
+  /// An ObjCInvocationExpr record.
+  EXPR_OBJC_INVOCATION_EXPR,
+  // @mulle-objc@ @invocation <
+
   /// An ObjCSelectorExpr record.
   EXPR_OBJC_SELECTOR_EXPR,
 

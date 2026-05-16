@@ -1529,6 +1529,315 @@ ExprResult SemaObjC::ActOnSignatureFromMethodDecl(
 }
 // @mulle-objc@ @signature <
 
+// @mulle-objc@ @invocation >
+static ExprResult BuildObjCInvocationExpr(ASTContext &Context,
+                                          ObjCMethodDecl *Method,
+                                          Expr *Target,
+                                          ArrayRef<Expr *> Args,
+                                          SourceLocation AtLoc,
+                                          SourceLocation RParenLoc) {
+  std::string EncStr = Context.getObjCEncodingForMethodDecl(Method);
+  char *EncBuf = new (Context) char[EncStr.size() + 1];
+  std::memcpy(EncBuf, EncStr.c_str(), EncStr.size() + 1);
+
+  uint16_t Count = (uint16_t)(3 + Method->param_size());
+  uint32_t Bits  = Method->isVariadic() ? 0x08u : 0u;
+  Bits |= ComputeMetaABIBitsForMethod(Context, Method);
+
+  // AllExprs = [target, arg0, arg1, ...]
+  SmallVector<Expr *, 8> AllExprs;
+  AllExprs.push_back(Target);
+  AllExprs.append(Args.begin(), Args.end());
+
+  QualType Ty = Context.getObjCIdType();
+  return ObjCInvocationExpr::Create(Context, Ty, EncBuf, Bits, Count,
+                                    Method->getSelector(), Method,
+                                    AllExprs, AtLoc, RParenLoc);
+}
+
+ExprResult SemaObjC::ActOnInvocationFromMethodDecl(ObjCMethodDecl *Method,
+                                                   Expr *Target,
+                                                   ArrayRef<Expr *> Args,
+                                                   SourceLocation AtLoc,
+                                                   SourceLocation RParenLoc) {
+  ASTContext &Context = getASTContext();
+  if (!getLangOpts().ObjCRuntime.hasMulleMetaABI()) {
+    Diag(AtLoc, diag::err_signature_not_available);
+    return ExprError();
+  }
+
+  // Apply array/function decay to args before building the invocation so that
+  // e.g. string literals (char[N]) become char* in the MetaABI frame.
+  SmallVector<Expr *, 8> DecayedArgs;
+  for (Expr *Arg : Args) {
+    ExprResult Converted = SemaRef.DefaultFunctionArrayLvalueConversion(Arg);
+    if (Converted.isInvalid())
+      return ExprError();
+    DecayedArgs.push_back(Converted.get());
+  }
+  return BuildObjCInvocationExpr(Context, Method, Target, DecayedArgs, AtLoc,
+                                 RParenLoc);
+}
+
+ExprResult SemaObjC::ActOnInvocationWithSelectorAndSignature(
+    Selector Sel, ObjCSignatureExpr *SigE, Expr *Target,
+    ArrayRef<Expr *> Args, SourceLocation AtLoc, SourceLocation RParenLoc) {
+  ASTContext &Context = getASTContext();
+  if (!getLangOpts().ObjCRuntime.hasMulleMetaABI()) {
+    Diag(AtLoc, diag::err_signature_not_available);
+    return ExprError();
+  }
+
+  // Look up the method to build the MetaABI frame.
+  SourceRange SR(AtLoc, RParenLoc);
+  ObjCMethodDecl *Method = LookupInstanceMethodInGlobalPool(Sel, SR);
+  if (!Method)
+    Method = LookupFactoryMethodInGlobalPool(Sel, SR);
+  if (!Method) {
+    Diag(AtLoc, diag::warn_undeclared_selector) << Sel;
+    return ExprError();
+  }
+
+  // Borrow encoding/bits/count from the explicit @signature expression.
+  size_t EncLen = SigE->getTypeEncoding().size();
+  char *Enc = new (Context) char[EncLen + 1];
+  std::memcpy(Enc, SigE->getTypeEncoding().data(), EncLen + 1);
+
+  SmallVector<Expr *, 8> AllExprs;
+  AllExprs.push_back(Target);
+  AllExprs.append(Args.begin(), Args.end());
+
+  QualType Ty = Context.getObjCIdType();
+  return ObjCInvocationExpr::Create(Context, Ty, Enc,
+                                    SigE->getBits(), SigE->getCount(),
+                                    Sel, Method,
+                                    AllExprs, AtLoc, RParenLoc);
+}
+
+ExprResult SemaObjC::ActOnInvocationWithRuntimeSelectorAndSignature(
+    SourceLocation AtLoc, SourceLocation RParenLoc,
+    Expr *Target, Expr *SelExpr, Expr *SigExpr,
+    MultiExprArg Args) {
+  ASTContext &Context = getASTContext();
+  if (!getLangOpts().ObjCRuntime.hasMulleMetaABI()) {
+    Diag(AtLoc, diag::err_signature_not_available);
+    return ExprError();
+  }
+
+  // Look up NSInvocation to get NSInvocation * as the result type.
+  IdentifierInfo *NSInvocationId = &Context.Idents.get("NSInvocation");
+  NamedDecl *IF = SemaRef.LookupSingleName(SemaRef.TUScope, NSInvocationId,
+                                           AtLoc, Sema::LookupOrdinaryName);
+  if (!IF) {
+    // Fallback: search TU decl directly (handles module imports).
+    auto Results = Context.getTranslationUnitDecl()->lookup(
+        DeclarationName(NSInvocationId));
+    for (auto *D : Results)
+      if ((IF = dyn_cast<ObjCInterfaceDecl>(D))) break;
+  }
+  ObjCInterfaceDecl *NSInvocationDecl = dyn_cast_or_null<ObjCInterfaceDecl>(IF);
+  if (!NSInvocationDecl) {
+    Diag(AtLoc, diag::err_no_nsconstant_string_class) << NSInvocationId;
+    return ExprError();
+  }
+
+  QualType ObjTy = Context.getObjCInterfaceType(NSInvocationDecl);
+  QualType T     = Context.getObjCObjectPointerType(ObjTy);
+
+  SmallVector<Expr *, 8> ArgVec(Args.begin(), Args.end());
+
+  // Compile-time null selector is always an error.
+  // Use IgnoreParenCasts so that ObjC-typed null constants like (id)0 are
+  // detected; isNullPointerConstant only sees through (void*)0 for C casts.
+  if (SelExpr->IgnoreParenCasts()->isNullPointerConstant(
+          Context, Expr::NPC_ValueDependentIsNotNull)) {
+    Diag(SelExpr->getBeginLoc(), diag::err_invocation_nil_selector);
+    return ExprError();
+  }
+
+  // Compile-time nil sig + compile-time nil target → invocation will always be nil.
+  if (SigExpr->IgnoreParenCasts()->isNullPointerConstant(
+          Context, Expr::NPC_ValueDependentIsNotNull) &&
+      Target->IgnoreParenCasts()->isNullPointerConstant(
+          Context, Expr::NPC_ValueDependentIsNotNull)) {
+    Diag(AtLoc, diag::err_invocation_nil_target_nil_sig);
+    return ExprError();
+  }
+
+  // If sig is nil and sel is a compile-time @selector, look up the method and
+  // build a static invocation (same as prototype form).
+  // Lookup order: target's static type first, then global method pool.
+  if (auto *SelE = dyn_cast<ObjCSelectorExpr>(SelExpr->IgnoreParenCasts())) {
+    if (SigExpr->IgnoreParenCasts()->isNullPointerConstant(
+            Context, Expr::NPC_ValueDependentIsNotNull)) {
+      Selector Sel = SelE->getSelector();
+      ObjCMethodDecl *Method = nullptr;
+
+      // Try target's static type first.
+      QualType TargetTy = Target->getType();
+      if (const ObjCObjectPointerType *OPT =
+              TargetTy->getAs<ObjCObjectPointerType>()) {
+        if (ObjCInterfaceDecl *IFace = OPT->getInterfaceDecl()) {
+          Method = IFace->lookupMethod(Sel, /*isInstance=*/true);
+          if (!Method)
+            Method = IFace->lookupMethod(Sel, /*isInstance=*/false);
+        }
+      }
+
+      // Fall back to global method pool.
+      if (!Method) {
+        SourceRange SR(AtLoc, RParenLoc);
+        Method = LookupInstanceMethodInGlobalPool(Sel, SR);
+        if (!Method)
+          Method = LookupFactoryMethodInGlobalPool(Sel, SR);
+      }
+
+      if (Method) {
+        SmallVector<Expr *, 8> DecayedArgs;
+        for (Expr *Arg : ArgVec) {
+          ExprResult R = SemaRef.DefaultFunctionArrayLvalueConversion(Arg);
+          if (R.isInvalid()) return ExprError();
+          DecayedArgs.push_back(R.get());
+        }
+        return BuildObjCInvocationExpr(Context, Method, Target, DecayedArgs,
+                                       AtLoc, RParenLoc);
+      }
+    }
+  }
+
+  // If sig is a compile-time @signature, use the explicit form (codegen handles
+  // static vs dynamic dispatch based on whether sel is also compile-time).
+  if (dyn_cast<ObjCSignatureExpr>(SigExpr->IgnoreParenCasts())) {
+    // If sel is also compile-time, look up the method so codegen can build
+    // the ParameterBlock frame.
+    ObjCMethodDecl *Method = nullptr;
+    if (auto *SelE = dyn_cast<ObjCSelectorExpr>(SelExpr->IgnoreParenCasts())) {
+      Selector Sel = SelE->getSelector();
+      SourceRange SR(AtLoc, RParenLoc);
+      Method = LookupInstanceMethodInGlobalPool(Sel, SR);
+      if (!Method)
+        Method = LookupFactoryMethodInGlobalPool(Sel, SR);
+    }
+    auto *Inv = ObjCInvocationExpr::CreateExplicit(Context, T, Target, SelExpr,
+                                                   SigExpr, ArgVec, AtLoc, RParenLoc);
+    if (Method)
+      Inv->setMethodDecl(Method);
+    return Inv;
+  }
+
+  // Dynamic form: both sel and sig are runtime values.
+  // Emit ObjC message send to
+  // +[NSInvocation mulleInvocationWithTarget:selector:methodSignature:, args...]
+  // which uses mulle_vararg_list internally for proper arg demotion.
+  const IdentifierInfo *pieces[3] = {
+      &Context.Idents.get("mulleInvocationWithTarget"),
+      &Context.Idents.get("selector"),
+      &Context.Idents.get("methodSignature")
+  };
+  Selector DynSel = Context.Selectors.getSelector(3, pieces);
+
+  ObjCMethodDecl *DynMethod =
+      NSInvocationDecl->lookupMethod(DynSel, /*isInstance=*/false);
+  if (!DynMethod) {
+    Diag(AtLoc, diag::warn_undeclared_selector) << DynSel;
+    return ExprError();
+  }
+
+  SmallVector<Expr *, 8> MsgArgs;
+  MsgArgs.push_back(Target);
+  MsgArgs.push_back(SelExpr);
+  MsgArgs.push_back(SigExpr);
+  MsgArgs.append(ArgVec.begin(), ArgVec.end());
+
+  TypeSourceInfo *RecvTSI = Context.getTrivialTypeSourceInfo(
+      Context.getObjCInterfaceType(NSInvocationDecl), AtLoc);
+
+  SmallVector<SourceLocation, 3> SelLocs(3, AtLoc);
+
+  return SemaRef.ObjC().BuildClassMessage(
+      RecvTSI,
+      Context.getObjCInterfaceType(NSInvocationDecl),
+      SourceLocation(),
+      DynSel,
+      DynMethod,
+      AtLoc,
+      SelLocs,
+      RParenLoc,
+      MsgArgs);
+}
+
+// @mulle-objc@ @invocation = IMP >
+ExprResult SemaObjC::ActOnInvocationWithIMP(Expr *InvExpr, Expr *ImpExpr,
+                                            SourceLocation AtLoc) {
+  // InvExpr must be an ObjCInvocationExpr.
+  auto *Inv = dyn_cast_or_null<ObjCInvocationExpr>(InvExpr);
+  if (!Inv)
+    return ExprError();
+
+  ExprResult Converted = SemaRef.DefaultFunctionArrayLvalueConversion(ImpExpr);
+  if (Converted.isInvalid())
+    return ExprError();
+
+  // Warn if the IMP doesn't match void *(id, SEL, void *).
+  // Look through explicit casts like (IMP) to check the underlying function.
+  Expr *Inner = Converted.get()->IgnoreParenCasts();
+  QualType ImpTy = Inner->getType();
+  // If it's a bare function type (DeclRefExpr to function), get the pointer type.
+  if (ImpTy->isFunctionType())
+    ImpTy = SemaRef.getASTContext().getPointerType(ImpTy);
+  if (auto *PT = ImpTy->getAs<PointerType>()) {
+    if (auto *FT = PT->getPointeeType()->getAs<FunctionProtoType>()) {
+      bool bad = false;
+      if (FT->getNumParams() != 3)
+        bad = true;
+      else {
+        // param 0: id (any ObjC object pointer)
+        if (!FT->getParamType(0)->isObjCObjectPointerType())
+          bad = true;
+        // param 1: SEL
+        if (!FT->getParamType(1)->isObjCSelType() &&
+            !FT->getParamType(1)->isIntegerType())
+          bad = true;
+        // param 2: void *
+        if (!FT->getParamType(2)->isVoidPointerType())
+          bad = true;
+      }
+      // return: void * (any pointer is fine)
+      if (!FT->getReturnType()->isPointerType() &&
+          !FT->getReturnType()->isVoidType())
+        bad = true;
+      if (bad)
+        SemaRef.Diag(ImpExpr->getBeginLoc(),
+                     diag::warn_invocation_imp_signature);
+    }
+  }
+
+  Inv->setImpExpr(Converted.get());
+  return Inv;
+}
+// @mulle-objc@ @invocation = IMP <
+
+// @mulle-objc@ @invocation { body } >
+ExprResult SemaObjC::ActOnInvocationWithBody(Expr *InvExpr,
+                                             ObjCMethodDecl *Method,
+                                             SourceLocation AtLoc) {
+  auto *Inv = dyn_cast_or_null<ObjCInvocationExpr>(InvExpr);
+  if (!Inv || !Method)
+    return ExprError();
+
+  // The method body has already been parsed and attached to Method.
+  // Store the method decl so codegen can generate the function and
+  // store its address in _implementation.
+  Inv->setMethodDecl(Method);
+  // Signal that this is a body form by setting ImpExpr to a sentinel.
+  // We use a null pointer constant as a placeholder; codegen checks
+  // Method->hasBody() to distinguish = IMP from { body }.
+  return Inv;
+}
+// @mulle-objc@ @invocation { body } <
+
+// @mulle-objc@ @invocation <
+
 ExprResult SemaObjC::ParseObjCProtocolExpression(IdentifierInfo *ProtocolId,
                                                  SourceLocation AtLoc,
                                                  SourceLocation ProtoLoc,

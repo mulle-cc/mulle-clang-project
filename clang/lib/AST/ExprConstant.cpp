@@ -2101,6 +2101,7 @@ static bool IsGlobalLValue(APValue::LValueBase B) {
   case Expr::ObjCEncodeExprClass:
   // @mulle-objc@ @signature >
   case Expr::ObjCSignatureExprClass:
+  case Expr::ObjCInvocationExprClass:
   // @mulle-objc@ @signature <
     return true;
   case Expr::ObjCBoxedExprClass:
@@ -9510,6 +9511,7 @@ public:
   bool VisitObjCEncodeExpr(const ObjCEncodeExpr *E) { return Success(E); }
   // @mulle-objc@ @signature >
   bool VisitObjCSignatureExpr(const ObjCSignatureExpr *E) { return false; }
+  bool VisitObjCInvocationExpr(const ObjCInvocationExpr *E) { return false; }
   // @mulle-objc@ @signature <
   bool VisitCXXTypeidExpr(const CXXTypeidExpr *E);
   bool VisitCXXUuidofExpr(const CXXUuidofExpr *E);
@@ -21255,6 +21257,7 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
   case Expr::ObjCEncodeExprClass:
   // @mulle-objc@ @signature >
   case Expr::ObjCSignatureExprClass:
+  case Expr::ObjCInvocationExprClass:
   // @mulle-objc@ @signature <
   case Expr::ObjCMessageExprClass:
   // @mulle-objc@ uniqueid: make @selector() and @protocol() constants integers >

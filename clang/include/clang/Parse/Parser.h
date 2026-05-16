@@ -5867,6 +5867,13 @@ private:
   ExprResult ParseObjCSignatureExpression(SourceLocation AtLoc);
   // @mulle-objc@ @signature <
 
+  // @mulle-objc@ @invocation >
+  /// \verbatim
+  ///   @invocation ( target, method-call-args )
+  /// \endverbatim
+  ExprResult ParseObjCInvocationExpression(SourceLocation AtLoc);
+  // @mulle-objc@ @invocation <
+
   /// \verbatim
   ///     objc-selector-expression
   ///       @selector '(' '('[opt] objc-keyword-selector ')'[opt] ')'

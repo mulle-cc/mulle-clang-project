@@ -1457,8 +1457,10 @@ Decl *Parser::ParseObjCMethodDecl(SourceLocation mLoc,
   bool isVariadic = false;
   bool cStyleParamWarned = false;
 
-  // Parse the (optional) parameter list.
-  while (Tok.is(tok::comma)) {
+  // Parse the (optional) C-style parameter list.
+  // When ForSignature is true (e.g. inside @invocation), the comma belongs to
+  // the caller (positional args), not the method declaration.
+  while (!ForSignature && Tok.is(tok::comma)) {
     ConsumeToken();
     if (Tok.is(tok::ellipsis)) {
       isVariadic = true;
@@ -2981,6 +2983,10 @@ ExprResult Parser::ParseObjCAtExpression(SourceLocation AtLoc) {
     case tok::objc_signature:
       return ParsePostfixExpressionSuffix(ParseObjCSignatureExpression(AtLoc));
     // @mulle-objc@ @signature <
+    // @mulle-objc@ @invocation >
+    case tok::objc_invocation:
+      return ParsePostfixExpressionSuffix(ParseObjCInvocationExpression(AtLoc));
+    // @mulle-objc@ @invocation <
     case tok::objc_available:
       return ParseAvailabilityCheckExpr(AtLoc);
       default: {
@@ -3736,8 +3742,155 @@ ExprResult Parser::ParseObjCSignatureExpression(SourceLocation AtLoc) {
 }
 // @mulle-objc@ @signature <
 
+// @mulle-objc@ @invocation >
+/// @invocation( target, method-call )
+///
+/// method-call is one of:
+///   Form 1 (interleaved): selectorPiece [ : arg [selectorPiece : arg]* ]
+///   prototype form (prototype):   - | + (rettype) sel:(paramtype)name ...
+///   explicit form (explicit):    @selector(sel) , @signature(...) , args...
+ExprResult Parser::ParseObjCInvocationExpression(SourceLocation AtLoc) {
+  assert(Tok.isObjCAtKeyword(tok::objc_invocation) &&
+         "Not an @invocation expression!");
+
+  ConsumeToken(); // consume 'invocation'
+
+  if (Tok.isNot(tok::l_paren))
+    return ExprError(Diag(Tok, diag::err_expected_lparen_after)
+                     << "@invocation");
+
+  BalancedDelimiterTracker T(*this, tok::l_paren);
+  T.consumeOpen();
+
+  // Parse target expression (first positional argument, before the comma).
+  ExprResult TargetRes = ParseAssignmentExpression();
+  if (TargetRes.isInvalid()) {
+    SkipUntil(tok::r_paren, StopAtSemi);
+    return ExprError();
+  }
+  Expr *Target = TargetRes.get();
+
+  if (ExpectAndConsume(tok::comma)) {
+    SkipUntil(tok::r_paren, StopAtSemi);
+    return ExprError();
+  }
+
+  // prototype form: prototype (- or +)
+  // Only prototype form supports { body } since it has named parameters.
+  ObjCMethodDecl *ProtoMethodDecl = nullptr;
+  ExprResult InvResult;
+
+  if (Tok.isOneOf(tok::minus, tok::plus)) {
+    tok::TokenKind mType = Tok.getKind();
+    SourceLocation mLoc = ConsumeToken();
+    Decl *MethodDecl =
+        ParseObjCMethodDecl(mLoc, mType, tok::objc_not_keyword,
+                            /*MethodDefinition=*/false, /*ForSignature=*/true);
+    // Parse positional args (comma-separated) up to ')'
+    SmallVector<Expr *, 8> Args;
+    while (Tok.is(tok::comma)) {
+      ConsumeToken();
+      ExprResult ArgRes = ParseAssignmentExpression();
+      if (ArgRes.isInvalid()) {
+        SkipUntil(tok::r_paren, StopAtSemi);
+        return ExprError();
+      }
+      Args.push_back(ArgRes.get());
+    }
+    T.consumeClose();
+    if (!MethodDecl)
+      return ExprError();
+    ProtoMethodDecl = cast<ObjCMethodDecl>(MethodDecl);
+    InvResult = Actions.ObjC().ActOnInvocationFromMethodDecl(
+        ProtoMethodDecl, Target, Args, AtLoc, T.getCloseLocation());
+  } else {
+    // explicit form: @invocation(target, selExpr, sigExpr [, arg1, arg2, ...])
+    ExprResult SelRes = ParseAssignmentExpression();
+    if (SelRes.isInvalid()) {
+      SkipUntil(tok::r_paren, StopAtSemi);
+      return ExprError();
+    }
+
+    if (ExpectAndConsume(tok::comma)) {
+      SkipUntil(tok::r_paren, StopAtSemi);
+      return ExprError();
+    }
+
+    ExprResult SigRes = ParseAssignmentExpression();
+    if (SigRes.isInvalid()) {
+      SkipUntil(tok::r_paren, StopAtSemi);
+      return ExprError();
+    }
+
+    SmallVector<Expr *, 8> Args;
+    while (Tok.is(tok::comma)) {
+      ConsumeToken();
+      if (Tok.is(tok::r_paren))
+        break;
+      ExprResult ArgRes = ParseAssignmentExpression();
+      if (ArgRes.isInvalid()) {
+        SkipUntil(tok::r_paren, StopAtSemi);
+        return ExprError();
+      }
+      Args.push_back(ArgRes.get());
+    }
+
+    T.consumeClose();
+    InvResult = Actions.ObjC().ActOnInvocationWithRuntimeSelectorAndSignature(
+        AtLoc, T.getCloseLocation(), Target, SelRes.get(), SigRes.get(), Args);
+  }
+
+  if (InvResult.isInvalid())
+    return InvResult;
+
+  // @mulle-objc@ @invocation = IMP >
+  // Optional suffix: = IMP  or  { body }
+  if (Tok.is(tok::equal)) {
+    ConsumeToken(); // consume '='
+    ExprResult ImpRes = ParseAssignmentExpression();
+    if (ImpRes.isInvalid())
+      return ExprError();
+    return Actions.ObjC().ActOnInvocationWithIMP(
+        InvResult.get(), ImpRes.get(), AtLoc);
+  }
+  // @mulle-objc@ @invocation = IMP <
+
+  // @mulle-objc@ @invocation { body } >
+  if (Tok.is(tok::l_brace)) {
+    if (!ProtoMethodDecl) {
+      Diag(Tok, diag::err_expected_semi_after_expr);
+      return ExprError();
+    }
+    // Require target to be a typed ObjC pointer so self has a known type.
+    ObjCInterfaceDecl *TargetClass = nullptr;
+    QualType TargetTy = Target->getType();
+    if (auto *OPT = TargetTy->getAs<ObjCObjectPointerType>())
+      if (auto *IT = OPT->getInterfaceType())
+        TargetClass = IT->getDecl();
+    if (!TargetClass) {
+      Diag(Target->getBeginLoc(), diag::err_objc_invocation_body_requires_typed_target);
+      return ExprError();
+    }
+    ProtoMethodDecl->setDeclContext(TargetClass);
+
+    unsigned ScopeFlags = Scope::FnScope | Scope::DeclScope |
+                          Scope::CompoundStmtScope;
+    ParseScope BodyScope(this, ScopeFlags);
+    Actions.ObjC().ActOnStartOfObjCMethodDef(getCurScope(), ProtoMethodDecl);
+    StmtResult Body = ParseCompoundStatementBody();
+    BodyScope.Exit();
+    if (Body.isInvalid()) return ExprError();
+    Actions.ActOnFinishFunctionBody(ProtoMethodDecl, Body.get());
+    return Actions.ObjC().ActOnInvocationWithBody(
+        InvResult.get(), ProtoMethodDecl, AtLoc);
+  }
+  // @mulle-objc@ @invocation { body } <
+
+  return InvResult;
+}
+// @mulle-objc@ @invocation <
+
 void Parser::ParseLexedObjCMethodDefs(LexedMethod &LM, bool parseMethod) {
-  // MCDecl might be null due to error in method or c-function  prototype, etc.
   Decl *MCDecl = LM.D;
   bool skip =
       MCDecl && ((parseMethod && !Actions.ObjC().isObjCMethodDecl(MCDecl)) ||

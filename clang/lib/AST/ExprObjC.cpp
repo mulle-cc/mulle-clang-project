@@ -345,3 +345,98 @@ StringRef ObjCBridgedCastExpr::getBridgeKindName() const {
 
   llvm_unreachable("Invalid BridgeKind!");
 }
+
+// @mulle-objc@ @invocation >
+ObjCInvocationExpr *ObjCInvocationExpr::Create(const ASTContext &C,
+                                               QualType T, const char *Enc,
+                                               uint32_t Bits, uint16_t Count,
+                                               Selector Sel, ObjCMethodDecl *MD,
+                                               ArrayRef<Expr *> Args,
+                                               SourceLocation AtLoc,
+                                               SourceLocation RParenLoc) {
+  // Args = [target, arg0, arg1, ...], so TotalExprs >= 1.
+  unsigned TotalExprs = Args.size();
+  void *Mem = C.Allocate(sizeof(ObjCInvocationExpr) +
+                         TotalExprs * sizeof(Stmt *),
+                         alignof(ObjCInvocationExpr));
+  ObjCInvocationExpr *E = new (Mem) ObjCInvocationExpr(EmptyShell(),
+                                                       TotalExprs > 0
+                                                         ? TotalExprs - 1
+                                                         : 0);
+  E->TypeEncoding = Enc;
+  E->Bits         = Bits;
+  E->Count        = Count;
+  E->SelName      = Sel;
+  E->Method       = MD;
+  E->ImpExpr      = nullptr;
+  E->AtLoc        = AtLoc;
+  E->RParenLoc    = RParenLoc;
+  E->IsExplicit = false;
+  E->TotalSubExprs = TotalExprs;
+  E->SubExprs     = reinterpret_cast<Stmt **>(E + 1);
+  for (unsigned I = 0; I < TotalExprs; ++I)
+    E->SubExprs[I] = Args[I];
+  E->setType(T);
+  E->setValueKind(VK_PRValue);
+  E->setObjectKind(OK_Ordinary);
+  E->setDependence(ExprDependence::None);
+  return E;
+}
+
+ObjCInvocationExpr *ObjCInvocationExpr::CreateExplicit(
+    const ASTContext &C, QualType T,
+    Expr *Target, Expr *SelExpr, Expr *SigExpr,
+    ArrayRef<Expr *> Args,
+    SourceLocation AtLoc, SourceLocation RParenLoc) {
+  unsigned NumArgs   = Args.size();
+  unsigned TotalSubs = NumArgs + 3; // target + selExpr + sigExpr + args
+  void *Mem = C.Allocate(sizeof(ObjCInvocationExpr) +
+                         TotalSubs * sizeof(Stmt *),
+                         alignof(ObjCInvocationExpr));
+  ObjCInvocationExpr *E = new (Mem) ObjCInvocationExpr(EmptyShell(), NumArgs);
+  E->IsExplicit = true;
+  E->TotalSubExprs = TotalSubs;
+  E->ImpExpr       = nullptr;
+  E->AtLoc         = AtLoc;
+  E->RParenLoc     = RParenLoc;
+  E->SubExprs      = reinterpret_cast<Stmt **>(E + 1);
+  E->SubExprs[0]   = Target;
+  E->SubExprs[1]   = SelExpr;
+  E->SubExprs[2]   = SigExpr;
+  for (unsigned i = 0; i < NumArgs; ++i)
+    E->SubExprs[i + 3] = Args[i];
+  E->setType(T);
+  E->setValueKind(VK_PRValue);
+  E->setObjectKind(OK_Ordinary);
+  E->setDependence(ExprDependence::None);
+  return E;
+}
+
+ObjCInvocationExpr *ObjCInvocationExpr::CreateEmpty(const ASTContext &C,
+                                                    unsigned numArgs) {
+  // numArgs positional args + 1 target slot.
+  unsigned TotalExprs = numArgs + 1;
+  void *Mem = C.Allocate(sizeof(ObjCInvocationExpr) +
+                         TotalExprs * sizeof(Stmt *),
+                         alignof(ObjCInvocationExpr));
+  ObjCInvocationExpr *E = new (Mem) ObjCInvocationExpr(EmptyShell(), numArgs);
+  E->IsExplicit = false;
+  E->TotalSubExprs = TotalExprs;
+  E->SubExprs = reinterpret_cast<Stmt **>(E + 1);
+  return E;
+}
+
+ObjCInvocationExpr *ObjCInvocationExpr::CreateEmptyExplicit(const ASTContext &C,
+                                                           unsigned numArgs) {
+  // target + selExpr + sigExpr + numArgs positional args.
+  unsigned TotalSubs = numArgs + 3;
+  void *Mem = C.Allocate(sizeof(ObjCInvocationExpr) +
+                         TotalSubs * sizeof(Stmt *),
+                         alignof(ObjCInvocationExpr));
+  ObjCInvocationExpr *E = new (Mem) ObjCInvocationExpr(EmptyShell(), numArgs);
+  E->IsExplicit = true;
+  E->TotalSubExprs = TotalSubs;
+  E->SubExprs = reinterpret_cast<Stmt **>(E + 1);
+  return E;
+}
+// @mulle-objc@ @invocation <
