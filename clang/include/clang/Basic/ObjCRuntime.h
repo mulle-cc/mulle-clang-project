@@ -25,7 +25,7 @@
 namespace clang {
 
 // @mulle-objc@ runtime load version this compiler is compatible with >
-#define COMPATIBLE_MULLE_OBJC_RUNTIME_LOAD_VERSION  20
+#define COMPATIBLE_MULLE_OBJC_RUNTIME_LOAD_VERSION  21
 // @mulle-objc@ runtime load version this compiler is compatible with <
 
 /// The basic abstraction for the target Objective-C runtime.

@@ -504,6 +504,109 @@ void SemaObjC::ActOnStartOfObjCMethodDef(Scope *FnBodyScope, Decl *D) {
    }
    // @mulle-objc@ MetaABI: save scope for later retrieval in ActonMethod <
 
+  // @mulle-objc@ class-property: retype self in + methods >
+  // In + methods of a class with class properties (own or inherited),
+  // give self an internal struct pointer type so self->_field resolves
+  // as a normal MemberExpr. The struct has a char spacer of
+  // MULLE_OBJC_CLASSPAIR_IVAR_BASE bytes followed by the class property ivars.
+  if (getLangOpts().ObjCRuntime.hasMulleMetaABI() && MDecl->isClassMethod())
+  {
+     ObjCInterfaceDecl *ClassDecl = MDecl->getClassInterface();
+     if (ClassDecl)
+     {
+        // Collect all class property ivars (inherited + own) in layout order
+        SmallVector<const ObjCInterfaceDecl *, 8> Hierarchy;
+        for (const ObjCInterfaceDecl *C = ClassDecl; C; C = C->getSuperClass())
+           Hierarchy.push_back(C);
+        std::reverse(Hierarchy.begin(), Hierarchy.end());
+
+        SmallVector<const ObjCPropertyDecl *, 8> AllClassProps;
+        for (const ObjCInterfaceDecl *C : Hierarchy)
+           for (const ObjCPropertyDecl *PD : C->properties())
+              if (PD->isClassProperty())
+                 AllClassProps.push_back(PD);
+
+        if (!AllClassProps.empty())
+        {
+           // Compute MULLE_OBJC_CLASSPAIR_IVAR_BASE from the AST:
+           // sizeof(struct _mulle_objc_classpair) - offsetof(struct _mulle_objc_classpair, infraclass)
+           uint64_t SpacerSize = 0;
+           IdentifierInfo *ClasspairII = &Context.Idents.get("_mulle_objc_classpair");
+           TagDecl *ClasspairDecl = nullptr;
+           LookupResult R(SemaRef, ClasspairII, SourceLocation(), Sema::LookupTagName);
+           if (SemaRef.LookupName(R, FnBodyScope) && R.isSingleResult())
+              ClasspairDecl = dyn_cast<TagDecl>(R.getFoundDecl());
+           if (ClasspairDecl)
+           {
+              QualType ClasspairTy = Context.getTypeDeclType(cast<TypeDecl>(ClasspairDecl));
+              uint64_t ClasspairSize = Context.getTypeSize(ClasspairTy) / 8;
+              // Find infraclass field offset
+              if (RecordDecl *RD = dyn_cast<RecordDecl>(ClasspairDecl))
+              {
+                 for (FieldDecl *FD : RD->fields())
+                 {
+                    if (FD->getName() == "infraclass")
+                    {
+                       uint64_t InfraOffset = Context.getFieldOffset(FD) / 8;
+                       SpacerSize = ClasspairSize - InfraOffset;
+                       break;
+                    }
+                 }
+              }
+           }
+
+           if (SpacerSize > 0)
+           {
+              // Build struct __Foo_classivars { char __spacer[N]; <class prop fields>; }
+              std::string RecordName = "__";
+              RecordName += ClassDecl->getNameAsString();
+              RecordName += "_classivars";
+              IdentifierInfo *RecordID = &Context.Idents.get(RecordName);
+              RecordDecl *RD = RecordDecl::Create(Context, TagTypeKind::Struct,
+                                                  Context.getTranslationUnitDecl(),
+                                                  SourceLocation(), SourceLocation(),
+                                                  RecordID);
+              // Spacer field: char __spacer[SpacerSize]
+              QualType CharTy = Context.CharTy;
+              QualType SpacerTy = Context.getConstantArrayType(
+                 CharTy,
+                 llvm::APInt(64, SpacerSize),
+                 nullptr,
+                 ArraySizeModifier::Normal, 0);
+              FieldDecl *SpacerFD = FieldDecl::Create(Context, RD,
+                                                      SourceLocation(), SourceLocation(),
+                                                      &Context.Idents.get("__spacer"),
+                                                      SpacerTy,
+                                                      Context.getTrivialTypeSourceInfo(SpacerTy),
+                                                      nullptr, false, ICIS_NoInit);
+              RD->addDecl(SpacerFD);
+              // Class property ivar fields (inherited + own, in layout order)
+              for (const ObjCPropertyDecl *PD : AllClassProps)
+              {
+                 std::string FieldName = "_";
+                 FieldName += PD->getNameAsString();
+                 FieldDecl *FD = FieldDecl::Create(Context, RD,
+                                                   SourceLocation(), SourceLocation(),
+                                                   &Context.Idents.get(FieldName),
+                                                   PD->getType(),
+                                                   Context.getTrivialTypeSourceInfo(PD->getType()),
+                                                   nullptr, false, ICIS_NoInit);
+                 RD->addDecl(FD);
+              }
+              RD->completeDefinition();
+
+              QualType StructTy = Context.getTypeDeclType((TypeDecl *) RD);
+              QualType SelfPtrTy = Context.getPointerType(StructTy);
+
+              // Retype self to struct __Foo_classivars *
+              if (VarDecl *SelfDecl = MDecl->getSelfDecl())
+                 SelfDecl->setType(SelfPtrTy);
+           }
+        }
+     }
+  }
+  // @mulle-objc@ class-property: retype self in + methods <
+
   // The ObjC parser requires parameter names so there's no need to check.
   SemaRef.CheckParmsForFunctionDef(MDecl->parameters(),
                                    /*CheckParameterNames=*/false);

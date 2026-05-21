@@ -3456,9 +3456,12 @@ bool Expr::isConstantInitializer(ASTContext &Ctx, bool IsForRef,
   case ObjCEncodeExprClass:
   // @mulle-objc@ @signature >
   case ObjCSignatureExprClass:
-  case ObjCInvocationExprClass:
   // @mulle-objc@ @signature <
     return true;
+  // @mulle-objc@ @invocation >
+  case ObjCInvocationExprClass:
+    return false;
+  // @mulle-objc@ @invocation <
   // @mulle-objc@: allow @selector as compile-time constant
   case ObjCSelectorExprClass:
      if( Ctx.getLangOpts().ObjCRuntime.hasConstantSelector())
@@ -3816,7 +3819,6 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
   case ObjCEncodeExprClass:
   // @mulle-objc@ @signature >
   case ObjCSignatureExprClass:
-  case ObjCInvocationExprClass:
   // @mulle-objc@ @signature <
   case ObjCBoolLiteralExprClass:
   case ObjCAvailabilityCheckExprClass:
@@ -4045,6 +4047,9 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
   case ObjCSubscriptRefExprClass:
   case ObjCBridgedCastExprClass:
   case ObjCMessageExprClass:
+  // @mulle-objc@ @invocation >
+  case ObjCInvocationExprClass:
+  // @mulle-objc@ @invocation <
   case ObjCPropertyRefExprClass:
     // FIXME: Classify these cases better.
     if (IncludePossibleEffects)

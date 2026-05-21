@@ -1010,6 +1010,8 @@ void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
     EmittedIvarStructs.insert(Name);
   }
 
+  // (class property storage is now in the classpair allocation — no __Self__ struct needed)
+
   for (auto *M : D->methods()) {
     if (M->isAlias()) {
       // Erase the @method_implementation line.
@@ -1026,6 +1028,8 @@ void RewriteMulleObjC::RewriteImplementationDecl(ObjCImplementationDecl *D) {
       // Implicit or explicit @synthesize — emit C accessor before @implementation
       const ObjCPropertyDecl *PD = M->findPropertyDecl();
       if (!PD) continue;
+      // Skip class property synthesized stubs — handled separately (v21)
+      if (PD->isClassProperty()) continue;
       ObjCIvarDecl *IVar = nullptr;
       // find the ivar from property_impls, or fall back to _propName convention
       for (auto *PI : D->property_impls())
@@ -1265,11 +1269,19 @@ void RewriteMulleObjC::RewriteMethodDecl(ObjCMethodDecl *M,
                                           const ObjCContainerDecl *CD) {
   if (!M->hasBody()) return;
 
-  // The ObjC name: -[Foo bar:baz:]
+  // The ObjC name: -[Foo bar:baz:] or -[Foo(Cat) bar:baz:]
   std::string ObjCName;
   ObjCName += M->isInstanceMethod() ? '-' : '+';
   ObjCName += '[';
-  ObjCName += CD->getNameAsString();
+  if (const auto *CatImpl = dyn_cast<ObjCCategoryImplDecl>(M->getDeclContext()))
+  {
+    ObjCName += CatImpl->getClassInterface()->getNameAsString();
+    ObjCName += '(';
+    ObjCName += CatImpl->getNameAsString();
+    ObjCName += ')';
+  }
+  else
+    ObjCName += CD->getNameAsString();
   ObjCName += ' ';
   ObjCName += M->getSelector().getAsString();
   ObjCName += ']';
@@ -2325,6 +2337,8 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
     std::vector<ObjCMethodDecl *> IMethods, CMethods;
     for (auto *M : D->methods())
       (M->isInstanceMethod() ? IMethods : CMethods).push_back(M);
+
+
     auto sortMethods = [](ObjCMethodDecl *A, ObjCMethodDecl *B) {
       return MulleObjCUniqueIdHashForString(A->getSelector().getAsString())
            < MulleObjCUniqueIdHashForString(B->getSelector().getAsString());
@@ -2367,24 +2381,19 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
     };
 
     // Helper: emit method list as compound literal (or "0")
+    struct SynthMethod { std::string sel; std::string sig; std::string cname; uint32_t bits; };
     auto EmitMethodListInline = [&](const std::vector<ObjCMethodDecl *> &Methods,
-                                    uint32_t catId) -> std::string {
-      if (Methods.empty()) return "0";
-      std::string S;
-      llvm::raw_string_ostream L(S);
-      L << "(struct _mulle_objc_methodlist *) &(struct { unsigned int n_methods; struct _mulle_objc_loadcategory *loadcategory;"
-           " struct _mulle_objc_method methods[" << Methods.size() << "]; }){\n"
-        << "      .n_methods    = " << Methods.size() << ",\n"
-        << "      .loadcategory = ";
-      if (catId) { L << "(struct _mulle_objc_loadcategory *) 0x"; L.write_hex(catId); L << "U"; }
-      else L << "0";
-      L << ",\n      .methods      =\n      {\n";
+                                    uint32_t catId,
+                                    const std::vector<SynthMethod> &Extra = {}) -> std::string {
+      // Build unified list of (selId, entry-string) pairs, then sort by selId
+      struct MethodEntry { uint32_t selId; std::string text; };
+      std::vector<MethodEntry> AllEntries;
+
       for (auto *M : Methods) {
         std::string sel = M->getSelector().getAsString();
         uint32_t selId  = MulleObjCUniqueIdHashForString(sel);
         std::string cname;
         if (M->isAlias()) {
-          // Follow alias chain to terminal method or C function.
           const ObjCMethodDecl *TM = M;
           while (TM->isAlias() && TM->getAliasMethod())
             TM = TM->getAliasMethod();
@@ -2397,16 +2406,50 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
         }
         if (cname.empty()) cname = MethodCName(M, D->getClassInterface());
         std::string methSig = Context->getObjCEncodingForMethodDecl(M);
-        L << "         { .descriptor = { .methodid  = (mulle_objc_methodid_t) 0x";
-        L.write_hex(selId);
-        L << "U,\n"
-          << "                           .signature = \"" << methSig << "\",\n"
-          << "                           .name      = \"" << sel << "\",\n";
-        L << "                           .bits      = 0x";
-        L.write_hex(MethodBits(M));
-        L << " },\n"
-          << "           .value      = (mulle_objc_implementation_t) " << cname << " },\n";
+        std::string E;
+        llvm::raw_string_ostream EOS(E);
+        EOS << "         { .descriptor = { .methodid  = (mulle_objc_methodid_t) 0x";
+        EOS.write_hex(selId);
+        EOS << "U,\n"
+            << "                           .signature = \"" << methSig << "\",\n"
+            << "                           .name      = \"" << sel << "\",\n"
+            << "                           .bits      = 0x";
+        EOS.write_hex(MethodBits(M));
+        EOS << " },\n"
+            << "           .value      = (mulle_objc_implementation_t) " << cname << " },\n";
+        AllEntries.push_back({selId, E});
       }
+      for (const auto &SM : Extra) {
+        uint32_t selId = MulleObjCUniqueIdHashForString(SM.sel);
+        std::string E;
+        llvm::raw_string_ostream EOS(E);
+        EOS << "         { .descriptor = { .methodid  = (mulle_objc_methodid_t) 0x";
+        EOS.write_hex(selId);
+        EOS << "U,\n"
+            << "                           .signature = \"" << SM.sig << "\",\n"
+            << "                           .name      = \"" << SM.sel << "\",\n"
+            << "                           .bits      = 0x";
+        EOS.write_hex(SM.bits);
+        EOS << " },\n"
+            << "           .value      = (mulle_objc_implementation_t) " << SM.cname << " },\n";
+        AllEntries.push_back({selId, E});
+      }
+
+      if (AllEntries.empty()) return "0";
+      std::sort(AllEntries.begin(), AllEntries.end(),
+                [](const MethodEntry &A, const MethodEntry &B) { return A.selId < B.selId; });
+
+      std::string S;
+      llvm::raw_string_ostream L(S);
+      L << "(struct _mulle_objc_methodlist *) &(struct { unsigned int n_methods; struct _mulle_objc_loadcategory *loadcategory;"
+           " struct _mulle_objc_method methods[" << AllEntries.size() << "]; }){\n"
+        << "      .n_methods    = " << AllEntries.size() << ",\n"
+        << "      .loadcategory = ";
+      if (catId) { L << "(struct _mulle_objc_loadcategory *) 0x"; L.write_hex(catId); L << "U"; }
+      else L << "0";
+      L << ",\n      .methods      =\n      {\n";
+      for (const auto &E : AllEntries)
+        L << E.text;
       L << "      }\n   }";
       return S;
     };
@@ -2503,13 +2546,14 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
        << "      .classname        = \"" << ClassName << "\",\n"
        << "      .classmethods     = " << EmitMethodListInline(CMethods, 0) << ",\n"
        << "      .instancemethods  = " << EmitMethodListInline(IMethods, 0) << ",\n"
+       << "      .classproperties  = 0,\n"
        << "      .properties       = " << EmitPropList() << ",\n"
        << "      .protocols        = " << EmitProtoList() << ",\n"
        // @mulle-objc@ origin >
        << "#ifndef __OPTIMIZE__\n"
        << "      .origin           = (char *) __FILE__,\n"
        << "#else\n"
-       << "      .origin           = 0\n"
+       << "      .origin           = 0,\n"
        << "#endif\n"
        // @mulle-objc@ origin <
        << "   },\n"
@@ -2524,7 +2568,9 @@ std::string RewriteMulleObjC::EmitLoadClassList() {
        // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef >
        << "   .instancesize     = " << (OwnIvars.empty() ? "0" : "(int) sizeof(OBJC_CLASS_" + ClassName + ")") << ",\n"
        // @mulle-objc@ use OBJC_CLASS_ prefix for class typedef <
+       << "   .classinstancesize = 0,\n"
        << "   .instancevariables = " << EmitIvarList() << ",\n"
+       << "   .classvariables = 0,\n"
        << "   .mixinids = " << EmitMixinIds() << "\n"
        << "};\n";
   }
@@ -2579,6 +2625,8 @@ std::string RewriteMulleObjC::EmitLoadMixinList() {
     std::vector<ObjCMethodDecl *> IMethods, CMethods;
     for (auto *M : D->methods())
       (M->isInstanceMethod() ? IMethods : CMethods).push_back(M);
+
+
     auto sortMethods = [](ObjCMethodDecl *A, ObjCMethodDecl *B) {
       return MulleObjCUniqueIdHashForString(A->getSelector().getAsString())
            < MulleObjCUniqueIdHashForString(B->getSelector().getAsString());

@@ -2350,6 +2350,17 @@ void SemaObjC::DiagnoseUnimplementedProperties(Scope *S, ObjCImplDecl *IMPDecl,
   CollectImmediateProperties(CDecl, PropMap, NoNeedToImplPropMap,
                              SynthesizeProperties/*CollectClassPropsOnly*/);
 
+  // For mulle-objc, class properties are auto-synthesized in CodeGen,
+  // so remove them from the map to suppress spurious warnings.
+  if (SemaRef.getLangOpts().ObjCRuntime.getKind() == ObjCRuntime::Mulle) {
+    for (auto I = PropMap.begin(); I != PropMap.end(); ) {
+      if (I->second->isClassProperty())
+        I = PropMap.erase(I);
+      else
+        ++I;
+    }
+  }
+
   // Scan the @interface to see if any of the protocols it adopts
   // require an explicit implementation, via attribute
   // 'objc_protocol_requires_explicit_implementation'.

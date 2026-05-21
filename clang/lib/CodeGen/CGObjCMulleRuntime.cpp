@@ -1065,7 +1065,8 @@ namespace {
                                        const char *Section,
                                        const Decl *Container,
                                        const ObjCContainerDecl *OCD,
-                                       const ObjCCommonTypesHelper &ObjCTypes);
+                                       const ObjCCommonTypesHelper &ObjCTypes,
+                                       bool IsClassProperty = false);
 
       /// PushProtocolProperties - Push protocol's property on the input stack.
       void PushProtocolProperties(
@@ -1073,7 +1074,8 @@ namespace {
                                   SmallVectorImpl<llvm::Constant*> &Properties,
                                   const Decl *Container,
                                   const ObjCProtocolDecl *Proto,
-                                  const ObjCCommonTypesHelper &ObjCTypes);
+                                  const ObjCCommonTypesHelper &ObjCTypes,
+                                  bool IsClassProperty = false);
 
 #pragma mark - FNV1 hashing + conveniences
 
@@ -5574,10 +5576,13 @@ PushProtocolProperties(llvm::SmallPtrSet<const IdentifierInfo*,16> &PropertySet,
                        SmallVectorImpl<llvm::Constant *> &Properties,
                        const Decl *Container,
                        const ObjCProtocolDecl *Proto,
-                       const ObjCCommonTypesHelper &ObjCTypes) {
+                       const ObjCCommonTypesHelper &ObjCTypes,
+                       bool IsClassProperty) {
    for (const auto *P : Proto->protocols())
-      PushProtocolProperties(PropertySet, Properties, Container, P, ObjCTypes);
+      PushProtocolProperties(PropertySet, Properties, Container, P, ObjCTypes, IsClassProperty);
    for (const auto *PD : Proto->properties()) {
+      if (PD->isClassProperty() != IsClassProperty)
+         continue;
       if (!PropertySet.insert(PD->getIdentifier()).second)
          continue;
 
@@ -5699,11 +5704,15 @@ llvm::Constant *CGObjCCommonMulleRuntime::EmitPropertyList(Twine Name,
                                                   const char *Section,
                                                   const Decl *Container,
                                                   const ObjCContainerDecl *OCD,
-                                                  const ObjCCommonTypesHelper &ObjCTypes) {
+                                                  const ObjCCommonTypesHelper &ObjCTypes,
+                                                  bool IsClassProperty) {
    SmallVector<llvm::Constant *, 16> Properties;
    llvm::SmallPtrSet<const IdentifierInfo*, 16> PropertySet;
    for (const auto *PD : OCD->properties())
    {
+      if (PD->isClassProperty() != IsClassProperty)
+         continue;
+
       llvm::Constant *Prop[9];
 
       PropertySet.insert(PD->getIdentifier());
@@ -5714,11 +5723,11 @@ llvm::Constant *CGObjCCommonMulleRuntime::EmitPropertyList(Twine Name,
    }
    if (const ObjCInterfaceDecl *OID = dyn_cast<ObjCInterfaceDecl>(OCD)) {
       for (const auto *P : OID->all_referenced_protocols())
-         PushProtocolProperties(PropertySet, Properties, Container, P, ObjCTypes);
+         PushProtocolProperties(PropertySet, Properties, Container, P, ObjCTypes, IsClassProperty);
    }
    else if (const ObjCCategoryDecl *CD = dyn_cast<ObjCCategoryDecl>(OCD)) {
       for (const auto *P : CD->protocols())
-         PushProtocolProperties(PropertySet, Properties, Container, P, ObjCTypes);
+         PushProtocolProperties(PropertySet, Properties, Container, P, ObjCTypes, IsClassProperty);
    }
 
    // Return null for empty list.
@@ -5767,6 +5776,8 @@ llvm::Constant *CGObjCCommonMulleRuntime::GetSourceLocationDescription( SourceLo
 //      mulle_objc_protocolid_t          *protocolids;
 //      mulle_objc_classid_t             *mixinids;
 //   };
+
+
 void CGObjCMulleRuntime::GenerateCategory(const ObjCCategoryImplDecl *OCD) {
 //   unsigned Size = CGM.getDataLayout().getTypeAllocSize(ObjCTypes.CategoryTy);
 
@@ -5795,10 +5806,11 @@ void CGObjCMulleRuntime::GenerateCategory(const ObjCCategoryImplDecl *OCD) {
    for (const auto *I : OCD->class_methods())
       // Class methods should always be defined.
       ClassMethods.push_back(GetMethodConstant(I));
+
    llvm::array_pod_sort( ClassMethods.begin(), ClassMethods.end(),
                          uniqueid_comparator);
 
-   llvm::Constant *Values[11];
+   llvm::Constant *Values[12];
    
    const char   *Section;
 
@@ -5827,14 +5839,17 @@ void CGObjCMulleRuntime::GenerateCategory(const ObjCCategoryImplDecl *OCD) {
       Values[ 0] = llvm::ConstantExpr::getBitCast( _HashConstantForString( Category->getName().str()), ObjCTypes.ClassIDTy);
       Values[ 1] = GetClassName(Category->getName());
 
-      Values[ 7] = EmitPropertyList("OBJC_CATEGORY_PROP_LIST_" + ExtName.str(),
+      Values[ 7] = EmitPropertyList("OBJC_CATEGORY_CLASSPROP_LIST_" + ExtName.str(),
                                     Section,
-                                   OCD, Category, ObjCTypes);
-      Values[ 8] =
+                                   OCD, Category, ObjCTypes, true);
+      Values[ 8] = EmitPropertyList("OBJC_CATEGORY_PROP_LIST_" + ExtName.str(),
+                                    Section,
+                                   OCD, Category, ObjCTypes, false);
+      Values[ 9] =
       EmitProtocolList("OBJC_CATEGORY_PROTOCOLS_" + ExtName.str(),
                        Section,
                        Category->protocol_begin(), Category->protocol_end());
-      Values[ 9] =
+      Values[ 10] =
       EmitMixinIDList("OBJC_CATEGORY_MIXINS_" + ExtName.str(),
                                Section,
                                Category->protocol_begin(), Category->protocol_end());
@@ -5845,15 +5860,16 @@ void CGObjCMulleRuntime::GenerateCategory(const ObjCCategoryImplDecl *OCD) {
       Values[ 1] = GetClassName( OCD->getName());
 
       Values[ 7] = llvm::Constant::getNullValue(ObjCTypes.PropertyListPtrTy);
-      Values[ 8] = llvm::Constant::getNullValue(ObjCTypes.ProtocolListPtrTy);
-      Values[ 9] = llvm::Constant::getNullValue(ObjCTypes.ProtocolIDPtrTy);
+      Values[ 8] = llvm::Constant::getNullValue(ObjCTypes.PropertyListPtrTy);
+      Values[ 9] = llvm::Constant::getNullValue(ObjCTypes.ProtocolListPtrTy);
+      Values[ 10] = llvm::Constant::getNullValue(ObjCTypes.ProtocolIDPtrTy);
    }
    if( CGM.getCodeGenOpts().getDebugInfo() != llvm::codegenoptions::NoDebugInfo)
    {
-      Values[ 10] = GetSourceLocationDescription( OCD->getLocation());
+      Values[ 11] = GetSourceLocationDescription( OCD->getLocation());
    }
    else
-      Values[ 10] = llvm::Constant::getNullValue(ObjCTypes.Int8PtrTy);
+      Values[ 11] = llvm::Constant::getNullValue(ObjCTypes.Int8PtrTy);
 
    llvm::Constant *Init = llvm::ConstantStruct::get(ObjCTypes.CategoryTy,
                                                     Values);
@@ -5882,6 +5898,38 @@ enum FragileClassFlags {
 };
 
 
+// Compute the total size of class property ivars for a class, including
+// inherited ones from superclasses. Returns the size in bytes.
+// Also fills ClassIvarOffsets with (property, relative_offset) pairs for
+// own class properties (relative to the start of the class ivar area).
+static uint64_t ComputeClassIvarLayout(
+   CodeGen::CodeGenModule &CGM,
+   const ObjCInterfaceDecl *Interface,
+   SmallVectorImpl<std::pair<const ObjCPropertyDecl *, uint64_t>> *OwnIvarOffsets)
+{
+   // Compute inherited base size by walking superclass chain
+   uint64_t InheritedSize = 0;
+   if (const ObjCInterfaceDecl *Super = Interface->getSuperClass())
+      InheritedSize = ComputeClassIvarLayout(CGM, Super, nullptr);
+
+   // Lay out own class properties after inherited ones
+   uint64_t Offset = InheritedSize;
+   for (const ObjCPropertyDecl *PD : Interface->properties())
+   {
+      if (!PD->isClassProperty())
+         continue;
+      // Align to the type's alignment
+      llvm::Type *Ty = CGM.getTypes().ConvertType(PD->getType());
+      uint64_t Align = CGM.getDataLayout().getABITypeAlign(Ty).value();
+      Offset = llvm::alignTo(Offset, Align);
+      if (OwnIvarOffsets)
+         OwnIvarOffsets->push_back({PD, Offset});
+      uint64_t Size = CGM.getDataLayout().getTypeAllocSize(Ty);
+      Offset += Size;
+   }
+   return Offset;
+}
+
 void CGObjCMulleRuntime::GenerateClass(const ObjCImplementationDecl *ID) {
 
    std::string ClassName = ID->getNameAsString();
@@ -5889,30 +5937,14 @@ void CGObjCMulleRuntime::GenerateClass(const ObjCImplementationDecl *ID) {
    ObjCInterfaceDecl *Interface =
    const_cast<ObjCInterfaceDecl*>(ID->getClassInterface());
 
-   const char  *Section;
-
-   if (CGM.getTriple().isOSBinFormatMachO())
-      Section = "__DATA,__objc_load_info,regular,no_dead_strip";
-   else 
-      Section = ".data.objc.objc_load_info";
-
-   llvm::Constant *Protocols =
-   EmitProtocolList("OBJC_CLASS_PROTOCOLS_" + ID->getName(),
-                    Section,
-                    Interface->all_referenced_protocol_begin(),
-                    Interface->all_referenced_protocol_end());
-
    SmallVector<llvm::Constant *, 16> InstanceMethods, ClassMethods;
-
-  const ObjCInterfaceDecl *OID = ID->getClassInterface();
-
    // @mulle-objc@ method_implementation: resolve aliases >
    ResolveMethodAliases(ID);
    // @mulle-objc@ method_implementation: resolve aliases <
 
    for (const auto *I : ID->class_methods())
-      // Class methods should always be defined.
       ClassMethods.push_back(GetMethodConstant(I));
+
    llvm::array_pod_sort( ClassMethods.begin(), ClassMethods.end(),
                          uniqueid_comparator);
 
@@ -5923,6 +5955,8 @@ void CGObjCMulleRuntime::GenerateClass(const ObjCImplementationDecl *ID) {
    for (const auto *PID : ID->property_impls()) {
       if (PID->getPropertyImplementation() == ObjCPropertyImplDecl::Synthesize) {
          ObjCPropertyDecl *PD = PID->getPropertyDecl();
+         if (PD->isClassProperty())
+            continue;  // class property accessors handled separately
          if (ObjCMethodDecl *MD = PD->getGetterMethodDecl())
             if (llvm::Constant *C = GetMethodConstant(MD))
                InstanceMethods.push_back(C);
@@ -5944,6 +5978,20 @@ void CGObjCMulleRuntime::GenerateClass(const ObjCImplementationDecl *ID) {
 
    bool isMixin = Interface->isMixin();
 
+   const char *Section;
+   if (CGM.getTriple().isOSBinFormatMachO())
+      Section = "__DATA,__objc_load_info,regular,no_dead_strip";
+   else
+      Section = ".data.objc.objc_load_info";
+
+   const ObjCInterfaceDecl *OID = Interface;
+
+   llvm::Constant *Protocols =
+   EmitProtocolList("OBJC_CLASS_PROTOCOLS_" + ID->getName(),
+                    Section,
+                    Interface->all_referenced_protocol_begin(),
+                    Interface->all_referenced_protocol_end());
+
    if( isMixin)
    {
 //   struct _mulle_objc_loadmixin
@@ -5951,7 +5999,7 @@ void CGObjCMulleRuntime::GenerateClass(const ObjCImplementationDecl *ID) {
 //      struct _mulle_objc_loadclassbase  base;
 //   };
 
-      llvm::Constant *Values[7];
+      llvm::Constant *Values[8];
       int   i = 0;
 
       Values[ i++] = llvm::ConstantExpr::getBitCast(
@@ -5962,9 +6010,12 @@ void CGObjCMulleRuntime::GenerateClass(const ObjCImplementationDecl *ID) {
                                     Section, ClassMethods);
       Values[ i++] = EmitMethodList("OBJC_CLASS_METHODS_" + ID->getNameAsString(),
                                     Section, InstanceMethods);
-      Values[ i++] = EmitPropertyList("OBJC_CLASS_METHODS_" + ID->getNameAsString(),
+      Values[ i++] = EmitPropertyList("OBJC_MIXIN_CLASSPROPS_" + ID->getNameAsString(),
                                     Section,
-                                    ID, OID, ObjCTypes);
+                                    ID, OID, ObjCTypes, true);
+      Values[ i++] = EmitPropertyList("OBJC_MIXIN_PROPS_" + ID->getNameAsString(),
+                                    Section,
+                                    ID, OID, ObjCTypes, false);
       Values[ i++] = Protocols;
 
       if( CGM.getCodeGenOpts().getDebugInfo() != llvm::codegenoptions::NoDebugInfo)
@@ -6030,8 +6081,130 @@ void CGObjCMulleRuntime::GenerateClass(const ObjCImplementationDecl *ID) {
 //      mulle_objc_classid_t              *mixinids;
 //   };
 
-      llvm::Constant *Values[15];
+      llvm::Constant *Values[18];
       int   i = 0;
+
+      // Compute class property ivar layout and synthesize accessors
+      // (must happen before EmitMethodList so synthesized methods are included)
+      SmallVector<std::pair<const ObjCPropertyDecl *, uint64_t>, 8> OwnClassIvarOffsets;
+      uint64_t ClassInstanceSize = ComputeClassIvarLayout(CGM, Interface, &OwnClassIvarOffsets);
+
+      if (!OwnClassIvarOffsets.empty())
+      {
+         uint64_t IvarBase = 0;
+         TagDecl *ClasspairDecl = nullptr;
+         for (auto *D : CGM.getContext().getTranslationUnitDecl()->decls())
+         {
+            if (auto *TD = dyn_cast<TagDecl>(D))
+               if (TD->getName() == "_mulle_objc_classpair" && TD->isCompleteDefinition())
+               { ClasspairDecl = TD; break; }
+         }
+         if (ClasspairDecl)
+         {
+            QualType ClasspairTy = CGM.getContext().getTypeDeclType(cast<TypeDecl>(ClasspairDecl));
+            uint64_t ClasspairSize = CGM.getContext().getTypeSize(ClasspairTy) / 8;
+            if (RecordDecl *RD = dyn_cast<RecordDecl>(ClasspairDecl))
+               for (FieldDecl *FD : RD->fields())
+                  if (FD->getName() == "infraclass")
+                  { IvarBase = ClasspairSize - CGM.getContext().getFieldOffset(FD) / 8; break; }
+         }
+
+         if (IvarBase > 0)
+         {
+            llvm::FunctionType *LockFnTy = llvm::FunctionType::get(
+               CGM.VoidTy, {CGM.VoidPtrTy}, false);
+            llvm::FunctionCallee LockFn = CGM.getModule().getOrInsertFunction(
+               "mulle_objc_infraclass_lock_classproperty", LockFnTy);
+            llvm::FunctionCallee UnlockFn = CGM.getModule().getOrInsertFunction(
+               "mulle_objc_infraclass_unlock_classproperty", LockFnTy);
+
+            for (auto &[PD, RelOffset] : OwnClassIvarOffsets)
+            {
+               uint64_t AbsOffset = IvarBase + RelOffset;
+               llvm::Type *FieldTy = CGM.getTypes().ConvertType(PD->getType());
+               Selector GetterSel = PD->getGetterName();
+               Selector SetterSel = PD->getSetterName();
+
+               if (!ID->getClassMethod(GetterSel))
+               {
+                  std::string FnName = "+[" + ClassName + " " + GetterSel.getAsString() + "]";
+                  llvm::FunctionType *FnTy = llvm::FunctionType::get(
+                     CGM.VoidPtrTy, {CGM.VoidPtrTy, CGM.Int32Ty}, false);
+                  llvm::Function *Fn = llvm::Function::Create(
+                     FnTy, llvm::GlobalValue::InternalLinkage, FnName, &CGM.getModule());
+                  llvm::BasicBlock *BB = llvm::BasicBlock::Create(CGM.getLLVMContext(), "", Fn);
+                  llvm::IRBuilder<> Builder(BB);
+                  llvm::Value *SelfArg = Fn->getArg(0);
+                  Builder.CreateCall(LockFn, {SelfArg});
+                  llvm::Value *FieldPtr = Builder.CreateConstGEP1_64(CGM.Int8Ty, SelfArg, AbsOffset);
+                  llvm::Value *Val = Builder.CreateLoad(FieldTy, FieldPtr);
+                  Builder.CreateCall(UnlockFn, {SelfArg});
+                  if (FieldTy->isIntegerTy())
+                     Val = Builder.CreateIntToPtr(Val, CGM.VoidPtrTy);
+                  else if (!FieldTy->isPointerTy())
+                     Val = Builder.CreateBitCast(Val, CGM.VoidPtrTy);
+                  Builder.CreateRet(Val);
+
+                  std::string TypeStr;
+                  CGM.getContext().getObjCEncodingForType(PD->getType(), TypeStr);
+                  std::string FullSig = TypeStr + "16@0:8";
+                  llvm::GlobalVariable *&TypeEntry = MethodVarTypes[FullSig];
+                  if (!TypeEntry)
+                     TypeEntry = CreateCStringLiteral(FullSig, ObjCLabelType::MethodVarType);
+                  llvm::Constant *Method[] = {
+                     llvm::ConstantExpr::getBitCast(_HashConstantForString(GetterSel.getAsString()), ObjCTypes.SelectorIDTy),
+                     getConstantGEP(VMContext, TypeEntry, 0, 0),
+                     GetMethodVarName(GetterSel),
+                     llvm::ConstantInt::get(ObjCTypes.IntTy, 0x00400000),
+                     llvm::ConstantExpr::getBitCast(Fn, ObjCTypes.Int8PtrTy)
+                  };
+                  ClassMethods.push_back(llvm::ConstantStruct::get(ObjCTypes.MethodTy, Method));
+               }
+
+               if (!PD->isReadOnly() && !ID->getClassMethod(SetterSel))
+               {
+                  std::string FnName = "+[" + ClassName + " " + SetterSel.getAsString() + "]";
+                  llvm::FunctionType *FnTy = llvm::FunctionType::get(
+                     CGM.VoidPtrTy, {CGM.VoidPtrTy, CGM.Int32Ty, CGM.VoidPtrTy}, false);
+                  llvm::Function *Fn = llvm::Function::Create(
+                     FnTy, llvm::GlobalValue::InternalLinkage, FnName, &CGM.getModule());
+                  llvm::BasicBlock *BB = llvm::BasicBlock::Create(CGM.getLLVMContext(), "", Fn);
+                  llvm::IRBuilder<> Builder(BB);
+                  llvm::Value *SelfArg = Fn->getArg(0);
+                  llvm::Value *ParamPtr = Fn->getArg(2);
+                  Builder.CreateCall(LockFn, {SelfArg});
+                  llvm::Value *FieldPtr = Builder.CreateConstGEP1_64(CGM.Int8Ty, SelfArg, AbsOffset);
+                  llvm::Value *Val;
+                  if (FieldTy->isIntegerTy())
+                     Val = Builder.CreatePtrToInt(ParamPtr, FieldTy);
+                  else if (!FieldTy->isPointerTy())
+                     Val = Builder.CreateBitCast(ParamPtr, FieldTy);
+                  else
+                     Val = ParamPtr;
+                  Builder.CreateStore(Val, FieldPtr);
+                  Builder.CreateCall(UnlockFn, {SelfArg});
+                  Builder.CreateRet(llvm::ConstantPointerNull::get(CGM.VoidPtrTy));
+
+                  std::string TypeStr = "v20@0:8";
+                  std::string ParamEnc;
+                  CGM.getContext().getObjCEncodingForType(PD->getType(), ParamEnc);
+                  TypeStr += ParamEnc + "16";
+                  llvm::GlobalVariable *&TypeEntry = MethodVarTypes[TypeStr];
+                  if (!TypeEntry)
+                     TypeEntry = CreateCStringLiteral(TypeStr, ObjCLabelType::MethodVarType);
+                  llvm::Constant *Method[] = {
+                     llvm::ConstantExpr::getBitCast(_HashConstantForString(SetterSel.getAsString()), ObjCTypes.SelectorIDTy),
+                     getConstantGEP(VMContext, TypeEntry, 0, 0),
+                     GetMethodVarName(SetterSel),
+                     llvm::ConstantInt::get(ObjCTypes.IntTy, 0x01400000),
+                     llvm::ConstantExpr::getBitCast(Fn, ObjCTypes.Int8PtrTy)
+                  };
+                  ClassMethods.push_back(llvm::ConstantStruct::get(ObjCTypes.MethodTy, Method));
+               }
+            }
+            llvm::array_pod_sort(ClassMethods.begin(), ClassMethods.end(), uniqueid_comparator);
+         }
+      }
 
       ObjCInterfaceDecl *Super = Interface->getSuperClass();
       llvm::ConstantInt *ClassID = _HashConstantForString( ID->getObjCRuntimeNameAsString().str());
@@ -6043,9 +6216,12 @@ void CGObjCMulleRuntime::GenerateClass(const ObjCImplementationDecl *ID) {
                                     Section, ClassMethods);
       Values[ i++] = EmitMethodList("OBJC_CLASS_METHODS_" + ID->getNameAsString(),
                                   Section, InstanceMethods);
-      Values[ i++] = EmitPropertyList("OBJC_CLASS_METHODS_" + ID->getNameAsString(),
+      Values[ i++] = EmitPropertyList("OBJC_CLASS_CLASSPROPS_" + ID->getNameAsString(),
                                   Section,
-                                  ID, OID, ObjCTypes);
+                                  ID, OID, ObjCTypes, true);
+      Values[ i++] = EmitPropertyList("OBJC_CLASS_PROPS_" + ID->getNameAsString(),
+                                  Section,
+                                  ID, OID, ObjCTypes, false);
       Values[ i++] = Protocols;
 
       if( CGM.getCodeGenOpts().getDebugInfo() != llvm::codegenoptions::NoDebugInfo)
@@ -6093,7 +6269,50 @@ void CGObjCMulleRuntime::GenerateClass(const ObjCImplementationDecl *ID) {
 
       Values[ i++] = llvm::ConstantInt::get(ObjCTypes.IntTy, Size);
 
+      Values[ i++] = llvm::ConstantInt::get(ObjCTypes.IntTy, (int) ClassInstanceSize);
+
       Values[ i++] = EmitIvarList( ID, Section, InstanceVariables, false);
+
+      // Emit classvariables ivar list (own class property ivars with relative offsets)
+      SmallVector<llvm::Constant *, 8> ClassVariables;
+      for (auto &[PD, RelOffset] : OwnClassIvarOffsets)
+      {
+         std::string IvarName = "_" + PD->getNameAsString();
+         std::string TypeStr;
+         CGM.getContext().getObjCEncodingForType(PD->getType(), TypeStr);
+
+         llvm::GlobalVariable *&NameEntry = IvarNames[IvarName];
+         if (!NameEntry)
+            NameEntry = CreateCStringLiteral(IvarName, ObjCLabelType::IvarName);
+         llvm::GlobalVariable *&TypeEntry = IvarTypes[TypeStr];
+         if (!TypeEntry)
+            TypeEntry = CreateCStringLiteral(TypeStr, ObjCLabelType::IvarType);
+
+         llvm::Constant *Ivar[] = {
+            llvm::ConstantExpr::getBitCast(
+               _HashConstantForString(IvarName),
+               ObjCTypes.SelectorIDTy),
+            getConstantGEP(VMContext, NameEntry, 0, 0),
+            getConstantGEP(VMContext, TypeEntry, 0, 0),
+            llvm::ConstantInt::get(ObjCTypes.IntTy, (int) RelOffset)
+         };
+         ClassVariables.push_back(llvm::ConstantStruct::get(ObjCTypes.IvarTy, Ivar));
+      }
+      if (ClassVariables.empty())
+      {
+         Values[ i++] = llvm::Constant::getNullValue(ObjCTypes.IvarListPtrTy);
+      }
+      else
+      {
+         llvm::Constant *CVals[2];
+         CVals[0] = llvm::ConstantInt::get(ObjCTypes.IntTy, ClassVariables.size());
+         llvm::ArrayType *AT = llvm::ArrayType::get(ObjCTypes.IvarTy, ClassVariables.size());
+         CVals[1] = llvm::ConstantArray::get(AT, ClassVariables);
+         llvm::Constant *CInit = llvm::ConstantStruct::getAnon(CVals);
+         llvm::GlobalVariable *CGV = CreateMetadataVar(
+            "OBJC_CLASS_VARIABLES_" + ID->getName(), CInit, Section, CGM.getPointerAlign());
+         Values[ i++] = llvm::ConstantExpr::getBitCast(CGV, ObjCTypes.IvarListPtrTy);
+      }
 
       Values[ i++] = MixinList;
 
@@ -8381,6 +8600,7 @@ ObjCTypesHelper::ObjCTypesHelper(CodeGen::CodeGenModule &cgm)
 //      char                              *classname;
 //      struct _mulle_objc_methodlist     *classmethods;
 //      struct _mulle_objc_methodlist     *instancemethods;
+//      struct _mulle_objc_propertylist   *classproperties;    // v21
 //      struct _mulle_objc_propertylist   *properties;
 //      struct _mulle_objc_protocollist   *protocols;
 //      char                              *origin;
@@ -8404,6 +8624,7 @@ ObjCTypesHelper::ObjCTypesHelper(CodeGen::CodeGenModule &cgm)
                     Int8PtrTy,         // base.classname
                     MethodListPtrTy,   // base.classmethods
                     MethodListPtrTy,   // base.instancemethods
+                    PropertyListPtrTy, // base.classproperties (v21)
                     PropertyListPtrTy, // base.properties
                     ProtocolListPtrTy, // base.protocols
                     Int8PtrTy,         // base.origin
@@ -8414,7 +8635,9 @@ ObjCTypesHelper::ObjCTypesHelper(CodeGen::CodeGenModule &cgm)
                     ClassIDTy,         // superclassivarhash
                     IntTy,             // fastclassindex
                     IntTy,             // instancesize
+                    IntTy,             // classinstancesize (v21)
                     IvarListPtrTy,     // instancevariables
+                    IvarListPtrTy,     // classvariables (v21)
                     ClassIDPtrTy       // mixinids
                     });
 
@@ -8431,6 +8654,7 @@ ObjCTypesHelper::ObjCTypesHelper(CodeGen::CodeGenModule &cgm)
                     Int8PtrTy,         // base.classname
                     MethodListPtrTy,   // base.classmethods
                     MethodListPtrTy,   // base.instancemethods
+                    PropertyListPtrTy, // base.classproperties (v21)
                     PropertyListPtrTy, // base.properties
                     ProtocolListPtrTy, // base.protocols
                     Int8PtrTy          // base.origin
@@ -8450,6 +8674,7 @@ ObjCTypesHelper::ObjCTypesHelper(CodeGen::CodeGenModule &cgm)
 //
 //      struct _mulle_objc_methodlist     *classmethods;
 //      struct _mulle_objc_methodlist     *instancemethods;
+//      struct _mulle_objc_propertylist   *classproperties;    // v21
 //      struct _mulle_objc_propertylist   *properties;
 //
 //      struct _mulle_objc_protocollist   *protocols;
@@ -8469,12 +8694,13 @@ ObjCTypesHelper::ObjCTypesHelper(CodeGen::CodeGenModule &cgm)
 
                             MethodListPtrTy,
                             MethodListPtrTy,
-                            PropertyListPtrTy,
+                            PropertyListPtrTy,  // classproperties (v21)
+                            PropertyListPtrTy,  // properties
 
                             ProtocolListPtrTy,
                             ClassIDPtrTy,
 
-                            Int8PtrTy
+                            Int8PtrTy           // origin
                             );
 
    //   struct _mulle_objc_loadstaticstring
