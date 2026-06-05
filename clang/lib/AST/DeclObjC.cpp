@@ -1815,6 +1815,14 @@ ObjCIvarDecl *ObjCInterfaceDecl::all_declared_ivar_begin() {
 
 
 // @mulle-objc@ codegen: make an ivar hash string for fragility fix >
+//
+// The ivar hash detects class layout changes between translation units.
+// We expand struct ivars (they affect sizeof) but NOT pointed-to structs.
+// A pointer is always pointer-sized regardless of the pointee's definition,
+// so expanding it would make the hash depend on struct visibility — causing
+// spurious mismatches when a struct is forward-declared in one TU but fully
+// defined in another (e.g., private implementation structs).
+//
 // could cache this value
 std::string
 ObjCInterfaceDecl::getIvarHashString( ASTContext &C) const
@@ -1828,7 +1836,6 @@ ObjCInterfaceDecl::getIvarHashString( ASTContext &C) const
       QualType PType = Ivar->getType();
 
       ASTContext::ObjCEncOptions Options = ASTContext::ObjCEncOptions()
-                               .setExpandPointedToStructures()
                                .setExpandStructures()
                                .setIsOutermostType();
 
