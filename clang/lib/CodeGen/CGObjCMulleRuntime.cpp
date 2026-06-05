@@ -5647,6 +5647,7 @@ void  CGObjCCommonMulleRuntime::SetPropertyInfoToEmit( const ObjCPropertyDecl *P
 //   bits      |= (nullability == NullabilityKind::Nullable)                                ? 0x00100 : 0x0;
    bits      |= (PD->getPropertyAttributes() & ObjCPropertyAttribute::kind_class)           ? 0x00200 : 0x0;
    bits      |= (PD->getPropertyAttributes() & ObjCPropertyAttribute::kind_dynamic)         ? 0x00400 : 0x0;
+   bits      |= (PD->getPropertyAttributes() & ObjCPropertyAttribute::kind_forward)         ? 0x100000 : 0x0;
    bits      |= (PD->getPropertyAttributes() & ObjCPropertyAttribute::kind_nonserializable) ? 0x00800 : 0x0;
    bits      |= (PD->getPropertyAttributes() & ObjCPropertyAttribute::kind_container)       ? 0x01000 : 0x0;
    bits      |= (PD->getPropertyAttributes() & ObjCPropertyAttribute::kind_relationship)    ? 0x02000 : 0x0;

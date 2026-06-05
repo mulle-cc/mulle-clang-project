@@ -1239,6 +1239,7 @@ void JSONNodeDumper::VisitObjCPropertyDecl(const ObjCPropertyDecl *D) {
                         Attrs & ObjCPropertyAttribute::kind_null_resettable);
     // @mulle-objc@ new property attributes serializable, container, dynamic >
     attributeOnlyIfTrue("dynamic", Attrs & ObjCPropertyAttribute::kind_dynamic);
+    attributeOnlyIfTrue("forward", Attrs & ObjCPropertyAttribute::kind_forward);
     attributeOnlyIfTrue("serializable", Attrs & ObjCPropertyAttribute::kind_serializable);
     attributeOnlyIfTrue("nonserializable", Attrs & ObjCPropertyAttribute::kind_nonserializable);
     attributeOnlyIfTrue("autorelease", Attrs & ObjCPropertyAttribute::kind_autorelease);

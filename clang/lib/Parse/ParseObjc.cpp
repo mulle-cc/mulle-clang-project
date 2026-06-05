@@ -718,11 +718,16 @@ void Parser::ParseObjCInterfaceDeclList(tok::ObjCKeywordKind contextKey,
 
     case tok::objc_required:
     case tok::objc_optional:
-      // This is only valid on protocols.
-      if (contextKey != tok::objc_protocol)
+      // @mulle-objc@ allow @optional in @interface >
+      // Allow in protocols, interfaces, categories, implementations
+      if (contextKey != tok::objc_protocol &&
+          contextKey != tok::objc_interface &&
+          contextKey != tok::objc_implementation &&
+          contextKey != tok::objc_not_keyword)
         Diag(AtLoc, diag::err_objc_directive_only_in_protocol);
       else
         MethodImplKind = DirectiveKind;
+      // @mulle-objc@ allow @optional in @interface <
       break;
 
     // @mulle-objc@ method_implementation dispatch >
@@ -894,6 +899,7 @@ void Parser::ParseObjCPropertyAttribute(ObjCDeclSpec &DS) {
              II->isStr("nonnull") ||
              II->isStr("nonatomic") ||
              II->isStr("dynamic") ||
+             II->isStr("forward") ||
              II->isStr("serializable") ||
              II->isStr("nonserializable") ||
              II->isStr("autorelease") ||
@@ -937,6 +943,8 @@ void Parser::ParseObjCPropertyAttribute(ObjCDeclSpec &DS) {
     // @mulle-objc@ new property attributes serializable, container, dynamic >
     else if (II->isStr("dynamic"))
       DS.setPropertyAttributes(ObjCPropertyAttribute::kind_dynamic);
+    else if (II->isStr("forward"))
+      DS.setPropertyAttributes(ObjCPropertyAttribute::kind_forward);
     else if (II->isStr("serializable"))
       DS.setPropertyAttributes(ObjCPropertyAttribute::kind_serializable);
     else if (II->isStr("nonserializable"))

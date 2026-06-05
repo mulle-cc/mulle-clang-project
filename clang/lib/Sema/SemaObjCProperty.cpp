@@ -256,7 +256,7 @@ Decl *SemaObjC::ActOnProperty(Scope *S, SourceLocation AtLoc,
         // if marked dynamic, do not auto-add an ivar
         // if there is one already, we could warn, but its OK
         //
-        if( ! Ivar && ! (Res->getPropertyAttributesAsWritten() & ObjCPropertyAttribute::kind_dynamic))
+        if( ! Ivar && ! (Res->getPropertyAttributesAsWritten() & (ObjCPropertyAttribute::kind_dynamic|ObjCPropertyAttribute::kind_forward)))
         {
            // create an Ivar and add it
            Ivar = ObjCIvarDecl::Create( SemaRef.Context, CDecl,
@@ -368,6 +368,8 @@ makePropertyAttributesAsWritten(unsigned Attributes) {
   // @mulle-objc@ new property attributes serializable, container, dynamic >
   if (Attributes & ObjCPropertyAttribute::kind_dynamic)
     attributesAsWritten |= ObjCPropertyAttribute::kind_dynamic;
+  if (Attributes & ObjCPropertyAttribute::kind_forward)
+    attributesAsWritten |= ObjCPropertyAttribute::kind_forward;
   if (Attributes & ObjCPropertyAttribute::kind_serializable)
     attributesAsWritten |= ObjCPropertyAttribute::kind_serializable;
   if (Attributes & ObjCPropertyAttribute::kind_nonserializable)
@@ -790,12 +792,22 @@ ObjCPropertyDecl *SemaObjC::CreatePropertyDecl(
 
   if (MethodImplKind == tok::objc_required)
     PDecl->setPropertyImplementation(ObjCPropertyDecl::Required);
-  else if (MethodImplKind == tok::objc_optional)
+  else if (MethodImplKind == tok::objc_optional) {
     PDecl->setPropertyImplementation(ObjCPropertyDecl::Optional);
+    // @mulle-objc@ @optional properties in @interface must be dynamic or forward
+    if (SemaRef.getLangOpts().ObjCRuntime.hasMulleMetaABI() &&
+        !isa<ObjCProtocolDecl>(CDecl) &&
+        !(Attributes & (ObjCPropertyAttribute::kind_dynamic|ObjCPropertyAttribute::kind_forward))) {
+      Diag(PDecl->getLocation(), diag::err_mulle_optional_property_not_dynamic)
+        << PDecl->getDeclName();
+    }
+  }
 
   // @mulle-objc@ new property attributes serializable, container, dynamic >
   if (Attributes & ObjCPropertyAttribute::kind_dynamic)
     PDecl->setPropertyAttributes(ObjCPropertyAttribute::kind_dynamic);
+  if (Attributes & ObjCPropertyAttribute::kind_forward)
+    PDecl->setPropertyAttributes(ObjCPropertyAttribute::kind_forward);
   if (Attributes & ObjCPropertyAttribute::kind_serializable)
     PDecl->setPropertyAttributes(ObjCPropertyAttribute::kind_serializable);
   if (Attributes & ObjCPropertyAttribute::kind_nonserializable)
@@ -1367,7 +1379,7 @@ Decl *SemaObjC::ActOnPropertyImplDecl(
     ObjCInterfaceDecl *ClassDeclared;
     if( SemaRef.Context.getLangOpts().ObjCRuntime.hasMulleMetaABI())
     {
-      if( property->getPropertyAttributes() & ObjCPropertyAttribute::kind_dynamic)
+      if( property->getPropertyAttributes() & (ObjCPropertyAttribute::kind_dynamic|ObjCPropertyAttribute::kind_forward))
       {
          Diag(property->getLocation(), diag::err_mulle_dynamic_property_synthesize)
             << property->getDeclName();
@@ -2190,6 +2202,9 @@ void SemaObjC::DefaultSynthesizeProperties(Scope *S, ObjCImplDecl *IMPDecl,
     if (Prop->isInvalidDecl() ||
         Prop->isClassProperty() ||
         Prop->getPropertyImplementation() == ObjCPropertyDecl::Optional)
+      continue;
+    // @mulle-objc@ skip dynamic/forward properties in auto-synthesis
+    if (Prop->getPropertyAttributes() & (ObjCPropertyAttribute::kind_dynamic|ObjCPropertyAttribute::kind_forward))
       continue;
     // Property may have been synthesized by user.
     if (IMPDecl->FindPropertyImplDecl(

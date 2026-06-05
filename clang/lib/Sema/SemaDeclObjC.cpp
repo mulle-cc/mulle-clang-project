@@ -3721,13 +3721,18 @@ void SemaObjC::MatchAllMethodDeclarations(
          // @mulle-objc@ language: remove warnings for unimplemented instance methods like -retain, -release which are always defined >
          if( getLangOpts().ObjCRuntime.hasMulleMetaABI())
          {
-            std::string   s;
+            if( I->isOptional())
+               ;
+            else
+            {
+               std::string   s;
 
-            s = I->getNameAsString();
-            if( s != "release" &&
-                s != "retain")
-               WarnUndefinedMethod(SemaRef, IMPDecl, I, IncompleteImpl,
-                                   diag::warn_undef_method_impl);
+               s = I->getNameAsString();
+               if( s != "release" &&
+                   s != "retain")
+                  WarnUndefinedMethod(SemaRef, IMPDecl, I, IncompleteImpl,
+                                      diag::warn_undef_method_impl);
+            }
          }
          else
          // @mulle-objc@ language: remove warnings for unimplemented instance methods like -retain, -release which are always defined <
@@ -3766,13 +3771,18 @@ void SemaObjC::MatchAllMethodDeclarations(
          // @mulle-objc@ language: remove warnings for unimplemented class methods like +new, +alloc which are always defined
          if( getLangOpts().ObjCRuntime.hasMulleMetaABI())
          {
-            std::string   s;
+            if( I->isOptional())
+               ;
+            else
+            {
+               std::string   s;
 
-            s = I->getNameAsString();
-            if( s != "new" &&
-                s != "alloc")
-            WarnUndefinedMethod(SemaRef, IMPDecl, I, IncompleteImpl,
-                                diag::warn_undef_method_impl);
+               s = I->getNameAsString();
+               if( s != "new" &&
+                   s != "alloc")
+               WarnUndefinedMethod(SemaRef, IMPDecl, I, IncompleteImpl,
+                                   diag::warn_undef_method_impl);
+            }
          }
          else
         WarnUndefinedMethod(SemaRef, IMPDecl, I, IncompleteImpl,
@@ -4949,11 +4959,15 @@ static void DiagnoseCategoryMethodRedeclaration(SemaObjC &S,
              Sel.getNameForSlot(0) == "dependencies")
             continue;
 
-         // Suppress if other category name contains forward/future/prototype
-         StringRef N = CatName->getName();
-         if (N.contains_insensitive("forward") ||
-             N.contains_insensitive("future")  ||
-             N.contains_insensitive("prototype"))
+         // Suppress if other category adopts the NSForwarding protocol
+         bool isForwardingCategory = false;
+         for (const auto *Proto : Cat->protocols()) {
+            if (Proto->getName() == "NSForwarding") {
+               isForwardingCategory = true;
+               break;
+            }
+         }
+         if (isForwardingCategory)
             continue;
 
          // Suppress if @dependency covers this category

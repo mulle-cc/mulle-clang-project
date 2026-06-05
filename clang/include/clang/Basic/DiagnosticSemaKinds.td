@@ -8355,6 +8355,8 @@ def err_mulle_objc_universename_not_an_identifier: Error<
    "the universename '%0' must only contain lowercase identifier characters">;
 def err_mulle_dynamic_property_synthesize  : Error<
   "%0 is a dynamic property, that can not be synthesized">;
+def err_mulle_optional_property_not_dynamic : Error<
+  "@optional property %0 must be declared 'dynamic' or 'forward'">;
 
 // @mulle-objc@ dependency directive >
 def warn_mulle_objc_dependency_manual_method : Warning<

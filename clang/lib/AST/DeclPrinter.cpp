@@ -1700,6 +1700,12 @@ void DeclPrinter::VisitObjCPropertyDecl(ObjCPropertyDecl *PDecl) {
     }
 
     if (PDecl->getPropertyAttributes() &
+        ObjCPropertyAttribute::kind_forward) {
+      Out << (first ? ' ' : ',') << "forward";
+      first = false;
+    }
+
+    if (PDecl->getPropertyAttributes() &
         ObjCPropertyAttribute::kind_serializable) {
       Out << (first ? ' ' : ',') << "serializable";
       first = false;

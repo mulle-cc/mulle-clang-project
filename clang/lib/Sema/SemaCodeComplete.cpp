@@ -7677,6 +7677,8 @@ void SemaCodeCompletion::CodeCompleteObjCPropertyFlags(Scope *S,
   // @mulle-objc@ new property attributes serializable, container, dynamic >
   if (!ObjCPropertyFlagConflicts(Attributes, ObjCPropertyAttribute::kind_dynamic))
     Results.AddResult(CodeCompletionResult("dynamic"));
+  if (!ObjCPropertyFlagConflicts(Attributes, ObjCPropertyAttribute::kind_forward))
+    Results.AddResult(CodeCompletionResult("forward"));
   if (!ObjCPropertyFlagConflicts(Attributes, ObjCPropertyAttribute::kind_serializable))
     Results.AddResult(CodeCompletionResult("serializable"));
   if (!ObjCPropertyFlagConflicts(Attributes, ObjCPropertyAttribute::kind_nonserializable))
