@@ -2444,6 +2444,10 @@ void SemaObjC::DiagnoseUnimplementedProperties(Scope *S, ObjCImplDecl *IMPDecl,
         Prop->getAvailability() == AR_Unavailable)
       continue;
 
+    // @mulle-objc@ forward properties don't need accessors in this impl
+    if (Prop->getPropertyAttributes() & ObjCPropertyAttribute::kind_forward)
+      continue;
+
     // Diagnose unimplemented getters and setters.
     DiagnoseUnimplementedAccessor(SemaRef, PrimaryClass, Prop->getGetterName(),
                                   IMPDecl, CDecl, C, Prop, InsMap);

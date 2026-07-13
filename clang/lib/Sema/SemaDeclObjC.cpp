@@ -4959,15 +4959,17 @@ static void DiagnoseCategoryMethodRedeclaration(SemaObjC &S,
              Sel.getNameForSlot(0) == "dependencies")
             continue;
 
-         // Suppress if other category adopts the NSForwarding protocol
-         bool isForwardingCategory = false;
+         // Suppress if other category adopts MulleObjCForwarding or
+         // MulleObjCFuture protocol
+         bool isSuppressedCategory = false;
          for (const auto *Proto : Cat->protocols()) {
-            if (Proto->getName() == "NSForwarding") {
-               isForwardingCategory = true;
+            if (Proto->getName() == "MulleObjCForwarding" ||
+                Proto->getName() == "MulleObjCFuture") {
+               isSuppressedCategory = true;
                break;
             }
          }
-         if (isForwardingCategory)
+         if (isSuppressedCategory)
             continue;
 
          // Suppress if @dependency covers this category

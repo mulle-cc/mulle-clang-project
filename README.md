@@ -195,8 +195,26 @@ The following compiler flags control mulle-objc code generation:
 | `-fobjc-encode-no-offsets`        | Strip byte offsets from ObjC method type encodings (for cross-arch portability)
 | `--mulle-objc-no-asm-names`       | Disable `__asm__` symbol renaming (for C compilers that don't support it)
 | `--mulle-objc-portable-call`      | Emit `mulle_metaabi_object_call` macro calls in rewriter output for portable cross-arch C
-| `--mulle-objc-emit-deps`          | Emit `@dependency` information as a `.deps` file alongside the object file
+| `--mulle-objc-emit-deps[=<dir>]`  | Emit a `.deps.inc` sidecar file for each compiled source (see below)
 | `-Wmulle-method-implementation`   | Warn when a category implements a method already declared in another category (see `@dependency`)
+
+
+### `--mulle-objc-emit-deps` — dependency sidecar files
+
+When this flag is set, the compiler writes a `<source>.deps.inc` file alongside
+each object file (or into the directory given by `=<dir>`). The file contains
+one initializer line per `@implementation` / `@implementation Foo(Cat)` found in
+the translation unit:
+
+```c
+// src/Foo.m
+      { @selector( Foo), MULLE_OBJC_NO_CATEGORYID },      // 752dd620;Foo;;
+      { @selector( Foo), @selector( Extra) },      // 752dd620;Foo;1a593efb;Extra
+```
+
+These fragments can then be `#include`d into `objc-deps.inc` (the dependency
+list for the runtime).
+
 
 The following table represents option pairs, that logically exclude each other.
 Either one is always defined.
