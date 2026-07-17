@@ -104,7 +104,7 @@ public:
     llvm_unreachable("bad kind");
   }
 
-  // @mulle-objc@ compiler: additional methods hasConstantSelector and hasMulleMetaABI to check if compiling with mulle >
+  // @mulle-objc@ compiler: additional Mulle runtime predicates >
   bool hasConstantSelector() const {
      switch (getKind()) {
         case Mulle: return true;
@@ -124,7 +124,17 @@ public:
     }
     llvm_unreachable("bad kind");
   }
-  // @mulle-objc@ compiler: additional methods hasConstantSelector and hasMulleMetaABI to check if compiling with mulle <
+
+  /// Whether block objects participate in this runtime's Objective-C object
+  /// model. Mulle currently uses standalone Blocks-runtime objects.
+  bool supportsMulleBlockObjects() const {
+    switch (getKind()) {
+    case Mulle: return false;
+    default   : return true;
+    }
+    llvm_unreachable("bad kind");
+  }
+  // @mulle-objc@ compiler: additional Mulle runtime predicates <
 
   /// The inverse of isNonFragile():  does this runtime follow the set of
   /// implied behaviors for a "fragile" ABI?

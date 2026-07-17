@@ -1133,6 +1133,11 @@ namespace {
    private:
       ObjCTypesHelper ObjCTypes;
 
+      void EmitBlockObjectOwnershipCall(CodeGenFunction &CGF,
+                                        llvm::Value *Value,
+                                        StringRef SelectorName);
+      bool ShouldEmitBlockObjectOwnership(unsigned Flags) const;
+
       /// EmitModuleInfo - Another marker encoding module level
       /// information.
       // void EmitModuleInfo();
@@ -1475,6 +1480,12 @@ namespace {
                                   const ObjCIvarDecl *Ivar) override;
 
       llvm::ConstantStruct *CreateNSConstantStringStruct( StringRef S, unsigned StringLength) override;
+
+      bool TryEmitBlockObjectRetain(CodeGenFunction &CGF, llvm::Value *Value,
+                                    unsigned Flags) override;
+      bool TryEmitBlockObjectRelease(CodeGenFunction &CGF,
+                                     llvm::Value *Value,
+                                     unsigned Flags) override;
    };
 }
 
@@ -7108,23 +7119,73 @@ void CGObjCCommonMulleRuntime::ResolveMethodAliases(const ObjCImplDecl *ID) {
 
 # pragma mark - Block code
 
+void CGObjCMulleRuntime::EmitBlockObjectOwnershipCall(CodeGenFunction &CGF,
+                                                       llvm::Value *Value,
+                                                       StringRef SelectorName)
+{
+   ASTContext     &Context = CGM.getContext();
+   IdentifierInfo *Identifier = &Context.Idents.get(SelectorName);
+   Selector       Sel = Context.Selectors.getNullarySelector(Identifier);
+   llvm::Value    *Object;
+   llvm::Value    *MethodID;
+
+   Object   = CGF.Builder.CreateBitCast(Value, ObjCTypes.ObjectPtrTy);
+   MethodID = GetSelector(CGF, Sel);
+
+   // Use the canonical Mulle meta-ABI zero-argument form: receiver, selector,
+   // receiver. Block copy/dispose helpers are linkonce_odr, so their bodies
+   // must not vary with optimization level. Mulle retain returns self; the
+   // generic caller deliberately stores the original pointer after retaining.
+   llvm::Value *Args[] = { Object, MethodID, Object };
+   CGF.EmitNounwindRuntimeCall(
+      ObjCTypes.getMessageSendFn(INLINE_CALL_NONE), Args);
+}
+
+bool CGObjCMulleRuntime::ShouldEmitBlockObjectOwnership(unsigned Flags) const
+{
+   return Flags == BLOCK_FIELD_IS_OBJECT &&
+          CGM.getLangOpts().getGC() == LangOptions::NonGC;
+}
+
+bool CGObjCMulleRuntime::TryEmitBlockObjectRetain(CodeGenFunction &CGF,
+                                                  llvm::Value *Value,
+                                                  unsigned Flags)
+{
+   if (! ShouldEmitBlockObjectOwnership(Flags))
+      return false;
+
+   EmitBlockObjectOwnershipCall(CGF, Value, "retain");
+   return true;
+}
+
+bool CGObjCMulleRuntime::TryEmitBlockObjectRelease(CodeGenFunction &CGF,
+                                                   llvm::Value *Value,
+                                                   unsigned Flags)
+{
+   if (! ShouldEmitBlockObjectOwnership(Flags))
+      return false;
+
+   EmitBlockObjectOwnershipCall(CGF, Value, "release");
+   return true;
+}
+
 llvm::Constant *CGObjCCommonMulleRuntime::BuildGCBlockLayout(CodeGen::CodeGenModule &CGM,
                                            const CodeGen::CGBlockInfo &blockInfo)
 {
-   return( nullptr);
+   return llvm::Constant::getNullValue(CGM.Int8PtrTy);
 }
 
 llvm::Constant *CGObjCCommonMulleRuntime::BuildRCBlockLayout(CodeGen::CodeGenModule &CGM,
                                           const CodeGen::CGBlockInfo &blockInfo)
 {
-   return( nullptr);
+   return llvm::Constant::getNullValue(CGM.Int8PtrTy);
 }
 
 /// Returns an i8* which points to the byref layout information.
 llvm::Constant *CGObjCCommonMulleRuntime::BuildByrefLayout(CodeGen::CodeGenModule &CGM,
                                            QualType T)
 {
-   return( nullptr);
+   return llvm::Constant::getNullValue(CGM.Int8PtrTy);
 }
 
 
@@ -7709,4 +7770,3 @@ CGObjCRuntime *clang::CodeGen::CreateMulleObjCRuntime(CodeGenModule &CGM)
   }
   llvm_unreachable("bad runtime");
 }
-

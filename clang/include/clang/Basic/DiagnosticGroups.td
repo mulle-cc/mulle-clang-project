@@ -692,6 +692,9 @@ def MulleProtocolClass : DiagGroup<"mulle-protocolclass">;
 // @mulle-objc@ method_implementation group >
 def MulleMethodImplementation : DiagGroup<"mulle-method-implementation">;
 // @mulle-objc@ method_implementation group <
+// @mulle-objc@ Blocks are not native Mulle Objective-C objects >
+def MulleBlockObjectConversion : DiagGroup<"mulle-block-object-conversion">;
+// @mulle-objc@ Blocks are not native Mulle Objective-C objects <
 def ObjCReceiver : DiagGroup<"receiver-expr">;
 def OperatorNewReturnsNull : DiagGroup<"new-returns-null">;
 def OverlengthStrings : DiagGroup<"overlength-strings">;

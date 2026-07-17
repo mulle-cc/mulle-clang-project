@@ -4309,21 +4309,24 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
   Opts.Trigraphs =
       Args.hasFlag(OPT_ftrigraphs, OPT_fno_trigraphs, Opts.Trigraphs);
 
-// @mulle-objc@ can not deal with blocks >
+// @mulle-objc@ keep z/OS extensions disabled for mulle-clang >
 #if 0
   Opts.ZOSExt =
       Args.hasFlag(OPT_fzos_extensions, OPT_fno_zos_extensions, T.isOSzOS());
-
+#endif
+// @mulle-objc@ keep z/OS extensions disabled for mulle-clang <
   Opts.Blocks = Args.hasArg(OPT_fblocks) || (Opts.OpenCL
     && Opts.OpenCLVersion == 200);
 
+// @mulle-objc@ keep convergent functions disabled for mulle-clang >
+#if 0
   bool HasConvergentOperations = Opts.isTargetDevice() || Opts.OpenCL ||
                                  Opts.HLSL || T.isAMDGPU() || T.isNVPTX();
   Opts.ConvergentFunctions =
       Args.hasFlag(OPT_fconvergent_functions, OPT_fno_convergent_functions,
                    HasConvergentOperations);
 #endif
-// @mulle-objc@ can not deal with blocks <
+// @mulle-objc@ keep convergent functions disabled for mulle-clang <
 // @mulle-objc@ ElideConstructors interferes with C code >
   Opts.ElideConstructors = 0; // !Args.hasArg(OPT_fno_elide_constructors);
 // @mulle-objc@ ElideConstructors interferes with C code <

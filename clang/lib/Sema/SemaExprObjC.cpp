@@ -3067,6 +3067,13 @@ ExprResult SemaObjC::BuildInstanceMessage(
     Receiver = Result.get();
     ReceiverType = Receiver->getType();
 
+    // A block receiver is treated as an Objective-C object by the Apple
+    // object model, but Mulle block objects currently live only in the Blocks
+    // runtime. An explicit cast to id is the deliberate opt-out.
+    SemaRef.DiagnoseMulleBlockObjectConversion(
+        Receiver->getExprLoc(), Context.getObjCIdType(), ReceiverType,
+        Receiver->getSourceRange());
+
     // If the receiver is an ObjC pointer, a block pointer, or an
     // __attribute__((NSObject)) pointer, we don't need to do any
     // special conversion in order to look up a receiver.

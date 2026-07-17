@@ -761,6 +761,20 @@ void Sema::diagnoseZeroToNullptrConversion(CastKind Kind, const Expr *E) {
       << FixItHint::CreateReplacement(E->getSourceRange(), "nullptr");
 }
 
+void Sema::DiagnoseMulleBlockObjectConversion(SourceLocation Loc,
+                                               QualType DestType,
+                                               QualType SrcType,
+                                               SourceRange Range) {
+  if (!getLangOpts().ObjC ||
+      getLangOpts().ObjCRuntime.supportsMulleBlockObjects() ||
+      !SrcType->isBlockPointerType() ||
+      !DestType->isObjCRetainableType() || DestType->isBlockPointerType())
+    return;
+
+  Diag(Loc, diag::warn_mulle_block_object_conversion)
+      << SrcType << DestType << Range;
+}
+
 /// ImpCastExprToType - If Expr is not of type 'Type', insert an implicit cast.
 /// If there is already an implicit cast, merge into the existing one.
 /// The result is of the given category.
@@ -794,6 +808,9 @@ ExprResult Sema::ImpCastExprToType(Expr *E, QualType Ty,
 
   diagnoseNullableToNonnullConversion(Ty, E->getType(), E->getBeginLoc());
   diagnoseZeroToNullptrConversion(Kind, E);
+  if (!isCast(CCK))
+    DiagnoseMulleBlockObjectConversion(E->getBeginLoc(), Ty, E->getType(),
+                                       E->getSourceRange());
   if (Context.hasAnyFunctionEffects() && !isCast(CCK) &&
       Kind != CK_NullToPointer && Kind != CK_NullToMemberPointer)
     diagnoseFunctionEffectConversion(Ty, E->getType(), E->getBeginLoc());
