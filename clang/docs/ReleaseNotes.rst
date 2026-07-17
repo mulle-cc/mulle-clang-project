@@ -37,6 +37,10 @@ latest release, please see the `Clang Web Site <https://clang.llvm.org>`_ or the
 Potentially Breaking Changes
 ============================
 
+- This fork restores upstream Blocks defaults for Darwin C and C++, and for
+  Objective-C when the resolved runtime is an Apple runtime. ``__BLOCKS__`` may
+  therefore be defined again in translation units where earlier fork releases
+  suppressed it. Mulle Objective-C remains opt-in and requires ``-fblocks``.
 - Clang will now emit a warning if the auto-detected GCC installation
   directory (i.e. the one with the largest version number) does not
   contain libstdc++ include directories although a "complete" GCC
@@ -263,6 +267,18 @@ C23 Feature Support
 
 Non-comprehensive list of changes in this release
 -------------------------------------------------
+- Mulle Objective-C now supports Blocks declarations, literals, invocation,
+  escaping copies, ``__block`` storage, and manual-reference-counted Mulle
+  object captures with ``-fblocks``. Direct object captures use Mulle
+  retain/release dispatch, while ``__block`` objects preserve the original
+  non-owning MRC behavior. Because Blocks-runtime objects are not native Mulle
+  objects, implicit block-to-Objective-C-object conversions are diagnosed by
+  ``-Wmulle-block-object-conversion``, which defaults to an error. The
+  target-independent implementation is covered on Mach-O, ELF, and COFF across
+  32- and 64-bit architectures; non-Darwin targets link a compatible Blocks
+  runtime. See :doc:`MulleObjCBlocks` for runtime, ownership, object-model, and
+  platform details.
+
 - Added ``__scoped_atomic_uinc_wrap`` and ``__scoped_atomic_udec_wrap``.
 
 - Removed OpenCL header-only feature macros (previously unconditionally enabled

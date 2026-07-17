@@ -8308,6 +8308,11 @@ def err_mulle_aam_illegal_consumed_message : Error<
 "in AAM method %0 is not available, because it needs a retained argument">;
 def err_mulle_objc_runtime_function_missing : Error<
 "the mulle-objc runtime function %0 has not been declared yet">;
+def warn_mulle_block_object_conversion : Warning<
+"implicit conversion from block pointer type %0 to Objective-C retainable "
+"type %1 is not supported by the Mulle Objective-C runtime; blocks are not "
+"Mulle Objective-C objects (use an explicit cast to acknowledge this runtime "
+"limitation)">, InGroup<MulleBlockObjectConversion>, DefaultError;
 def err_mulle_objc_property_synthesize_wrong_name : Error<
 "the mulle-objc runtime synthesized instance variable name must be the name of the property, prefixed by an underscore">;
 def err_mulle_objc_no_property_dot_expression : Error<

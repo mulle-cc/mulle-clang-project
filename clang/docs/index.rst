@@ -19,6 +19,7 @@ Using Clang as a Compiler
    UsersManual
    Toolchain
    LanguageExtensions
+   MulleObjCBlocks
    ClangCommandLineReference
    AttributeReference
    DiagnosticsReference
@@ -128,4 +129,3 @@ Indices and tables
 
 * :ref:`genindex`
 * :ref:`search`
-

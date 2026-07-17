@@ -1,4 +1,6 @@
 // RUN: %clang_cc1 -triple %itanium_abi_triple -fsyntax-only -verify -fblocks -Wno-strict-prototypes %s
+// RUN: %clang_cc1 -triple x86_64-apple-darwin -fobjc-runtime=macosx-10.15 -fsyntax-only -verify -fblocks -Wno-strict-prototypes %s
+// RUN: %clang_cc1 -triple x86_64-apple-darwin -fobjc-runtime=mulle -fsyntax-only -verify -fblocks -Wno-strict-prototypes %s
 
 #define bool _Bool
 @protocol NSObject;

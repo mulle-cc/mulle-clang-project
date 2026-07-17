@@ -1835,6 +1835,9 @@ static std::string getBlockCaptureStr(const CGBlockInfo::Capture &Cap,
 static std::string getCopyDestroyHelperFuncName(
     const SmallVectorImpl<CGBlockInfo::Capture> &Captures,
     CharUnits BlockAlignment, CaptureStrKind StrKind, CodeGenModule &CGM) {
+  // The helper name intentionally does not encode the Objective-C runtime
+  // dialect. All translation units in a final link must use the same runtime;
+  // mixing dialects could otherwise merge helpers with different ownership.
   assert((StrKind == CaptureStrKind::CopyHelper ||
           StrKind == CaptureStrKind::DisposeHelper) &&
          "unexpected CaptureStrKind");
@@ -2036,6 +2039,14 @@ CodeGenFunction::GenerateCopyHelperFunction(const CGBlockInfo &blockInfo) {
     }
     case BlockCaptureEntityKind::BlockObject: {
       llvm::Value *srcValue = Builder.CreateLoad(srcField, "blockcopy.src");
+      // @mulle-objc@ allow runtime-specific direct object ownership >
+      if (CGM.getObjCRuntime().TryEmitBlockObjectRetain(
+              *this, srcValue, flags.getBitMask())) {
+        Builder.CreateStore(srcValue, dstField);
+        break;
+      }
+      // @mulle-objc@ allow runtime-specific direct object ownership <
+
       llvm::Value *dstAddr = dstField.emitRawPointer(*this);
       llvm::Value *args[] = {
         dstAddr, srcValue, llvm::ConstantInt::get(Int32Ty, flags.getBitMask())
@@ -2203,7 +2214,6 @@ public:
     llvm::Value *srcValue = CGF.Builder.CreateLoad(srcField);
 
     unsigned flags = (Flags | BLOCK_BYREF_CALLER).getBitMask();
-
     llvm::Value *flagsVal = llvm::ConstantInt::get(CGF.Int32Ty, flags);
     llvm::FunctionCallee fn = CGF.CGM.getBlockObjectAssign();
 
@@ -2869,6 +2879,14 @@ void CodeGenFunction::emitByrefStructureInit(const AutoVarEmission &emission) {
 
 void CodeGenFunction::BuildBlockRelease(llvm::Value *V, BlockFieldFlags flags,
                                         bool CanThrow) {
+  // @mulle-objc@ allow runtime-specific direct object ownership >
+  if (CGM.getObjCRuntime().TryEmitBlockObjectRelease(
+          *this, V, flags.getBitMask())) {
+    assert(!CanThrow && "runtime-specific block object release may not throw");
+    return;
+  }
+  // @mulle-objc@ allow runtime-specific direct object ownership <
+
   llvm::FunctionCallee F = CGM.getBlockObjectDispose();
   llvm::Value *args[] = {V,
                          llvm::ConstantInt::get(Int32Ty, flags.getBitMask())};

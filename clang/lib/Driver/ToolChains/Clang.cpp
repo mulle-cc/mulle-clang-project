@@ -7124,25 +7124,31 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                    options::OPT_fno_swift_version_independent_apinotes, false))
     CmdArgs.push_back("-fswift-version-independent-apinotes");
 
-// @mulle-objc@ blocks are just no good for mulle-clang>
-#if 0 // @mulle-objc@ disable blocks-related flags for mulle-clang
+  // @mulle-objc@ keep Blocks opt-in for the Mulle Objective-C runtime >
+  ObjCRuntime Runtime = AddObjCRuntimeArgs(Args, Inputs, CmdArgs, rewriteKind);
+  bool BlocksDefault = TC.IsBlocksDefault();
+  if (types::isObjC(InputType) && Runtime.hasMulleMetaABI())
+    BlocksDefault = false;
+
   // -fblocks=0 is default.
   if (Args.hasFlag(options::OPT_fblocks, options::OPT_fno_blocks,
-                   TC.IsBlocksDefault()) ||
-      (Args.hasArg(options::OPT_fgnu_runtime) &&
+                   BlocksDefault) ||
+      (!Runtime.hasMulleMetaABI() && Args.hasArg(options::OPT_fgnu_runtime) &&
        Args.hasArg(options::OPT_fobjc_nonfragile_abi) &&
        !Args.hasArg(options::OPT_fno_blocks))) {
     CmdArgs.push_back("-fblocks");
 
-    if (!Args.hasArg(options::OPT_fgnu_runtime) && !TC.hasBlocksRuntime())
+    // Deliberately key this to the resolved runtime family. Unlike upstream's
+    // literal -fgnu-runtime check, this also covers explicit GNUstep/ObjFW
+    // runtimes without adding spurious weak Blocks-runtime imports.
+    if (!Runtime.isGNUFamily() && !TC.hasBlocksRuntime())
       CmdArgs.push_back("-fblocks-runtime-optional");
   }
 
   // -fencode-extended-block-signature=1 is default.
   if (TC.IsEncodeExtendedBlockSignatureDefault())
     CmdArgs.push_back("-fencode-extended-block-signature");
-#endif
-// @mulle-objc@ blocks are just no good for mulle-clang<
+  // @mulle-objc@ keep Blocks opt-in for the Mulle Objective-C runtime <
 
   if (Args.hasFlag(options::OPT_fcoro_aligned_allocation,
                    options::OPT_fno_coro_aligned_allocation, false) &&
@@ -7400,7 +7406,6 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                    false))
     CmdArgs.push_back("-fmodules-debuginfo");
 
-  ObjCRuntime Runtime = AddObjCRuntimeArgs(Args, Inputs, CmdArgs, rewriteKind);
   RenderObjCOptions(TC, D, RawTriple, Args, Runtime, rewriteKind != RK_None,
                     Input, CmdArgs);
 

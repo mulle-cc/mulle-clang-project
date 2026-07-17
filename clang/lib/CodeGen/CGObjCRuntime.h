@@ -378,6 +378,21 @@ public:
   virtual llvm::Constant *BuildByrefLayout(CodeGen::CodeGenModule &CGM,
                                            QualType T) = 0;
 
+  // @mulle-objc@ customize ownership of direct Blocks object captures >
+  /// Give an Objective-C runtime a chance to retain or release a Blocks
+  /// capture. The runtime owns the flag predicate; the generic caller stores
+  /// a successfully retained value. Returning false preserves the standard
+  /// _Block_object_assign/_Block_object_dispose operation.
+  virtual bool TryEmitBlockObjectRetain(CodeGenFunction &, llvm::Value *,
+                                        unsigned) {
+    return false;
+  }
+  virtual bool TryEmitBlockObjectRelease(CodeGenFunction &, llvm::Value *,
+                                         unsigned) {
+    return false;
+  }
+  // @mulle-objc@ customize ownership of direct Blocks object captures <
+
   struct MessageSendInfo {
     const CGFunctionInfo &CallInfo;
     llvm::PointerType *MessengerType;

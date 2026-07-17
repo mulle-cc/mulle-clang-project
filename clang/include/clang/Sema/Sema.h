@@ -1145,6 +1145,13 @@ public:
       const CXXCastPath *BasePath = nullptr,
       CheckedConversionKind CCK = CheckedConversionKind::Implicit);
 
+  /// Diagnose an implicit use of a standalone Blocks-runtime object as a
+  /// native Mulle Objective-C object.
+  void DiagnoseMulleBlockObjectConversion(SourceLocation Loc,
+                                           QualType DestType,
+                                           QualType SrcType,
+                                           SourceRange Range);
+
   /// ScalarTypeToBooleanCastKind - Returns the cast kind corresponding
   /// to the conversion from scalar type ScalarTy to the Boolean type.
   static CastKind ScalarTypeToBooleanCastKind(QualType ScalarTy);
