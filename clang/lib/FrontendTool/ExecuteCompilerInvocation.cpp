@@ -100,6 +100,7 @@ CreateFrontendBaseAction(CompilerInstance &CI) {
       return std::make_unique<cir::EmitObjAction>();
 #endif
     return std::make_unique<EmitObjAction>();
+  case EmitNH:                 return std::make_unique<MulleNHEmitAction>();
   case ExtractAPI:
     return std::make_unique<ExtractAPIAction>();
   case FixIt:                  return std::make_unique<FixItAction>();

@@ -332,6 +332,16 @@ public:
   HLSLFrontendAction(std::unique_ptr<FrontendAction> WrappedAction);
 };
 
+//===----------------------------------------------------------------------===//
+// @mulle-objc@ -emit-nh Action
+//===----------------------------------------------------------------------===//
+
+class MulleNHEmitAction : public ASTFrontendAction {
+protected:
+  std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI,
+                                                 StringRef InFile) override;
+};
+
 }  // end namespace clang
 
 #endif

@@ -196,6 +196,7 @@ The following compiler flags control mulle-objc code generation:
 | `--mulle-objc-no-asm-names`       | Disable `__asm__` symbol renaming (for C compilers that don't support it)
 | `--mulle-objc-portable-call`      | Emit `mulle_metaabi_object_call` macro calls in rewriter output for portable cross-arch C
 | `--mulle-objc-emit-deps[=<dir>]`  | Emit a `.deps.inc` sidecar file for each compiled source (see below)
+| `-emit-nh`                        | Emit a nuobjc `.nh` interface file describing ObjC classes, protocols, and C functions (see below)
 | `-Wmulle-method-implementation`   | Warn when a category implements a method already declared in another category (see `@dependency`)
 
 
@@ -214,6 +215,22 @@ the translation unit:
 
 These fragments can then be `#include`d into `objc-deps.inc` (the dependency
 list for the runtime).
+
+
+### `-emit-nh` — nuobjc interface file generation
+
+A standalone action (like `-c` or `-S`) that parses an ObjC header and emits a
+`.nh` interface file for the `mulle-nuobjc` transpiler:
+
+```bash
+mulle-clang -emit-nh -o MulleObjC.nh -x objective-c -fobjc-tao \
+    -isystem dependency/Debug/include \
+    MulleObjC.imports.h
+```
+
+The output describes classes (with superclass, protocols, methods), protocols,
+and vetted C functions (value-only types, no pointers). Methods are written in
+nuobjc dot-call syntax. See `SPEC-EMIT-NH.md` for full details.
 
 
 The following table represents option pairs, that logically exclude each other.

@@ -358,6 +358,9 @@ phases::ID Driver::getFinalPhase(const DerivedArgList &DAL,
              // @mulle-objc@ --mulle-objc-emit-c action >
              (PhaseArg = DAL.getLastArg(options::OPT_rewrite_mulle_objc)) ||
              // @mulle-objc@ --mulle-objc-emit-c action <
+             // @mulle-objc@ -emit-nh action >
+             (PhaseArg = DAL.getLastArg(options::OPT_emit_nh)) ||
+             // @mulle-objc@ -emit-nh action <
              (PhaseArg = DAL.getLastArg(options::OPT_rewrite_legacy_objc)) ||
              (PhaseArg = DAL.getLastArg(options::OPT__analyze)) ||
              (PhaseArg = DAL.getLastArg(options::OPT_emit_cir)) ||
@@ -5145,6 +5148,10 @@ Action *Driver::ConstructPhaseAction(
   case phases::Compile: {
     if (Args.hasArg(options::OPT_fsyntax_only))
       return C.MakeAction<CompileJobAction>(Input, types::TY_Nothing);
+    // @mulle-objc@ -emit-nh action >
+    if (Args.hasArg(options::OPT_emit_nh))
+      return C.MakeAction<CompileJobAction>(Input, types::TY_Nothing);
+    // @mulle-objc@ -emit-nh action <
     if (Args.hasArg(options::OPT_rewrite_objc))
       return C.MakeAction<CompileJobAction>(Input, types::TY_RewrittenObjC);
     // @mulle-objc@ --mulle-objc-emit-c action >

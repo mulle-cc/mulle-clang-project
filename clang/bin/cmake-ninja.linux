@@ -24,7 +24,7 @@ esac
 # MEMO: If you can't use ninja copy this file and make it cmake-make or so.
 PREFIX="${PREFIX:-/opt}"
 # VERSION / RC are passed in via mulle-clang-cpack
-VERSION="${VERSION:-22.1.2.4}"
+VERSION="${VERSION:-22.1.2.5}"
 INSTALL_PREFIX="${PREFIX}/mulle-clang-project/${VERSION}${RC}"
 
 # @mulle-objc@ extract mulle-clang patch version (4th component) for clang version suffix >
@@ -103,8 +103,9 @@ cmake \
    ${CMAKEFLAGS} \
    ../mulle-clang-project/llvm &&
 ninja ${NINJAFLAGS} "$@"  &&
-echo "Ninja install with sudo may require a password" >&2 &&
-${INSTALL_SUDO} ninja ${NINJAFLAGS} ${INSTALLFLAGS} install &&
+echo "===> Installing into ${INSTALL_PREFIX} ..." >&2 &&
+echo "     (may require a password for sudo)" >&2 &&
+${INSTALL_SUDO} cmake --install . &&
 
 # pass in INSTALL_SUDO via env if needed
 

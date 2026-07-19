@@ -2776,6 +2776,7 @@ static const auto &getFrontendActionTable() {
       {frontend::EmitLLVMOnly, OPT_emit_llvm_only},
       {frontend::EmitCodeGenOnly, OPT_emit_codegen_only},
       {frontend::EmitObj, OPT_emit_obj},
+      {frontend::EmitNH, OPT_emit_nh},
       {frontend::ExtractAPI, OPT_extract_api},
 
       {frontend::FixIt, OPT_fixit_EQ},
@@ -4787,6 +4788,7 @@ static bool isStrictlyPreprocessorAction(frontend::ActionKind Action) {
   case frontend::EmitLLVMOnly:
   case frontend::EmitCodeGenOnly:
   case frontend::EmitObj:
+  case frontend::EmitNH:
   case frontend::ExtractAPI:
   case frontend::FixIt:
   case frontend::GenerateModule:
@@ -4854,6 +4856,7 @@ static bool isCodeGenAction(frontend::ActionKind Action) {
   case frontend::RewriteMulleObjC:
   // @mulle-objc@ --mulle-objc-emit-c action <
   case frontend::RewriteTest:
+  case frontend::EmitNH:
   case frontend::RunAnalysis:
   case frontend::TemplightDump:
   case frontend::DumpCompilerOptions:

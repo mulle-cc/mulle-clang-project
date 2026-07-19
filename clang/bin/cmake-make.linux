@@ -9,7 +9,7 @@
 # MEMO: If you can't use ninja copy this file and make it cmake-make or so.
 PREFIX="${PREFIX:-/opt}"
 # VERSION / RC are passed in via mulle-clang-cpack
-VERSION="${VERSION:-22.1.2.4}"
+VERSION="${VERSION:-22.1.2.5}"
 INSTALL_PREFIX="${PREFIX}/mulle-clang-project/${VERSION}${RC}"
 
 # @mulle-objc@ extract mulle-clang patch version (4th component) for clang version suffix >
@@ -64,6 +64,7 @@ fi
 
 [ ! -d build ] && mkdir build
 cd build &&
+echo "===> Configuring (cmake)..." >&2 &&
 cmake \
    -DLLVM_BUILD_LLVM_DYLIB='ON' \
    -DLLVM_BUILD_TESTS="OFF"  \
@@ -85,14 +86,18 @@ cmake \
    -G "Unix Makefiles" \
    ${CMAKEFLAGS} \
    ../mulle-clang-project/llvm &&
+echo "===> Compiling (make -j ${CORES})..." >&2 &&
 make -j ${CORES} &&
-echo "Make install with sudo may require a password" >&2 &&
-${INSTALL_SUDO} make install || exit 1
+echo "===> Installing into ${INSTALL_PREFIX} ..." >&2 &&
+echo "     (may require a password for sudo)" >&2 &&
+${INSTALL_SUDO} cmake --install . || exit 1
 
 # pass in INSTALL_SUDO via env if needed
 
 # postprocess: remove llvm stuff that is not needed
 #              rename llvm stuff we need to m
+
+echo "===> Postprocessing ${INSTALL_PREFIX}/bin ..." >&2 &&
 
 
 cd "${INSTALL_PREFIX}/bin" &&

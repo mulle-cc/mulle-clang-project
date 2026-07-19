@@ -6299,6 +6299,12 @@ def mulle_objc_emit_deps_bare : Flag<["--"], "mulle-objc-emit-deps">,
   Alias<mulle_objc_emit_deps>, AliasArgs<[""]>,
   HelpText<"Write a .deps.inc sidecar file into the -o output directory">;
 // @mulle-objc@ --mulle-objc-emit-deps flag <
+// @mulle-objc@ -emit-nh flag >
+def emit_nh : Flag<["-"], "emit-nh">,
+  Flags<[NoXarchOption]>, Visibility<[ClangOption, CC1Option]>,
+  Group<Action_Group>,
+  HelpText<"Emit a nuobjc .nh interface file for the ObjC declarations in the input">;
+// @mulle-objc@ -emit-nh flag <
 def rewrite_legacy_objc : Flag<["-"], "rewrite-legacy-objc">,
   Flags<[NoXarchOption]>,
   HelpText<"Rewrite Legacy Objective-C source to C++">;

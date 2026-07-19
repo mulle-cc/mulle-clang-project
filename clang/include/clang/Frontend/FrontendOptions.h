@@ -80,6 +80,9 @@ enum ActionKind {
   /// Emit a .o file.
   EmitObj,
 
+  /// @mulle-objc@ Emit a nuobjc .nh interface file.
+  EmitNH,
+
   // Extract API information
   ExtractAPI,
 

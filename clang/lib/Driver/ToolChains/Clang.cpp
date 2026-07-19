@@ -5234,6 +5234,15 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     assert((isa<CompileJobAction>(JA) || isa<BackendJobAction>(JA)) &&
            "Invalid action for clang tool.");
     if (JA.getType() == types::TY_Nothing) {
+      // @mulle-objc@ -emit-nh: override -fsyntax-only with -emit-nh >
+      if (Args.hasArg(options::OPT_emit_nh)) {
+        CmdArgs.push_back("-emit-nh");
+        // Forward -o to cc1 since TY_Nothing normally suppresses it
+        if (const Arg *A = Args.getLastArg(options::OPT_o))
+          { CmdArgs.push_back("-o"); CmdArgs.push_back(A->getValue()); }
+      }
+      else
+      // @mulle-objc@ -emit-nh: override -fsyntax-only with -emit-nh <
       CmdArgs.push_back("-fsyntax-only");
     } else if (JA.getType() == types::TY_LLVM_IR ||
                JA.getType() == types::TY_LTO_IR) {
