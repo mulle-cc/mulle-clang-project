@@ -108,13 +108,23 @@
       "principalTool": "",
       "status": "todo",
       "skillLevel": "Low"
+    },
+    {
+      "title": "Update README.md version info",
+      "filename": "i-update_readmemd-8fc927dbde3c.md",
+      "scriptFilename": "s-update_readmemd-8fc927dbde3c.sh",
+      "uuid": "8fc927dbde3c",
+      "principalTool": "",
+      "status": "todo",
+      "skillLevel": "Low"
     }
   ],
   "environmentVariables": {
     "MULLE_CLANG_PROJECT_TAG": "22.1.2.5",
     "MULLE_CLANG_BRANCH": "mulle/22.1.2",
     "PWD": "/home/src/srcO",
-    "MULLE_OBJC_RUNTIME_LOAD_VERSION": "21"
+    "MULLE_OBJC_RUNTIME_LOAD_VERSION": "21",
+    "LC_ALL": "C"
   },
   "images": [],
   "fontSize": 16
