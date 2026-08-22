@@ -1,7 +1,16 @@
 Update version strings in the outer `mulle-clang-X.Y.Z` repo.
 
-The outer repo directory is named after the version (e.g. `mulle-clang-21.1.8`).
-After a major upgrade the repo should be cloned/renamed to `mulle-clang-22.x.x`.
+The outer repo directory is named after the version (e.g. `mulle-clang-22.1.2`).
+**Always create a new outer directory** named after the new version
+(e.g. `mulle-clang-22.1.8`), even for patch bumps within the same major.
+
+**Copy, don't rename** — the old outer directory should remain intact
+as a reference. Use `cp -a` to preserve everything, then work in the copy.
+Ask the user before copying if the disk space is large.
+
+```bash
+cp -a mulle-clang-22.1.2 mulle-clang-22.1.8 && cd mulle-clang-22.1.8
+```
 
 ## Steps
 
