@@ -1,26 +1,16 @@
 Build the new compiler and run the test suite.
 
-**Important:** Always use a **fresh** outer directory named after the new version
-(e.g. `mulle-clang-22.1.8`), created via `cp -a` from the old one.
-The old `build/` dir is stale — **delete it** and create a fresh one.
-
 ## Configure
 
 Use the provided cmake script — do NOT run cmake directly.
 The existing `build/` dir was configured for the old version — always use a
-fresh build dir (reusing causes `check-builtins` target conflicts).
-Delete stale build dirs first:
+fresh build dir (reusing causes `check-builtins` target conflicts):
 
 ```bash
-cd /home/src/srcL/mulle-clang-22.1.8
-rm -rf build
-mkdir build
-cd build
-cmake -G Ninja \
-  -DLLVM_ENABLE_PROJECTS="clang;clang-tools-extra" \
-  -DLLVM_ENABLE_RUNTIMES="compiler-rt" \
-  ... \
-  ../mulle-clang-project/llvm
+cd /home/src/srcL/mulle-clang-22.1.2
+mkdir build22
+cd build22
+../mulle-clang-project/clang/bin/cmake-ninja.linux
 ```
 
 **llvm 22 cmake change:** `compiler-rt` must move from `LLVM_ENABLE_PROJECTS`
