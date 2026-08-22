@@ -25,7 +25,22 @@ cd mulle-clang-22.1.8
    OLD_VERSION=22.1.2 NEW_VERSION=22.1.8 \
      bash mulle-clang-project/.mulle/etc/release-commander/upgrade.mrc/s-update_outer_repo-0004.sh
    ```
-   This replaces version strings in `BUILD-AND-TEST.md` and `migrate-to-next-release`.
+   This replaces version strings in `BUILD-AND-TEST.md`, `migrate-to-next-release`,
+   and the `VERSION` default in all cmake scripts.
+
+3. **Bump the VERSION default in cmake scripts.** The mulle-clang version is
+   `<llvm-version>.<mulle-patch>` (e.g. `22.1.8.7`). The mulle patch component
+   (4th number) stays the same unless mulle features were added:
+   ```bash
+   cd mulle-clang-project
+   sed -i 's/VERSION="${VERSION:-<old-llvm>.<mulle-patch>}"/VERSION="${VERSION:-<new-llvm>.<mulle-patch>}"/' \
+     clang/bin/cmake-ninja.linux \
+     clang/bin/cmake-ninja.darwin \
+     clang/bin/cmake-ninja.windows \
+     clang/bin/cmake-make.linux \
+     clang/bin/cmake-msbuild.windows \
+     clang/bin/cmake-distribution-ninja.linux
+   ```
 
 3. Delete stale build directories (they reference old paths) and reconfigure:
    ```bash
