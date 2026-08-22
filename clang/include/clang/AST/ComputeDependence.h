@@ -102,6 +102,9 @@ class ObjCArrayLiteral;
 class ObjCDictionaryLiteral;
 class ObjCBoxedExpr;
 class ObjCEncodeExpr;
+// @mulle-objc@ @signature >
+class ObjCSignatureExpr;
+// @mulle-objc@ @signature <
 class ObjCIvarRefExpr;
 class ObjCPropertyRefExpr;
 class ObjCSubscriptRefExpr;
@@ -201,6 +204,9 @@ ExprDependence computeDependence(ObjCArrayLiteral *E);
 ExprDependence computeDependence(ObjCDictionaryLiteral *E);
 ExprDependence computeDependence(ObjCBoxedExpr *E);
 ExprDependence computeDependence(ObjCEncodeExpr *E);
+// @mulle-objc@ @signature >
+ExprDependence computeDependence(ObjCSignatureExpr *E);
+// @mulle-objc@ @signature <
 ExprDependence computeDependence(ObjCIvarRefExpr *E);
 ExprDependence computeDependence(ObjCPropertyRefExpr *E);
 ExprDependence computeDependence(ObjCSubscriptRefExpr *E);

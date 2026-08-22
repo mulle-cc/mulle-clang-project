@@ -2776,6 +2776,7 @@ static const auto &getFrontendActionTable() {
       {frontend::EmitLLVMOnly, OPT_emit_llvm_only},
       {frontend::EmitCodeGenOnly, OPT_emit_codegen_only},
       {frontend::EmitObj, OPT_emit_obj},
+      {frontend::EmitNH, OPT_emit_nh},
       {frontend::ExtractAPI, OPT_extract_api},
 
       {frontend::FixIt, OPT_fixit_EQ},
@@ -2797,6 +2798,9 @@ static const auto &getFrontendActionTable() {
       {frontend::TemplightDump, OPT_templight_dump},
       {frontend::RewriteMacros, OPT_rewrite_macros},
       {frontend::RewriteObjC, OPT_rewrite_objc},
+      // @mulle-objc@ --mulle-objc-emit-c action >
+      {frontend::RewriteMulleObjC, OPT_rewrite_mulle_objc},
+      // @mulle-objc@ --mulle-objc-emit-c action <
       {frontend::RewriteTest, OPT_rewrite_test},
       {frontend::RunAnalysis, OPT_analyze},
       {frontend::RunPreprocessorOnly, OPT_Eonly},
@@ -2961,8 +2965,11 @@ static void GenerateFrontendArgs(const FrontendOptions &Opts,
       Lang = "c++";
       break;
     case Language::ObjC:
+// @mulle-objc@ add ObjcAAM >
+    case Language::ObjCAAM:
       Lang = "objective-c";
       break;
+// @mulle-objc@ add ObjcAAM <
     case Language::ObjCXX:
       Lang = "objective-c++";
       break;
@@ -3191,6 +3198,9 @@ static bool ParseFrontendArgs(FrontendOptions &Opts, ArgList &Args,
                 .Case("hip", Language::HIP)
                 .Case("c++", Language::CXX)
                 .Case("objective-c", Language::ObjC)
+                // @mulle-objc@ AAM:  .aam filename extension support >
+                .Case("objective-c-aam", Language::ObjCAAM)
+                // @mulle-objc@ AAM:  .aam filename extension support <
                 .Case("objective-c++", Language::ObjCXX)
                 .Case("hlsl", Language::HLSL)
                 .Default(Language::Unknown);
@@ -3268,6 +3278,13 @@ static bool ParseFrontendArgs(FrontendOptions &Opts, ArgList &Args,
   }
 
   Opts.DashX = DashX;
+
+  // @mulle-objc@ --mulle-objc-emit-deps >
+  if (const Arg *A = Args.getLastArg(OPT_mulle_objc_emit_deps)) {
+    Opts.MulleObjCEmitDeps = true;
+    Opts.MulleObjCEmitDepsDir = A->getValue(); // empty when bare flag
+  }
+  // @mulle-objc@ --mulle-objc-emit-deps <
 
   return Diags.getNumErrors() == NumErrorsBefore;
 }
@@ -3608,6 +3625,9 @@ static bool IsInputCompatibleWithStandard(InputKind IK,
 
   case Language::C:
   case Language::ObjC:
+  // @mulle-objc@ ObjCAAM >
+  case Language::ObjCAAM:
+  // @mulle-objc@ ObjCAAM
     return S.getLanguage() == Language::C;
 
   case Language::OpenCL:
@@ -3649,6 +3669,10 @@ static StringRef GetInputKindName(InputKind IK) {
     return "C";
   case Language::ObjC:
     return "Objective-C";
+  // @mulle-objc@ ObjCAAM >
+  case Language::ObjCAAM:
+    return "Objective-C AAM";
+  // @mulle-objc@ ObjCAAM <
   case Language::CXX:
     return "C++";
   case Language::ObjCXX:
@@ -3732,6 +3756,46 @@ void CompilerInvocationBase::GenerateLangArgs(const LangOptions &Opts,
 
   if (Opts.ObjC) {
     GenerateArg(Consumer, OPT_fobjc_runtime_EQ, Opts.ObjCRuntime.getAsString());
+
+    // @mulle-objc@ handle commandline flags part 2 >
+
+    if( Opts.ObjCUniverseName.length())
+      GenerateArg(Consumer, OPT_fobjc_universename_EQ, Opts.ObjCUniverseName);
+    else
+      if( Opts.ObjCDisableTaggedPointers) // is implicit in universename
+         GenerateArg(Consumer, OPT_fno_objc_tps);
+
+    if( Opts.ObjCDisableFastCalls)
+         GenerateArg(Consumer, OPT_fno_objc_fcs);
+
+    if( Opts.ObjCEnableThreadAffineObjects)
+         GenerateArg(Consumer, OPT_fobjc_tao);
+
+    if( Opts.ObjCUTF8Strings)
+         GenerateArg(Consumer, OPT_fobjc_utf8_strings);
+
+    if( Opts.ObjCAllocsAutoreleasedObjects)
+         GenerateArg(Consumer, OPT_fobjc_aam);
+
+    if( Opts.ObjCClasscallUseSelf == 1)
+         GenerateArg(Consumer, OPT_fobjc_classcall_use_self);
+    if( Opts.ObjCClasscallUseSelf == 2)
+         GenerateArg(Consumer, OPT_fobjc_classcall_init_use_self);
+
+    if( Opts.ObjCReuseParam == 1)
+         GenerateArg(Consumer, OPT_fobjc_reuse_param);
+    if( Opts.ObjCReuseParam == 2)
+         GenerateArg(Consumer, OPT_fno_objc_reuse_param);
+
+    // 0 is unset, 1:none, 2: minimal, 3: partial, 4:full
+    if( Opts.ObjCInlineMethodCalls)
+    {
+      char   buf[ 32];
+      sprintf( buf, "%d", Opts.ObjCInlineMethodCalls);
+      GenerateArg(Consumer, OPT_fobjc_inline_method_calls, std::string( buf));
+    }
+
+    // @mulle-objc@: handle AAM and TPS options Part 2<
 
     if (Opts.GC == LangOptions::GCOnly)
       GenerateArg(Consumer, OPT_fobjc_gc_only);
@@ -4110,6 +4174,59 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
         Diags.Report(diag::err_drv_unknown_objc_runtime) << value;
     }
 
+    // @mulle-objc@: handle AAM and TPS an TAO options >
+    if( Args.hasArg( OPT_fno_objc_tps))
+      Opts.ObjCDisableTaggedPointers = 1;
+    if( Args.hasArg( OPT_fno_objc_fcs))
+      Opts.ObjCDisableFastCalls = 1;
+
+    // TAO is by default OFF, unless is given
+    if( Args.hasArg( OPT_fobjc_tao))
+       Opts.ObjCEnableThreadAffineObjects = 1;
+       //fprintf( stderr, "-fobjc-tao detected\n");
+
+    // UTF-8 string mode is by default OFF (three-class mode is default)
+    if( Args.hasArg( OPT_fobjc_utf8_strings))
+       Opts.ObjCUTF8Strings = 1;;
+
+    StringRef value = Args.getLastArgValue(OPT_fobjc_universename_EQ);
+    if( value.size() != 0)
+    {
+      Opts.ObjCDisableTaggedPointers = 1;
+      Opts.ObjCUniverseName          = value.str();
+
+      // by default in multiverse configuration we use this optimization
+      if( ! Args.hasArg( OPT_fno_objc_classcall_use_self))
+         Opts.ObjCClasscallUseSelf = 1;
+    }
+    if( Args.hasArg( OPT_fobjc_aam))
+      Opts.ObjCAllocsAutoreleasedObjects = 1;
+    if( Args.hasArg( OPT_fobjc_classcall_use_self))
+      Opts.ObjCClasscallUseSelf = 1;
+    if( Args.hasArg( OPT_fobjc_classcall_init_use_self))
+      Opts.ObjCClasscallUseSelf = 2;
+    if( Args.hasArg( OPT_fobjc_reuse_param))
+      Opts.ObjCReuseParam = 1;
+    if( Args.hasArg( OPT_fno_objc_reuse_param))
+      Opts.ObjCReuseParam = 2;
+
+    // 0 is unset, 1:none, 2: minimal, 3: partial, 4:default 5:full
+    if( Args.hasArg( OPT_fobjc_inline_method_calls))
+    {
+       int   x = 4; // default if set
+       StringRef value = Args.getLastArgValue(OPT_fobjc_inline_method_calls);
+       if( value.size() != 0)
+        value.getAsInteger( 10, x);
+       Opts.ObjCInlineMethodCalls = x ? x : 1;
+    }
+    if (Args.hasArg(OPT_mulle_objc_no_asm_names))
+       Opts.ObjCNoAsmNames = 1;
+    if (Args.hasArg(OPT_fobjc_encode_no_offsets))
+       Opts.ObjCEncodeNoOffsets = 1;
+    if (Args.hasArg(OPT_mulle_objc_portable_call))
+       Opts.ObjCPortableCall = 1;
+    // @mulle-objc@: handle AAM and TPS and TAO options <
+
     if (Args.hasArg(OPT_fobjc_gc_only))
       Opts.setGC(LangOptions::GCOnly);
     else if (Args.hasArg(OPT_fobjc_gc))
@@ -4200,6 +4317,8 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
   Opts.Trigraphs =
       Args.hasFlag(OPT_ftrigraphs, OPT_fno_trigraphs, Opts.Trigraphs);
 
+// @mulle-objc@ can not deal with blocks >
+#if 0
   Opts.ZOSExt =
       Args.hasFlag(OPT_fzos_extensions, OPT_fno_zos_extensions, T.isOSzOS());
 
@@ -4211,6 +4330,12 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
   Opts.ConvergentFunctions =
       Args.hasFlag(OPT_fconvergent_functions, OPT_fno_convergent_functions,
                    HasConvergentOperations);
+#endif
+// @mulle-objc@ can not deal with blocks <
+// @mulle-objc@ ElideConstructors interferes with C code >
+  Opts.ElideConstructors = 0; // !Args.hasArg(OPT_fno_elide_constructors);
+// @mulle-objc@ ElideConstructors interferes with C code <
+
 
   Opts.NoBuiltin = Args.hasArg(OPT_fno_builtin) || Opts.Freestanding;
   if (!Opts.NoBuiltin)
@@ -4663,6 +4788,7 @@ static bool isStrictlyPreprocessorAction(frontend::ActionKind Action) {
   case frontend::EmitLLVMOnly:
   case frontend::EmitCodeGenOnly:
   case frontend::EmitObj:
+  case frontend::EmitNH:
   case frontend::ExtractAPI:
   case frontend::FixIt:
   case frontend::GenerateModule:
@@ -4676,6 +4802,9 @@ static bool isStrictlyPreprocessorAction(frontend::ActionKind Action) {
   case frontend::VerifyPCH:
   case frontend::PluginAction:
   case frontend::RewriteObjC:
+  // @mulle-objc@ --mulle-objc-emit-c action >
+  case frontend::RewriteMulleObjC:
+  // @mulle-objc@ --mulle-objc-emit-c action <
   case frontend::RewriteTest:
   case frontend::RunAnalysis:
   case frontend::TemplightDump:
@@ -4723,7 +4852,11 @@ static bool isCodeGenAction(frontend::ActionKind Action) {
   case frontend::VerifyPCH:
   case frontend::PluginAction:
   case frontend::RewriteObjC:
+  // @mulle-objc@ --mulle-objc-emit-c action >
+  case frontend::RewriteMulleObjC:
+  // @mulle-objc@ --mulle-objc-emit-c action <
   case frontend::RewriteTest:
+  case frontend::EmitNH:
   case frontend::RunAnalysis:
   case frontend::TemplightDump:
   case frontend::DumpCompilerOptions:
@@ -5049,7 +5182,10 @@ bool CompilerInvocation::CreateFromArgsImpl(
 
   ParseLangArgs(LangOpts, Args, DashX, T, Res.getPreprocessorOpts().Includes,
                 Diags);
-  if (Res.getFrontendOpts().ProgramAction == frontend::RewriteObjC)
+  if (Res.getFrontendOpts().ProgramAction == frontend::RewriteObjC ||
+      // @mulle-objc@ --mulle-objc-emit-c action >
+      Res.getFrontendOpts().ProgramAction == frontend::RewriteMulleObjC)
+      // @mulle-objc@ --mulle-objc-emit-c action <
     LangOpts.ObjCExceptions = 1;
 
   for (auto Warning : Res.getDiagnosticOpts().Warnings) {

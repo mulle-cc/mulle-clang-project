@@ -316,12 +316,25 @@ ENUM_LANGOPT(BFloat16ExcessPrecision, ExcessPrecisionKind, 2, FPP_Standard, NotC
 LANGOPT(NoBitFieldTypeAlign , 1, 0, NotCompatible, "bit-field type alignment")
 LANGOPT(HexagonQdsp6Compat , 1, 0, NotCompatible, "hexagon-qdsp6 backward compatibility")
 LANGOPT(ObjCAutoRefCount , 1, 0, NotCompatible, "Objective-C automated reference counting")
+// @mulle-objc@ options >
+LANGOPT(ObjCDisableTaggedPointers , 1, 0, NotCompatible, "Objective-C tagged pointer generation disabled")
+LANGOPT(ObjCDisableFastCalls , 1, 0, NotCompatible, "Objective-C fast method/class calls are disabled")
+LANGOPT(ObjCEnableThreadAffineObjects , 1, 0, NotCompatible, "Objective-C thread affine objects are enabled")
+LANGOPT(ObjCAllocsAutoreleasedObjects , 1, 0, NotCompatible, "Objective-C objects are created autoreleased")
+LANGOPT(ObjCUTF8Strings , 1, 0, NotCompatible, "Objective-C NSString literals use UTF-8 encoding (single class mode)")
+LANGOPT(ObjCClasscallUseSelf , 2, 0, NotCompatible, "Objective-C method code assumes self is valid before [Class call]")
+LANGOPT(ObjCInlineMethodCalls , 3, 0, NotCompatible, "Objective-C use inline method call")
+LANGOPT(ObjCNoAsmNames       , 1, 0, NotCompatible, "Objective-C suppress __asm__ symbol aliases in rewriter output")
+LANGOPT(ObjCEncodeNoOffsets  , 1, 0, NotCompatible, "Objective-C omit byte offsets from method type encodings")
+LANGOPT(ObjCPortableCall     , 1, 0, NotCompatible, "Objective-C emit portable mulle_metaabi_object_call macro calls in rewriter output")
+LANGOPT(ObjCReuseParam , 2, 0, NotCompatible, "Objective-C method code can reuse _param space")
+// @mulle-objc@ options <
 LANGOPT(ObjCWeakRuntime     , 1, 0, NotCompatible, "__weak support in the ARC runtime")
 LANGOPT(ObjCWeak            , 1, 0, NotCompatible, "Objective-C __weak in ARC and MRC files")
 LANGOPT(ObjCSubscriptingLegacyRuntime         , 1, 0, NotCompatible, "Subscripting support in legacy ObjectiveC runtime")
 LANGOPT(CompatibilityQualifiedIdBlockParamTypeChecking, 1, 0, Benign,
-        "compatibility mode for type checking block parameters "
-        "involving qualified id types")
+               "compatibility mode for type checking block parameters "
+               "involving qualified id types")
 LANGOPT(ObjCDisableDirectMethodsForTesting, 1, 0, NotCompatible,
         "Disable recognition of objc_direct methods")
 LANGOPT(CFProtectionBranch , 1, 0, NotCompatible, "Control-Flow Branch Protection enabled")

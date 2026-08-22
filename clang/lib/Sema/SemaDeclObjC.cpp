@@ -397,6 +397,215 @@ void SemaObjC::ActOnStartOfObjCMethodDef(Scope *FnBodyScope, Decl *D) {
 
   SemaRef.PushOnScopeChains(MDecl->getSelfDecl(), FnBodyScope);
   SemaRef.PushOnScopeChains(MDecl->getCmdDecl(), FnBodyScope);
+   // @mulle-objc@ MetaABI: save scope for later retrieval in ActonMethod >
+   bool hasMetaABIParam;
+
+   hasMetaABIParam = getLangOpts().ObjCRuntime.hasMulleMetaABI() && MDecl->getParamDecl();
+   if( hasMetaABIParam)
+   {
+      SemaRef.PushOnScopeChains(MDecl->getParamDecl(), FnBodyScope);
+      // @mulle-objc@ MetaABI shadow: create local shadow VarDecls for debugger >
+      // Emit  <type> a = _param->a;  for each field so debugger can 'print a'
+      if( RecordDecl *RD = MDecl->getParamRecord())
+      {
+         // @mulle-objc@ MetaABI shadow: voidptr-packed struct unpack >
+         // isMetaABIVoidPointerParam() is true only when the caller packs by value.
+         QualType RecTy = Context.getTypeDeclType( (TypeDecl *) RD);
+         bool isVoidPtrPacked = MDecl->isMetaABIVoidPointerParam();
+         // @mulle-objc@ MetaABI shadow: voidptr-packed struct unpack <
+
+         for( auto *FD : RD->fields())
+         {
+            if( !FD->getIdentifier()) continue;
+            VarDecl *Shadow = VarDecl::Create( Context, MDecl,
+                                               SourceLocation(), SourceLocation(),
+                                               FD->getIdentifier(), FD->getType(),
+                                               Context.getTrivialTypeSourceInfo( FD->getType()),
+                                               SC_None);
+            // @mulle-objc@ MetaABI shadow: voidptr-packed struct unpack >
+            if( isVoidPtrPacked)
+            {
+               // _param holds the packed value — cast &_param to RecTy* then ->field
+               ExprResult ParamRef = SemaRef.GetMulle_paramExpr( FnBodyScope, SourceLocation(), "_param");
+               if( !ParamRef.isInvalid())
+               {
+                  QualType PtrToRec = Context.getPointerType( RecTy);
+                  Expr *AddrOf = UnaryOperator::Create( Context, ParamRef.get(),
+                                                        UO_AddrOf,
+                                                        Context.getPointerType( ParamRef.get()->getType()),
+                                                        VK_PRValue, OK_Ordinary,
+                                                        SourceLocation(), false,
+                                                        FPOptionsOverride());
+                  Expr *Cast = CStyleCastExpr::Create( Context, PtrToRec,
+                                                       VK_PRValue, CK_BitCast,
+                                                       AddrOf, nullptr, FPOptionsOverride(),
+                                                       Context.getTrivialTypeSourceInfo( PtrToRec),
+                                                       SourceLocation(), SourceLocation());
+                  DeclarationNameInfo memberNameInfo( FD->getDeclName(), SourceLocation());
+                  DeclAccessPair fakeFoundDecl = DeclAccessPair::make( FD, FD->getAccess());
+                  ExprResult CastLV = SemaRef.DefaultLvalueConversion( Cast);
+                  Expr *Member = MemberExpr::Create( Context, CastLV.get(),
+                                                     true, SourceLocation(),
+                                                     CXXScopeSpec().getWithLocInContext( Context),
+                                                     SourceLocation(),
+                                                     FD, fakeFoundDecl, memberNameInfo,
+                                                     nullptr, FD->getType(),
+                                                     VK_LValue, OK_Ordinary, NOUR_None);
+                  Shadow->setInit( Member);
+               }
+            }
+            else
+            // @mulle-objc@ MetaABI shadow: voidptr-packed struct unpack <
+            {
+               ExprResult Init = SemaRef.GetMulle_paramFieldExpr( FD, FnBodyScope, SourceLocation());
+               if( !Init.isInvalid())
+                  Shadow->setInit( Init.get());
+            }
+            Shadow->setImplicit( true);
+            SemaRef.PushOnScopeChains( Shadow, FnBodyScope);
+         }
+      }
+      else if( MDecl->isMetaABIVoidPointerParam() && MDecl->param_size() == 1)
+      {
+         // @mulle-objc@ MetaABI shadow: voidptr-packed single param unpack >
+         // _param is void* holding the packed value. Create a shadow for the
+         // true-typed param: <type> v = *(<type>*)&_param;
+         ParmVarDecl *PVD = *MDecl->param_begin();
+         QualType ParamTy = PVD->getType();
+         VarDecl *Shadow = VarDecl::Create( Context, MDecl,
+                                            SourceLocation(), SourceLocation(),
+                                            PVD->getIdentifier(), ParamTy,
+                                            Context.getTrivialTypeSourceInfo( ParamTy),
+                                            SC_None);
+         ExprResult ParamRef = SemaRef.GetMulle_paramExpr( FnBodyScope, SourceLocation(), "_param");
+         if( !ParamRef.isInvalid())
+         {
+            QualType PtrToTy = Context.getPointerType( ParamTy);
+            Expr *AddrOf = UnaryOperator::Create( Context, ParamRef.get(),
+                                                  UO_AddrOf,
+                                                  Context.getPointerType( ParamRef.get()->getType()),
+                                                  VK_PRValue, OK_Ordinary,
+                                                  SourceLocation(), false,
+                                                  FPOptionsOverride());
+            Expr *Cast = CStyleCastExpr::Create( Context, PtrToTy,
+                                                 VK_PRValue, CK_BitCast,
+                                                 AddrOf, nullptr, FPOptionsOverride(),
+                                                 Context.getTrivialTypeSourceInfo( PtrToTy),
+                                                 SourceLocation(), SourceLocation());
+            ExprResult Deref = SemaRef.CreateBuiltinUnaryOp( SourceLocation(), UO_Deref, Cast);
+            if( !Deref.isInvalid())
+               Shadow->setInit( Deref.get());
+         }
+         Shadow->setImplicit( true);
+         SemaRef.PushOnScopeChains( Shadow, FnBodyScope);
+         // @mulle-objc@ MetaABI shadow: voidptr-packed single param unpack <
+      }
+      // @mulle-objc@ MetaABI shadow: create local shadow VarDecls for debugger <
+   }
+   // @mulle-objc@ MetaABI: save scope for later retrieval in ActonMethod <
+
+  // @mulle-objc@ class-property: retype self in + methods >
+  // In + methods of a class with class properties (own or inherited),
+  // give self an internal struct pointer type so self->_field resolves
+  // as a normal MemberExpr. The struct has a char spacer of
+  // MULLE_OBJC_CLASSPAIR_IVAR_BASE bytes followed by the class property ivars.
+  if (getLangOpts().ObjCRuntime.hasMulleMetaABI() && MDecl->isClassMethod())
+  {
+     ObjCInterfaceDecl *ClassDecl = MDecl->getClassInterface();
+     if (ClassDecl)
+     {
+        // Collect all class property ivars (inherited + own) in layout order
+        SmallVector<const ObjCInterfaceDecl *, 8> Hierarchy;
+        for (const ObjCInterfaceDecl *C = ClassDecl; C; C = C->getSuperClass())
+           Hierarchy.push_back(C);
+        std::reverse(Hierarchy.begin(), Hierarchy.end());
+
+        SmallVector<const ObjCPropertyDecl *, 8> AllClassProps;
+        for (const ObjCInterfaceDecl *C : Hierarchy)
+           for (const ObjCPropertyDecl *PD : C->properties())
+              if (PD->isClassProperty())
+                 AllClassProps.push_back(PD);
+
+        if (!AllClassProps.empty())
+        {
+           // Compute MULLE_OBJC_CLASSPAIR_IVAR_BASE from the AST:
+           // sizeof(struct _mulle_objc_classpair) - offsetof(struct _mulle_objc_classpair, infraclass)
+           uint64_t SpacerSize = 0;
+           IdentifierInfo *ClasspairII = &Context.Idents.get("_mulle_objc_classpair");
+           TagDecl *ClasspairDecl = nullptr;
+           LookupResult R(SemaRef, ClasspairII, SourceLocation(), Sema::LookupTagName);
+           if (SemaRef.LookupName(R, FnBodyScope) && R.isSingleResult())
+              ClasspairDecl = dyn_cast<TagDecl>(R.getFoundDecl());
+           if (ClasspairDecl)
+           {
+              QualType ClasspairTy = Context.getTypeDeclType(cast<TypeDecl>(ClasspairDecl));
+              uint64_t ClasspairSize = Context.getTypeSize(ClasspairTy) / 8;
+              // Find infraclass field offset
+              if (RecordDecl *RD = dyn_cast<RecordDecl>(ClasspairDecl))
+              {
+                 for (FieldDecl *FD : RD->fields())
+                 {
+                    if (FD->getName() == "infraclass")
+                    {
+                       uint64_t InfraOffset = Context.getFieldOffset(FD) / 8;
+                       SpacerSize = ClasspairSize - InfraOffset;
+                       break;
+                    }
+                 }
+              }
+           }
+
+           if (SpacerSize > 0)
+           {
+              // Build struct __Foo_classivars { char __spacer[N]; <class prop fields>; }
+              std::string RecordName = "__";
+              RecordName += ClassDecl->getNameAsString();
+              RecordName += "_classivars";
+              IdentifierInfo *RecordID = &Context.Idents.get(RecordName);
+              RecordDecl *RD = RecordDecl::Create(Context, TagTypeKind::Struct,
+                                                  Context.getTranslationUnitDecl(),
+                                                  SourceLocation(), SourceLocation(),
+                                                  RecordID);
+              // Spacer field: char __spacer[SpacerSize]
+              QualType CharTy = Context.CharTy;
+              QualType SpacerTy = Context.getConstantArrayType(
+                 CharTy,
+                 llvm::APInt(64, SpacerSize),
+                 nullptr,
+                 ArraySizeModifier::Normal, 0);
+              FieldDecl *SpacerFD = FieldDecl::Create(Context, RD,
+                                                      SourceLocation(), SourceLocation(),
+                                                      &Context.Idents.get("__spacer"),
+                                                      SpacerTy,
+                                                      Context.getTrivialTypeSourceInfo(SpacerTy),
+                                                      nullptr, false, ICIS_NoInit);
+              RD->addDecl(SpacerFD);
+              // Class property ivar fields (inherited + own, in layout order)
+              for (const ObjCPropertyDecl *PD : AllClassProps)
+              {
+                 std::string FieldName = "_";
+                 FieldName += PD->getNameAsString();
+                 FieldDecl *FD = FieldDecl::Create(Context, RD,
+                                                   SourceLocation(), SourceLocation(),
+                                                   &Context.Idents.get(FieldName),
+                                                   PD->getType(),
+                                                   Context.getTrivialTypeSourceInfo(PD->getType()),
+                                                   nullptr, false, ICIS_NoInit);
+                 RD->addDecl(FD);
+              }
+              RD->completeDefinition();
+
+              QualType StructTy = Context.getTypeDeclType((TypeDecl *) RD);
+              QualType SelfPtrTy = Context.getPointerType(StructTy);
+
+              // Retype self to struct __Foo_classivars *
+              if (VarDecl *SelfDecl = MDecl->getSelfDecl())
+                 SelfDecl->setType(SelfPtrTy);
+           }
+        }
+     }
+  }
+  // @mulle-objc@ class-property: retype self in + methods <
 
   // The ObjC parser requires parameter names so there's no need to check.
   SemaRef.CheckParmsForFunctionDef(MDecl->parameters(),
@@ -409,9 +618,41 @@ void SemaObjC::ActOnStartOfObjCMethodDef(Scope *FnBodyScope, Decl *D) {
       Diag(Param->getLocation(), diag::warn_arc_strong_pointer_objc_pointer) <<
             Param->getType();
 
-    if (Param->getIdentifier())
-      SemaRef.PushOnScopeChains(Param, FnBodyScope);
+     // @mulle-objc@ MetaABI: Remove Parameters from Scope >
+     // (nat) pushing the param identifier on the scope is done here
+     //
+     if( ! hasMetaABIParam)
+     {
+       if (Param->getIdentifier())
+         SemaRef.PushOnScopeChains(Param, FnBodyScope);
+     }
+     // @mulle-objc@ MetaABI: Remove Parameters from Scope <
   }
+
+  //
+  // @mulle-objc@ AAM:  check that family is compatible >
+  // certain methods returning retained objects can not
+  // be used.
+  //
+  if( getLangOpts().ObjCAllocsAutoreleasedObjects)
+  {
+     switch (MDecl->getMethodFamily())
+     {
+     case ObjCMethodFamily::OMF_alloc       :
+     case ObjCMethodFamily::OMF_new         :
+     case ObjCMethodFamily::OMF_copy        :
+     case ObjCMethodFamily::OMF_mutableCopy :
+     case ObjCMethodFamily::OMF_autorelease :
+     case ObjCMethodFamily::OMF_release     :
+     case ObjCMethodFamily::OMF_retain      :
+     case ObjCMethodFamily::OMF_retainCount :
+         Diag(MDecl->getLocation(), diag::err_mulle_aam_unsupported_method_family)
+            << MDecl->getSelector();
+          break;
+     default : break ;
+     }
+  }
+  // @mulle-objc@ AAM: check that family is compatible <
 
   // In ARC, disallow definition of retain/release/autorelease/retainCount
   if (getLangOpts().ObjCAutoRefCount) {
@@ -596,8 +837,7 @@ void SemaObjC::ActOnSuperClassOfClassInterface(
         if (T->isObjCObjectType()) {
           if (NamedDecl *IDecl = T->castAs<ObjCObjectType>()->getInterface()) {
             SuperClassDecl = dyn_cast<ObjCInterfaceDecl>(IDecl);
-            SuperClassType = Context.getTypeDeclType(
-                ElaboratedTypeKeyword::None, /*Qualifier=*/std::nullopt, TDecl);
+            SuperClassType = Context.getTypeDeclType( (TypeDecl *) TDecl);
 
             // This handles the following case:
             // @interface NewI @end
@@ -657,6 +897,14 @@ void SemaObjC::ActOnSuperClassOfClassInterface(
       SuperClassTInfo = Context.getTrivialTypeSourceInfo(SuperClassType,
                                                          SuperLoc);
     }
+
+    // @mulle-objc@ mixin subclass check >
+    if (SuperClassDecl && SuperClassDecl->isMixin()) {
+      Diag(SuperLoc, diag::err_mulle_subclass_of_mixin)
+        << ClassName << SuperName;
+      return;
+    }
+    // @mulle-objc@ mixin subclass check <
 
     IDecl->setSuperClass(SuperClassTInfo);
     IDecl->setEndOfDefinitionLoc(SuperClassTInfo->getTypeLoc().getEndLoc());
@@ -979,7 +1227,8 @@ ObjCInterfaceDecl *SemaObjC::ActOnStartClassInterface(
     ArrayRef<ParsedType> SuperTypeArgs, SourceRange SuperTypeArgsRange,
     Decl *const *ProtoRefs, unsigned NumProtoRefs,
     const SourceLocation *ProtoLocs, SourceLocation EndProtoLoc,
-    const ParsedAttributesView &AttrList, SkipBodyInfo *SkipBody) {
+    const ParsedAttributesView &AttrList, SkipBodyInfo *SkipBody,
+    bool AllowMixinName) {
   assert(ClassName && "Missing class identifier");
 
   ASTContext &Context = getASTContext();
@@ -1066,6 +1315,17 @@ ObjCInterfaceDecl *SemaObjC::ActOnStartClassInterface(
       }
     }
   }
+
+  // @mulle-objc@ mixin class conflict check >
+  // A regular @interface must not reuse the name of a mixin.
+  // AllowMixinName is true when called from ActOnStartMixinImplementation
+  // (which synthetically creates the backing interface for the mixin).
+  if (!AllowMixinName && PrevIDecl && PrevIDecl->isMixin()) {
+    Diag(ClassLoc, diag::err_mulle_class_conflicts_mixin) << ClassName;
+    Diag(PrevIDecl->getLocation(), diag::note_previous_definition);
+    IDecl->setInvalidDecl();
+  }
+  // @mulle-objc@ mixin class conflict check <
 
   SemaRef.ProcessDeclAttributeList(SemaRef.TUScope, IDecl, AttrList);
   SemaRef.AddPragmaAttributes(SemaRef.TUScope, IDecl);
@@ -1218,11 +1478,27 @@ ObjCProtocolDecl *SemaObjC::ActOnStartProtocolInterface(
     SourceLocation AtProtoInterfaceLoc, IdentifierInfo *ProtocolName,
     SourceLocation ProtocolLoc, Decl *const *ProtoRefs, unsigned NumProtoRefs,
     const SourceLocation *ProtoLocs, SourceLocation EndProtoLoc,
-    const ParsedAttributesView &AttrList, SkipBodyInfo *SkipBody) {
+    const ParsedAttributesView &AttrList, SkipBodyInfo *SkipBody,
+    bool IsMixin) {
   ASTContext &Context = getASTContext();
   bool err = false;
   // FIXME: Deal with AttrList.
   assert(ProtocolName && "Missing protocol identifier");
+
+  // @mulle-objc@ mixin protocol def conflict >
+  if (!IsMixin) {
+    NamedDecl *ClassDecl = SemaRef.LookupSingleName(
+        SemaRef.TUScope, ProtocolName, ProtocolLoc, Sema::LookupOrdinaryName);
+    if (auto *IDecl = dyn_cast_or_null<ObjCInterfaceDecl>(ClassDecl)) {
+      if (IDecl->isMixin()) {
+        Diag(ProtocolLoc, diag::err_mulle_protocol_def_conflicts_mixin)
+          << ProtocolName;
+        Diag(IDecl->getLocation(), diag::note_previous_definition);
+      }
+    }
+  }
+  // @mulle-objc@ mixin protocol def conflict <
+
   ObjCProtocolDecl *PrevDecl = LookupProtocol(
       ProtocolName, ProtocolLoc, SemaRef.forRedeclarationInCurContext());
   ObjCProtocolDecl *PDecl = nullptr;
@@ -1589,8 +1865,7 @@ void SemaObjC::actOnObjCTypeArgsOrProtocolQualifiers(
     QualType type;
     if (auto *actualTypeDecl = dyn_cast<TypeDecl *>(typeDecl))
       type =
-          Context.getTypeDeclType(ElaboratedTypeKeyword::None,
-                                  /*Qualifier=*/std::nullopt, actualTypeDecl);
+          Context.getTypeDeclType( (TypeDecl *) actualTypeDecl);
     else
       type = Context.getObjCInterfaceType(cast<ObjCInterfaceDecl *>(typeDecl));
     TypeSourceInfo *parsedTSInfo = Context.getTrivialTypeSourceInfo(type, loc);
@@ -1794,6 +2069,19 @@ SemaObjC::DeclGroupPtrTy SemaObjC::ActOnForwardProtocolDeclaration(
   SmallVector<Decl *, 8> DeclsInGroup;
   for (const IdentifierLoc &IdentPair : IdentList) {
     IdentifierInfo *Ident = IdentPair.getIdentifierInfo();
+
+    // @mulle-objc@ mixin protocol fwd conflict >
+    NamedDecl *ClassDecl = SemaRef.LookupSingleName(
+        SemaRef.TUScope, Ident, IdentPair.getLoc(), Sema::LookupOrdinaryName);
+    if (auto *IDecl = dyn_cast_or_null<ObjCInterfaceDecl>(ClassDecl)) {
+      if (IDecl->isMixin()) {
+        Diag(IdentPair.getLoc(),
+             diag::warn_mulle_protocol_fwd_after_mixin) << Ident;
+        Diag(IDecl->getLocation(), diag::note_previous_definition);
+      }
+    }
+    // @mulle-objc@ mixin protocol fwd conflict <
+
     ObjCProtocolDecl *PrevDecl = LookupProtocol(
         Ident, IdentPair.getLoc(), SemaRef.forRedeclarationInCurContext());
     ObjCProtocolDecl *PDecl =
@@ -1814,6 +2102,67 @@ SemaObjC::DeclGroupPtrTy SemaObjC::ActOnForwardProtocolDeclaration(
 
   return SemaRef.BuildDeclaratorGroup(DeclsInGroup);
 }
+
+// @mulle-objc@ mixin forward decl sema >
+SemaObjC::DeclGroupPtrTy SemaObjC::ActOnMixinForwardDeclaration(
+    SourceLocation AtLoc, ArrayRef<IdentifierLoc> IdentList,
+    const ParsedAttributesView &AttrList) {
+  ASTContext &Context = getASTContext();
+  SmallVector<Decl *, 8> DeclsInGroup;
+
+  for (const IdentifierLoc &IL : IdentList) {
+    IdentifierInfo *Name = IL.getIdentifierInfo();
+    SourceLocation Loc = IL.getLoc();
+
+    // Check for existing @class (non-mixin)
+    NamedDecl *PrevDecl = SemaRef.LookupSingleName(
+        SemaRef.TUScope, Name, Loc, Sema::LookupOrdinaryName,
+        SemaRef.forRedeclarationInCurContext());
+    if (auto *PrevIDecl = dyn_cast_or_null<ObjCInterfaceDecl>(PrevDecl)) {
+      if (PrevIDecl->isMixin()) {
+        // Duplicate @mixin forward decl — OK
+        DeclsInGroup.push_back(PrevIDecl);
+        continue;
+      }
+      Diag(Loc, diag::err_mulle_mixin_conflict_class) << Name;
+      Diag(PrevDecl->getLocation(), diag::note_previous_definition);
+      continue;
+    } else if (PrevDecl) {
+      Diag(Loc, diag::err_redefinition_different_kind) << Name;
+      Diag(PrevDecl->getLocation(), diag::note_previous_definition);
+      continue;
+    }
+
+    // Check for existing standalone @protocol
+    ObjCProtocolDecl *PrevProto = LookupProtocol(
+        Name, Loc, SemaRef.forRedeclarationInCurContext());
+    if (PrevProto) {
+      Diag(Loc, diag::err_mulle_mixin_conflict_protocol) << Name;
+      Diag(PrevProto->getLocation(), diag::note_previous_definition);
+      continue;
+    }
+
+    // Create ObjCInterfaceDecl (forward class), marked as mixin
+    ObjCInterfaceDecl *IDecl = ObjCInterfaceDecl::Create(
+        Context, SemaRef.CurContext, AtLoc, Name,
+        /*typeParamList=*/nullptr, /*PrevDecl=*/nullptr, Loc);
+    IDecl->setAtEndRange(Loc);
+    IDecl->setMixin(true);
+    SemaRef.PushOnScopeChains(IDecl, SemaRef.TUScope);
+    CheckObjCDeclScope(IDecl);
+    DeclsInGroup.push_back(IDecl);
+
+    // Create ObjCProtocolDecl (forward protocol)
+    ObjCProtocolDecl *PDecl = ObjCProtocolDecl::Create(
+        Context, SemaRef.CurContext, Name, Loc, AtLoc, /*PrevDecl=*/nullptr);
+    SemaRef.PushOnScopeChains(PDecl, SemaRef.TUScope);
+    CheckObjCDeclScope(PDecl);
+    DeclsInGroup.push_back(PDecl);
+  }
+
+  return SemaRef.BuildDeclaratorGroup(DeclsInGroup);
+}
+// @mulle-objc@ mixin forward decl sema <
 
 ObjCCategoryDecl *SemaObjC::ActOnStartCategoryInterface(
     SourceLocation AtInterfaceLoc, const IdentifierInfo *ClassName,
@@ -1911,6 +2260,352 @@ ObjCCategoryDecl *SemaObjC::ActOnStartCategoryInterface(
   return CDecl;
 }
 
+// @mulle-objc@ method_implementation sema >
+Decl *SemaObjC::ActOnMethodImplementationAlias(
+    SourceLocation AtLoc,
+    bool NewIsInstance,
+    Selector NewSel,
+    SourceLocation NewSelLoc,
+    bool RHSIsMethod,
+    bool RHSIsInstance,
+    Selector RHSSel,
+    IdentifierInfo *RHSFunc,
+    SourceLocation RHSLoc,
+    Decl *ClassDecl) {
+
+  ASTContext &Context = getASTContext();
+
+  // Must be inside an @implementation
+  ObjCImplDecl *ImpDecl = dyn_cast_or_null<ObjCImplDecl>(ClassDecl);
+  if (!ImpDecl) {
+    Diag(AtLoc, diag::err_mulle_method_impl_not_in_implementation);
+    return nullptr;
+  }
+
+  ObjCInterfaceDecl *IFace = nullptr;
+  if (auto *CImpl = dyn_cast<ObjCImplementationDecl>(ImpDecl))
+    IFace = CImpl->getClassInterface();
+  else if (auto *CatImpl = dyn_cast<ObjCCategoryImplDecl>(ImpDecl))
+    IFace = CatImpl->getClassInterface();
+
+  // Warn on instance/class mismatch
+  if (RHSIsMethod && NewIsInstance != RHSIsInstance)
+    Diag(AtLoc, diag::warn_mulle_method_impl_instance_class_mismatch);
+
+  // Look up RHS method
+  ObjCMethodDecl *RHSMethod = nullptr;
+  FunctionDecl *RHSFuncDecl = nullptr;
+  // Tracks whether this alias must be resolved by the runtime at load time
+  // (RHS not found in the current @implementation or its @interface).
+  bool IsRuntimeAlias = false;
+  if (RHSIsMethod) {
+    // Check the implementation first: a previous @method_implementation in
+    // the same @implementation block may have already registered the selector
+    // as a runtime alias.  Preferring the impl version means the codegen
+    // chain-flattener sees the alias target directly and can collapse chains
+    // like "-copy = -retain; -immutableCopy = -copy" into a single hop.
+    RHSMethod = RHSIsInstance ? ImpDecl->getInstanceMethod(RHSSel)
+                              : ImpDecl->getClassMethod(RHSSel);
+    if (!RHSMethod && IFace) {
+      RHSMethod = RHSIsInstance ? IFace->lookupInstanceMethod(RHSSel)
+                                : IFace->lookupClassMethod(RHSSel);
+    }
+    // Not found in the current impl/interface.  Check the global method pool
+    // for a declaration anywhere in the translation unit.  If found, this
+    // becomes a deferred runtime alias (resolved by the runtime at load time).
+    // If not found at all, emit a warning but still produce the runtime alias
+    // so the user can reference methods defined in separately-compiled units.
+    if (!RHSMethod) {
+      RHSMethod = LookupMethodInGlobalPool(RHSSel, SourceRange(RHSLoc, RHSLoc),
+                                           /*receiverIdOrClass=*/false,
+                                           /*instance=*/RHSIsInstance);
+      if (!RHSMethod) {
+        Diag(RHSLoc, diag::warn_mulle_method_impl_rhs_undeclared)
+          << (int)(!RHSIsInstance) << RHSSel;
+        // Synthesise a minimal stub so codegen has the selector and
+        // instance/class flag available.  isDefined=false marks it as a stub.
+        RHSMethod = ObjCMethodDecl::Create(
+            Context, RHSLoc, RHSLoc, RHSSel, Context.getObjCIdType(),
+            /*ReturnTInfo=*/nullptr, SemaRef.CurContext, RHSIsInstance,
+            /*isVariadic=*/false, /*isPropertyAccessor=*/false,
+            /*isSynthesizedAccessorStub=*/false,
+            /*isImplicitlyDeclared=*/false, /*isDefined=*/false,
+            ObjCImplementationControl::Optional,
+            /*HasRelatedResultType=*/false);
+      }
+      IsRuntimeAlias = true;
+      // @mulle-objc@ method_implementation: runtime alias in root class check >
+      // Runtime alias resolution walks superclasses and categories at load time.
+      // Root classes have neither, so a runtime alias can never resolve there.
+      // Protocol classes are always root classes, so this catches both cases.
+      if (IFace && IFace->getSuperClass() == nullptr) {
+        Diag(AtLoc, diag::err_mulle_method_impl_runtime_alias_in_root_class)
+          << NewSel << (RHSIsMethod ? RHSSel.getAsString() : RHSFunc->getName());
+        return nullptr;
+      }
+      // @mulle-objc@ method_implementation: runtime alias in root class check <
+    }
+
+    if (!IsRuntimeAlias) {
+    // Arity check: warn (not error) so the user can still alias methods with
+    // different argument counts (e.g. -copyWithZone: = -copy).  The alias
+    // becomes a runtime alias resolved by name at load time.
+    if (NewSel.getNumArgs() != RHSSel.getNumArgs()) {
+      Diag(AtLoc, diag::warn_mulle_method_impl_arity_mismatch)
+        << NewSel << RHSSel;
+      IsRuntimeAlias = true;
+    }
+
+    if (!IsRuntimeAlias) {
+    // Type check: return type and parameter types against LHS declaration
+    ObjCMethodDecl *LHSMethod = nullptr;
+    if (IFace)
+      LHSMethod = NewIsInstance ? IFace->lookupInstanceMethod(NewSel)
+                                : IFace->lookupClassMethod(NewSel);
+    if (!LHSMethod)
+      LHSMethod = NewIsInstance ? ImpDecl->getInstanceMethod(NewSel)
+                                : ImpDecl->getClassMethod(NewSel);
+    if (!LHSMethod)
+      Diag(NewSelLoc, diag::warn_mulle_method_impl_lhs_not_in_interface) << NewSel;
+    if (LHSMethod) {
+      ASTContext &Ctx = getASTContext();
+      if (!Ctx.hasSameType(LHSMethod->getReturnType(), RHSMethod->getReturnType())) {
+        Diag(AtLoc, diag::err_mulle_method_impl_return_type_mismatch)
+          << LHSMethod->getReturnType() << RHSMethod->getReturnType();
+        return nullptr;
+      }
+      for (unsigned i = 0, n = LHSMethod->param_size(); i < n; ++i) {
+        QualType LT = LHSMethod->param_begin()[i]->getType();
+        QualType RT = RHSMethod->param_begin()[i]->getType();
+        if (!Ctx.hasSameType(LT, RT)) {
+          // Both pointer types are passed by value in the MetaABI — the user
+          // may intentionally alias across compatible pointer types.
+          // WarnConflictingTypedMethods will fire the standard diagnostic with
+          // a note pointing back here; only error when one side is non-pointer
+          // (MetaABI calling convention would differ: by-reference vs by-value).
+          if (!LT->isAnyPointerType() || !RT->isAnyPointerType()) {
+            Diag(AtLoc, diag::err_mulle_method_impl_param_type_mismatch)
+              << i << LT << RT;
+            return nullptr;
+          }
+        }
+      }
+    }
+    } // !IsRuntimeAlias (inner: type checks)
+    } // !IsRuntimeAlias (outer: arity + type checks)
+  } else {
+    // C function — look up in translation unit scope
+    LookupResult R(SemaRef, RHSFunc, RHSLoc, Sema::LookupOrdinaryName);
+    SemaRef.LookupName(R, SemaRef.TUScope);
+    RHSFuncDecl = R.getAsSingle<FunctionDecl>();
+    if (!RHSFuncDecl) {
+      Diag(RHSLoc, diag::err_mulle_method_impl_cfunc_not_found) << RHSFunc;
+      return nullptr;
+    }
+
+    // Type check C function against mulle metaabi:
+    // (id, SEL [, void *_param]) -> void * | void
+    // Look up LHS method for return type check
+    ObjCMethodDecl *LHSMethod = nullptr;
+    if (IFace)
+      LHSMethod = NewIsInstance ? IFace->lookupInstanceMethod(NewSel)
+                                : IFace->lookupClassMethod(NewSel);
+    if (!LHSMethod)
+      LHSMethod = NewIsInstance ? ImpDecl->getInstanceMethod(NewSel)
+                                : ImpDecl->getClassMethod(NewSel);
+
+    const auto *FT = RHSFuncDecl->getType()->getAs<FunctionProtoType>();
+    if (FT && LHSMethod) {
+      ASTContext &Ctx = getASTContext();
+      // MetaABI: the void*_param slot is needed when there are ObjC arguments
+      // OR when the method has a non-void return type (return value is packed
+      // through the same _param slot).
+      unsigned nMethodArgs = NewSel.getNumArgs();
+      bool methodReturnsVoid = LHSMethod->getReturnType()->isVoidType();
+      bool needsParamSlot = nMethodArgs > 0 || !methodReturnsVoid;
+      unsigned expectedParams = 2 + (needsParamSlot ? 1 : 0); // id, SEL [, void*]
+
+      if (FT->getNumParams() != expectedParams) {
+        Diag(RHSLoc, diag::err_mulle_method_impl_arity_mismatch)
+          << NewSel << RHSFunc;
+        return nullptr;
+      }
+      // param 0: id, param 1: SEL — accept any pointer or builtin (SEL is a builtin in ObjC)
+      for (unsigned p = 0; p < 2; ++p) {
+        QualType PT = FT->getParamType(p);
+        if (!PT->isAnyPointerType() && !PT->isBuiltinType()) {
+          Diag(RHSLoc, diag::err_mulle_method_impl_param_type_mismatch)
+            << (int)p << PT << (p == 0 ? Ctx.getObjCIdType() : Ctx.getObjCSelType());
+          return nullptr;
+        }
+      }
+      // param 2 (if present): must be void *
+      if (needsParamSlot &&
+          !Ctx.hasSameType(FT->getParamType(2), Ctx.VoidPtrTy)) {
+        Diag(RHSLoc, diag::err_mulle_method_impl_param_type_mismatch)
+          << 2 << FT->getParamType(2) << Ctx.VoidPtrTy;
+        return nullptr;
+      }
+      // return: must be MetaABI-compatible.
+      // Accepted: void * (raw MetaABI), void (void-returning methods),
+      // any pointer type (typed convenience, e.g. char * for UTF8String),
+      // or the same type as the ObjC method's declared return (e.g. BOOL, int).
+      // The return value always travels in the C register, never via _param.
+      QualType FnRet = FT->getReturnType();
+      bool retOK = Ctx.hasSameType(FnRet, Ctx.VoidPtrTy) ||
+                   Ctx.hasSameType(FnRet, Ctx.VoidTy) ||
+                   FnRet->isAnyPointerType() ||
+                   (LHSMethod &&
+                    Ctx.hasSameUnqualifiedType(FnRet, LHSMethod->getReturnType()));
+      if (!retOK) {
+        Diag(RHSLoc, diag::err_mulle_method_impl_return_type_mismatch)
+          << FnRet << Ctx.VoidPtrTy;
+        return nullptr;
+      }
+    }
+  }
+
+  // @mulle-objc@ method_implementation: runtime alias in root class check >
+  // Runtime alias resolution walks superclasses and categories at load time.
+  // Root classes have neither, so a runtime alias can never resolve there.
+  // Protocol classes are always root classes, so this catches both cases.
+  // @mulle-objc@ method_implementation: runtime alias in root class check <
+
+  // For a runtime alias where the RHS is an undeclared stub (created by us
+  // with a default id return type), use the LHS declared return type so we
+  // don't emit a spurious "conflicting return type" warning.
+  QualType ReturnType;
+  TypeSourceInfo *ReturnTInfo = nullptr;
+  if (IsRuntimeAlias) {
+    ObjCMethodDecl *LHSDecl = nullptr;
+    if (IFace)
+      LHSDecl = NewIsInstance ? IFace->lookupInstanceMethod(NewSel)
+                              : IFace->lookupClassMethod(NewSel);
+    if (!LHSDecl)
+      LHSDecl = NewIsInstance ? ImpDecl->getInstanceMethod(NewSel)
+                              : ImpDecl->getClassMethod(NewSel);
+    ReturnType   = LHSDecl ? LHSDecl->getReturnType()
+                           : Context.getObjCIdType();
+    ReturnTInfo  = LHSDecl ? LHSDecl->getReturnTypeSourceInfo() : nullptr;
+  } else {
+    if (RHSMethod) {
+      ReturnType  = RHSMethod->getReturnType();
+      ReturnTInfo = RHSMethod->getReturnTypeSourceInfo();
+    } else if (RHSFuncDecl) {
+      // C function alias: use the LHS declared return type so WarnConflictingTypedMethods
+      // doesn't fire when the C function uses void * (raw MetaABI) or a typed pointer.
+      // The actual return value travels in the register per the C calling convention.
+      ObjCMethodDecl *LHSDecl = nullptr;
+      if (IFace)
+        LHSDecl = NewIsInstance ? IFace->lookupInstanceMethod(NewSel)
+                                : IFace->lookupClassMethod(NewSel);
+      if (!LHSDecl)
+        LHSDecl = NewIsInstance ? ImpDecl->getInstanceMethod(NewSel)
+                                : ImpDecl->getClassMethod(NewSel);
+      ReturnType  = LHSDecl ? LHSDecl->getReturnType()
+                            : RHSFuncDecl->getReturnType();
+      ReturnTInfo = LHSDecl ? LHSDecl->getReturnTypeSourceInfo()
+                            : RHSFuncDecl->getTypeSourceInfo();
+    } else {
+      ReturnType  = Context.getObjCIdType();
+      ReturnTInfo = nullptr;
+    }
+  }
+
+  ObjCMethodDecl *NewMethod = ObjCMethodDecl::Create(
+      Context, AtLoc, AtLoc, NewSel, ReturnType, ReturnTInfo,
+      SemaRef.CurContext, NewIsInstance, /*isVariadic=*/false,
+      /*isPropertyAccessor=*/false, /*isSynthesizedAccessorStub=*/false,
+      /*isImplicitlyDeclared=*/false, /*isDefined=*/true,
+      ObjCImplementationControl::Required,
+      /*HasRelatedResultType=*/false);
+
+  // Copy parameters from LHS interface or RHS method
+  ObjCMethodDecl *ParamSource = RHSMethod;
+  // For a runtime alias backed by a bare stub (no declared params), treat
+  // it as if we have no param source so the fallback path applies.
+  if (ParamSource && ParamSource->param_size() == 0 && NewSel.getNumArgs() > 0)
+    ParamSource = nullptr;
+  if (!ParamSource) {
+    // C function alias: get params from LHS interface declaration
+    if (IFace)
+      ParamSource = NewIsInstance ? IFace->lookupInstanceMethod(NewSel)
+                                  : IFace->lookupClassMethod(NewSel);
+    if (!ParamSource)
+      ParamSource = NewIsInstance ? ImpDecl->getInstanceMethod(NewSel)
+                                  : ImpDecl->getClassMethod(NewSel);
+  }
+  if (ParamSource && ParamSource->param_size() > 0) {
+    SmallVector<ParmVarDecl *, 8> Params;
+    SmallVector<SourceLocation, 8> SelLocs;
+    SelLocs.push_back(NewSelLoc);
+    for (auto *P : ParamSource->parameters()) {
+      ParmVarDecl *NewP = ParmVarDecl::Create(
+          Context, NewMethod, P->getBeginLoc(), P->getLocation(),
+          P->getIdentifier(), P->getType(), P->getTypeSourceInfo(),
+          P->getStorageClass(), /*DefArg=*/nullptr);
+      Params.push_back(NewP);
+    }
+    NewMethod->setMethodParams(Context, Params, SelLocs);
+  } else if (!ParamSource && NewSel.getNumArgs() > 0) {
+    // No interface declaration to copy params from (C func alias, undeclared
+    // selector with args). Try the global method pool for real param types
+    // so the encoding matches other declarations of this selector. Fall back
+    // to anonymous void* params so getObjCEncodingForMethodDecl doesn't walk
+    // a null ParamsAndSelLocs.
+    ObjCMethodDecl *PoolMethod =
+        LookupMethodInGlobalPool(NewSel, SourceRange(AtLoc, NewSelLoc),
+                                 /*receiverIdOrClass=*/false,
+                                 /*instance=*/NewIsInstance);
+    SmallVector<ParmVarDecl *, 8> Params;
+    SmallVector<SourceLocation, 8> SelLocs;
+    if (PoolMethod && PoolMethod->param_size() == NewSel.getNumArgs()) {
+      SelLocs.push_back(NewSelLoc);
+      for (auto *P : PoolMethod->parameters()) {
+        ParmVarDecl *NewP = ParmVarDecl::Create(
+            Context, NewMethod, AtLoc, AtLoc,
+            /*Id=*/nullptr, P->getType(), P->getTypeSourceInfo(),
+            SC_None, /*DefArg=*/nullptr);
+        Params.push_back(NewP);
+      }
+    } else {
+      TypeSourceInfo *VoidPtrTInfo =
+          Context.getTrivialTypeSourceInfo(Context.VoidPtrTy, AtLoc);
+      for (unsigned i = 0, n = NewSel.getNumArgs(); i < n; ++i) {
+        SelLocs.push_back(NewSelLoc);
+        ParmVarDecl *SynP = ParmVarDecl::Create(
+            Context, NewMethod, AtLoc, AtLoc,
+            /*Id=*/nullptr, Context.VoidPtrTy, VoidPtrTInfo,
+            SC_None, /*DefArg=*/nullptr);
+        Params.push_back(SynP);
+      }
+    }
+    NewMethod->setMethodParams(Context, Params, SelLocs);
+  }
+
+  // Store alias target for codegen
+  if (RHSIsMethod)
+    NewMethod->setAliasTarget(RHSMethod);
+  else {
+    NewMethod->setAliasTarget(RHSFuncDecl);
+    // Mark the C function as referenced so -Wunused-function is suppressed.
+    SemaRef.MarkFunctionReferenced(RHSLoc, RHSFuncDecl);
+  }
+
+  NewMethod->createImplicitParams(Context, IFace);
+  ImpDecl->addDecl(NewMethod);
+
+  // Inherit method attributes (e.g. objc_user_* annotations) from the
+  // interface/protocol declaration — same logic as the normal method path
+  // uses via CheckObjCMethodOverrides → mergeObjCMethodDecls.
+  if (IFace) {
+    CheckObjCMethodOverrides(NewMethod, IFace, RTC_Unknown);
+  }
+
+  return NewMethod;
+}
+// @mulle-objc@ method_implementation sema <
+
 /// ActOnStartCategoryImplementation - Perform semantic checks on the
 /// category implementation declaration and build an ObjCCategoryImplDecl
 /// object.
@@ -1979,6 +2674,9 @@ ObjCCategoryImplDecl *SemaObjC::ActOnStartCategoryImplementation(
 
   CheckObjCDeclScope(CDecl);
   ActOnObjCContainerStartDefinition(CDecl);
+  // @mulle-objc@ dependency directive >
+  ImplDependencies.clear();
+  // @mulle-objc@ dependency directive <
   return CDecl;
 }
 
@@ -1996,6 +2694,41 @@ ObjCImplementationDecl *SemaObjC::ActOnStartClassImplementation(
     Diag(ClassLoc, diag::err_redefinition_different_kind) << ClassName;
     Diag(PrevDecl->getLocation(), diag::note_previous_definition);
   } else if ((IDecl = dyn_cast_or_null<ObjCInterfaceDecl>(PrevDecl))) {
+    // @mulle-objc@ mixin setup >
+    if (IDecl->isMixin()) {
+      if (SuperClassname) {
+        Diag(SuperClassLoc, diag::err_mulle_subclass_of_mixin)
+            << ClassName << SuperClassname;
+        return nullptr;
+      }
+      // The mixin definition form (@mixin Foo ... @end) only creates the
+      // ObjCProtocolDecl. Require it to be fully defined before @implementation.
+      ObjCProtocolDecl *Proto = LookupProtocol(
+          const_cast<IdentifierInfo *>(ClassName), ClassLoc);
+      if (!Proto || !Proto->hasDefinition()) {
+        Diag(ClassLoc, diag::err_mulle_mixin_no_definition) << ClassName;
+        return nullptr;
+      }
+      // Synthesize @interface Foo <Foo> (root class conforming to its own protocol)
+      Decl *ProtoRef = Proto;
+      IDecl = ActOnStartClassInterface(
+          SemaRef.TUScope, AtClassImplLoc,
+          const_cast<IdentifierInfo *>(ClassName), ClassLoc,
+          /*typeParamList=*/nullptr,
+          /*SuperName=*/nullptr, SourceLocation(),
+          /*SuperTypeArgs=*/{}, SourceRange(),
+          &ProtoRef, 1,
+          &ClassLoc, ClassLoc,
+          ParsedAttributesView{}, /*SkipBody=*/nullptr,
+          /*AllowMixinName=*/true);
+      if (IDecl) {
+        IDecl->addAttr(ObjCRootClassAttr::CreateImplicit(getASTContext()));
+        IDecl->setMixin(true);
+      }
+      ActOnObjCContainerFinishDefinition();
+      // IDecl is now fully defined — fall through to standard implementation setup
+    }
+    // @mulle-objc@ mixin setup <
     // FIXME: This will produce an error if the definition of the interface has
     // been imported from a module but is not visible.
     SemaRef.RequireCompleteType(ClassLoc, Context.getObjCInterfaceType(IDecl),
@@ -2114,6 +2847,9 @@ ObjCImplementationDecl *SemaObjC::ActOnStartClassImplementation(
   }
 
   ActOnObjCContainerStartDefinition(IMPDecl);
+  // @mulle-objc@ dependency directive >
+  ImplDependencies.clear();
+  // @mulle-objc@ dependency directive <
   return IMPDecl;
 }
 
@@ -2266,21 +3002,31 @@ static void WarnUndefinedMethod(Sema &S, ObjCImplDecl *Impl,
     B << method;
     if (NeededFor)
       B << NeededFor;
-
-    // Add an empty definition at the end of the @implementation.
-    std::string FixItStr;
-    llvm::raw_string_ostream Out(FixItStr);
-    method->print(Out, Impl->getASTContext().getPrintingPolicy());
-    Out << " {\n}\n\n";
-
-    SourceLocation Loc = Impl->getAtEndRange().getBegin();
-    B << FixItHint::CreateInsertion(Loc, FixItStr);
   }
 
-  // Issue a note to the original declaration.
+  // Issue a note to the original declaration, with a fix-it to add an empty
+  // definition at the end of the @implementation.
   SourceLocation MethodLoc = method->getBeginLoc();
-  if (MethodLoc.isValid())
-    S.Diag(MethodLoc, diag::note_method_declared_at) << method;
+  if (MethodLoc.isValid()) {
+    const SemaBase::SemaDiagnosticBuilder &N =
+        S.Diag(MethodLoc, diag::note_method_declared_at);
+    N << method;
+
+    // @mulle-objc@ skip FixIt for mixin implementation — user uses @method_implementation instead >
+    const ObjCInterfaceDecl *IFace = Impl->getClassInterface();
+    bool isProtoImpl = IFace && IFace->isMixin();
+    if (!isProtoImpl) {
+      // Add an empty definition at the end of the @implementation.
+      std::string FixItStr;
+      llvm::raw_string_ostream Out(FixItStr);
+      method->print(Out, Impl->getASTContext().getPrintingPolicy());
+      Out << " {\n}\n\n";
+
+      SourceLocation Loc = Impl->getAtEndRange().getBegin();
+      N << FixItHint::CreateInsertion(Loc, FixItStr);
+    }
+    // @mulle-objc@ skip FixIt for mixin implementation <
+  }
 }
 
 /// Determines if type B can be substituted for type A.  Returns true if we can
@@ -2599,6 +3345,27 @@ void SemaObjC::WarnConflictingTypedMethods(ObjCMethodDecl *ImpMethodDecl,
       checkMethodFamilyMismatch(SemaRef, ImpMethodDecl, MethodDecl))
     return;
 
+  // @mulle-objc@ method_implementation: alias note >
+  // If the implementation is a @method_implementation alias, the type
+  // mismatch is intentional (user-acknowledged, pointer-only).  Let the
+  // standard diagnostic fire so it shows the right location and wording,
+  // but append a note pointing at the @method_implementation line.
+  if (ImpMethodDecl->isAlias()) {
+    // Run the normal checks — they emit the standard warnings at the right
+    // source locations.
+    CheckMethodOverrideReturn(SemaRef, ImpMethodDecl, MethodDecl,
+                              IsProtocolMethodDecl, false, true);
+    for (ObjCMethodDecl::param_iterator IM = ImpMethodDecl->param_begin(),
+         IF = MethodDecl->param_begin(), EM = ImpMethodDecl->param_end(),
+         EF = MethodDecl->param_end();
+         IM != EM && IF != EF; ++IM, ++IF) {
+      CheckMethodOverrideParam(SemaRef, ImpMethodDecl, MethodDecl, *IM, *IF,
+                               IsProtocolMethodDecl, false, true);
+    }
+    return;
+  }
+  // @mulle-objc@ method_implementation: alias note <
+
   CheckMethodOverrideReturn(SemaRef, ImpMethodDecl, MethodDecl,
                             IsProtocolMethodDecl, false, true);
 
@@ -2714,6 +3481,53 @@ static void findProtocolsWithExplicitImpls(const ObjCInterfaceDecl *Super,
   findProtocolsWithExplicitImpls(Super->getSuperClass(), PNS);
 }
 
+// @mulle-objc@ mixin implementation check >
+// Returns true if 'Sel' is provided by a @mixin implementation for any
+// mixin that IDecl conforms to.  Two paths to credit:
+//
+//  (a) Same TU: the mixin implementation is visible and has the method.
+//  (b) Cross TU: the mixin's own ObjCProtocolDecl declares the method
+//      (as @optional in the @mixin definition), meaning the
+//      @mixin provides a default that will be injected at
+//      runtime into every class adopting it.
+// CheckedPDecl is the protocol whose method list we are currently verifying.
+// When the matching mixin corresponds to CheckedPDecl itself, the
+// method was declared @required in that @mixin definition — "must implement
+// even though a default exists".  Only suppress for a DIFFERENT mixin
+// (e.g. MulleObjCRootObject satisfying the NSObject protocol's requirements).
+static bool isMethodProvidedByMixin(ASTContext &Ctx,
+                                            const ObjCInterfaceDecl *IDecl,
+                                            Selector Sel, bool IsInstance,
+                                            const ObjCProtocolDecl *CheckedPDecl) {
+  for (const auto *Proto : IDecl->all_referenced_protocols()) {
+    IdentifierInfo *II = Proto->getIdentifier();
+    // Look for a class interface with the same name that is a mixin.
+    DeclContext::lookup_result Res =
+        Ctx.getTranslationUnitDecl()->lookup(DeclarationName(II));
+    for (NamedDecl *ND : Res) {
+      ObjCInterfaceDecl *ProtoIface = dyn_cast<ObjCInterfaceDecl>(ND);
+      if (!ProtoIface || !ProtoIface->isMixin())
+        continue;
+      // If this mixin IS the protocol being checked, its @required
+      // methods must still be implemented by adopters — don't suppress.
+      if (Proto == CheckedPDecl)
+        continue;
+      // (a) Implementation visible in this TU — check directly.
+      if (ObjCImplementationDecl *ProtoImpl = ProtoIface->getImplementation()) {
+        if (IsInstance ? ProtoImpl->getInstanceMethod(Sel)
+                       : ProtoImpl->getClassMethod(Sel))
+          return true;
+      }
+      // (b) Cross-TU: if the mixin's own protocol declares the method,
+      // trust that its @mixin implementation provides it at runtime.
+      if (Proto->lookupMethod(Sel, IsInstance))
+        return true;
+    }
+  }
+  return false;
+}
+// @mulle-objc@ mixin implementation check <
+
 /// CheckProtocolMethodDefs - This routine checks unimplemented methods
 /// Declared in protocol, and those referenced by it.
 static void CheckProtocolMethodDefs(
@@ -2724,6 +3538,17 @@ static void CheckProtocolMethodDefs(
   ObjCInterfaceDecl *IDecl = C ? C->getClassInterface()
                                : dyn_cast<ObjCInterfaceDecl>(CDecl);
   assert (IDecl && "CheckProtocolMethodDefs - IDecl is null");
+
+  // @mulle-objc@ mixin optional method check >
+  // For @mixin implementation (mixin), the semantics are inverted:
+  // @optional methods must be implemented (they are the default implementations),
+  // while @required methods are for adaptors/subclasses and need not be present.
+  // Only invert when checking the mixin's OWN protocol (same name).
+  // Adopted/inherited mixins have their own semantics and their
+  // @optional methods do not need to be re-implemented.
+  bool isProtoClassImpl = IDecl->isMixin() &&
+                          (PDecl->getIdentifier() == IDecl->getIdentifier());
+  // @mulle-objc@ mixin optional method check <
 
   ObjCInterfaceDecl *Super = IDecl->getSuperClass();
   ObjCInterfaceDecl *NSIDecl = nullptr;
@@ -2781,8 +3606,11 @@ static void CheckProtocolMethodDefs(
   // check unimplemented instance methods.
   if (!NSIDecl)
     for (auto *method : PDecl->instance_methods()) {
-      if (method->getImplementationControl() !=
-              ObjCImplementationControl::Optional &&
+      // @mulle-objc@ mixin optional method check >
+      bool isOptional = (method->getImplementationControl() ==
+                         ObjCImplementationControl::Optional);
+      // @mulle-objc@ mixin optional method check <
+      if ((isProtoClassImpl ? isOptional : !isOptional) &&
           !method->isPropertyAccessor() &&
           !InsMap.count(method->getSelector()) &&
           (!Super || !Super->lookupMethod(
@@ -2798,21 +3626,47 @@ static void CheckProtocolMethodDefs(
         // Ugly, but necessary. Method declared in protocol might have
         // have been synthesized due to a property declared in the class which
         // uses the protocol.
-        if (ObjCMethodDecl *MethodInClass = IDecl->lookupMethod(
-                method->getSelector(), true /* instance */,
-                true /* shallowCategoryLookup */, false /* followSuper */))
-          if (C || MethodInClass->isPropertyAccessor())
-            continue;
-        unsigned DIAG = diag::warn_unimplemented_protocol_method;
-        if (!S.Diags.isIgnored(DIAG, Impl->getLocation())) {
-          WarnUndefinedMethod(S, Impl, method, IncompleteImpl, DIAG, PDecl);
-        }
-      }
+            if (ObjCMethodDecl *MethodInClass =
+                  IDecl->lookupMethod(method->getSelector(),
+                                      true /* instance */,
+                                      true /* shallowCategoryLookup */,
+                                      false /* followSuper */))
+              if (C || MethodInClass->isPropertyAccessor())
+                continue;
+            // @mulle-objc@ allow protocol methods to be redeclared as optional >
+            // (but not in mixin impls — there we explicitly want to warn
+            // about unimplemented optional methods since they are the defaults)
+            if (!isProtoClassImpl)
+              if (ObjCMethodDecl *NearestMethod =
+                    IDecl->lookupMethod(method->getSelector(),
+                                        true /* instance */,
+                                        false /* shallowCategoryLookup */,
+                                        true /* followSuper */))
+                if ( NearestMethod->getImplementationControl() == ObjCImplementationControl::Optional)
+                  continue;
+            // @mulle-objc@ allow protocol methods to be redeclared as optional <
+
+            // @mulle-objc@ skip if method provided by a @mixin >
+            if (!isProtoClassImpl &&
+                isMethodProvidedByMixin(S.Context, IDecl,
+                                                method->getSelector(), true,
+                                                PDecl))
+              continue;
+            // @mulle-objc@ skip if method provided by a @mixin <
+
+            unsigned DIAG = diag::warn_unimplemented_protocol_method;
+            if (!S.Diags.isIgnored(DIAG, Impl->getLocation())) {
+              WarnUndefinedMethod(S, Impl, method, IncompleteImpl, DIAG, PDecl);
+            }
+          }
     }
   // check unimplemented class methods
   for (auto *method : PDecl->class_methods()) {
-    if (method->getImplementationControl() !=
-            ObjCImplementationControl::Optional &&
+    // @mulle-objc@ mixin optional method check >
+    bool isOptionalCls = (method->getImplementationControl() ==
+                          ObjCImplementationControl::Optional);
+    // @mulle-objc@ mixin optional method check <
+    if ((isProtoClassImpl ? isOptionalCls : !isOptionalCls) &&
         !ClsMap.count(method->getSelector()) &&
         (!Super || !Super->lookupMethod(
                        method->getSelector(), false /* class method */,
@@ -2824,6 +3678,24 @@ static void CheckProtocolMethodDefs(
                                    true /* shallowCategoryLookup */,
                                    false /* followSuper */))
         continue;
+
+      // @mulle-objc@ allow protocol methods to be redeclared as optional >
+      if (ObjCMethodDecl *NearestMethod =
+         IDecl->lookupMethod(method->getSelector(),
+                             true /* instance */,
+                             false /* shallowCategoryLookup */,
+                             true /* followSuper */))
+         if ( NearestMethod->getImplementationControl() == ObjCImplementationControl::Optional)
+            continue;
+      // @mulle-objc@ allow protocol methods to be redeclared as optional <
+
+      // @mulle-objc@ skip if method provided by a @mixin >
+      if (!isProtoClassImpl &&
+          isMethodProvidedByMixin(S.Context, IDecl,
+                                          method->getSelector(), false,
+                                          PDecl))
+        continue;
+      // @mulle-objc@ skip if method provided by a @mixin <
 
       unsigned DIAG = diag::warn_unimplemented_protocol_method;
       if (!S.Diags.isIgnored(DIAG, Impl->getLocation())) {
@@ -2853,8 +3725,28 @@ void SemaObjC::MatchAllMethodDeclarations(
     if (!I->isPropertyAccessor() &&
         !InsMap.count(I->getSelector())) {
       if (ImmediateClass)
-        WarnUndefinedMethod(SemaRef, IMPDecl, I, IncompleteImpl,
-                            diag::warn_undef_method_impl);
+      {
+         // @mulle-objc@ language: remove warnings for unimplemented instance methods like -retain, -release which are always defined >
+         if( getLangOpts().ObjCRuntime.hasMulleMetaABI())
+         {
+            if( I->isOptional())
+               ;
+            else
+            {
+               std::string   s;
+
+               s = I->getNameAsString();
+               if( s != "release" &&
+                   s != "retain")
+                  WarnUndefinedMethod(SemaRef, IMPDecl, I, IncompleteImpl,
+                                      diag::warn_undef_method_impl);
+            }
+         }
+         else
+         // @mulle-objc@ language: remove warnings for unimplemented instance methods like -retain, -release which are always defined <
+           WarnUndefinedMethod(SemaRef, IMPDecl, I, IncompleteImpl,
+                               diag::warn_undef_method_impl);
+      }
       continue;
     } else {
       ObjCMethodDecl *ImpMethodDecl =
@@ -2883,8 +3775,27 @@ void SemaObjC::MatchAllMethodDeclarations(
     if (!I->isPropertyAccessor() &&
         !ClsMap.count(I->getSelector())) {
       if (ImmediateClass)
+      {
+         // @mulle-objc@ language: remove warnings for unimplemented class methods like +new, +alloc which are always defined
+         if( getLangOpts().ObjCRuntime.hasMulleMetaABI())
+         {
+            if( I->isOptional())
+               ;
+            else
+            {
+               std::string   s;
+
+               s = I->getNameAsString();
+               if( s != "new" &&
+                   s != "alloc")
+               WarnUndefinedMethod(SemaRef, IMPDecl, I, IncompleteImpl,
+                                   diag::warn_undef_method_impl);
+            }
+         }
+         else
         WarnUndefinedMethod(SemaRef, IMPDecl, I, IncompleteImpl,
                             diag::warn_undef_method_impl);
+      }
     } else {
       ObjCMethodDecl *ImpMethodDecl =
         IMPDecl->getClassMethod(I->getSelector());
@@ -3009,6 +3920,13 @@ void SemaObjC::ImplMethodsVsClassMethods(Scope *S, ObjCImplDecl *IMPDecl,
     InsMap.insert(P->getGetterName());
     if (!P->getSetterName().isNull())
       InsMap.insert(P->getSetterName());
+
+    // @mulle-objc@ new property attribute container >
+    if (!P->getAdderName().isNull())
+      InsMap.insert(P->getAdderName());
+    if (!P->getRemoverName().isNull())
+      InsMap.insert(P->getRemoverName());
+    // @mulle-objc@ new property attribute container <
   }
 
   // Check and see if properties declared in the interface have either 1)
@@ -3106,6 +4024,15 @@ SemaObjC::DeclGroupPtrTy SemaObjC::ActOnForwardClassDeclaration(
     // Create a declaration to describe this forward declaration.
     ObjCInterfaceDecl *PrevIDecl
       = dyn_cast_or_null<ObjCInterfaceDecl>(PrevDecl);
+
+    // @mulle-objc@ mixin class conflict check >
+    if (PrevIDecl && PrevIDecl->isMixin()) {
+      Diag(IdentLocs[i], diag::err_mulle_class_conflicts_mixin)
+        << IdentList[i];
+      Diag(PrevIDecl->getLocation(), diag::note_previous_definition);
+      continue;
+    }
+    // @mulle-objc@ mixin class conflict check <
 
     IdentifierInfo *ClassName = IdentList[i];
     if (PrevIDecl && PrevIDecl->getIdentifier() != ClassName) {
@@ -3980,6 +4907,109 @@ static void DiagnoseCategoryDirectMembersProtocolConformance(
                                                    PDecl->protocols());
 }
 
+// @mulle-objc@ dependency directive >
+Decl *SemaObjC::ActOnDependencyDecl(Scope *S, SourceLocation AtLoc,
+                                    SourceLocation ClassLoc,
+                                    IdentifierInfo *ClassName,
+                                    IdentifierInfo *CategoryName,
+                                    Decl *ImplDecl) {
+  ASTContext &Context = getASTContext();
+  if (ImplDecl) {
+    // Inside @implementation — store on the impl decl's context.
+    auto *ImpDecl = cast<ObjCImplDecl>(ImplDecl);
+    ObjCDependencyDecl *DD = ObjCDependencyDecl::Create(
+        Context, ImpDecl, AtLoc, ClassLoc, ClassName, CategoryName);
+    ImpDecl->addDecl(DD);
+    ImplDependencies.push_back(DD);
+    return DD;
+  }
+  // File scope — store in the TU list.
+  ObjCDependencyDecl *DD = ObjCDependencyDecl::Create(
+      Context, SemaRef.CurContext, AtLoc, ClassLoc, ClassName, CategoryName);
+  TUDependencies.push_back(DD);
+  return DD;
+}
+// @mulle-objc@ dependency directive <
+
+// @mulle-objc@ warn category method redeclaration >
+/// Warn if a method implemented in a category is already declared in another
+/// category of the same class, unless:
+///   - the other category name contains "forward", "future", or "prototype"
+///   - the impl has a @dependency for that category
+static void DiagnoseCategoryMethodRedeclaration(SemaObjC &S,
+                                                ObjCCategoryImplDecl *CatImpl,
+                                                ObjCInterfaceDecl *IDecl)
+{
+   IdentifierInfo *ImplCatName = CatImpl->getIdentifier();
+
+   // Build set of category names covered by @dependency in this impl
+   llvm::SmallPtrSet<IdentifierInfo *, 4> DependencyCategories;
+   for (auto *Dep : CatImpl->dependency_impls())
+      if (Dep->getCategoryName())
+         DependencyCategories.insert(Dep->getCategoryName());
+
+   for (const auto *Method : CatImpl->methods())
+   {
+      Selector Sel = Method->getSelector();
+      bool     IsInstance = Method->isInstanceMethod();
+
+      for (const auto *Cat : IDecl->known_categories())
+      {
+         IdentifierInfo *CatName = Cat->getIdentifier();
+         if (!CatName || CatName == ImplCatName)
+            continue;
+
+         if (!Cat->getMethod(Sel, IsInstance))
+            continue;
+
+         // Never warn for +dependencies — it's synthesized by @dependency
+         if (!IsInstance && Sel.isUnarySelector() &&
+             Sel.getNameForSlot(0) == "dependencies")
+            continue;
+
+         // Suppress if other category adopts MulleObjCForwarding or
+         // MulleObjCFuture protocol
+         bool isSuppressedCategory = false;
+         for (const auto *Proto : Cat->protocols()) {
+            if (Proto->getName() == "MulleObjCForwarding" ||
+                Proto->getName() == "MulleObjCFuture") {
+               isSuppressedCategory = true;
+               break;
+            }
+         }
+         if (isSuppressedCategory)
+            continue;
+
+         // Suppress if @dependency covers this category
+         if (DependencyCategories.count(CatName))
+            continue;
+
+         S.Diag(Method->getLocation(),
+                diag::warn_mulle_method_impl_in_other_category)
+            << Method->getDeclName()
+            << CatName
+            << IDecl->getIdentifier();
+         S.Diag(Cat->getMethod(Sel, IsInstance)->getLocation(),
+                diag::note_previous_declaration);
+         // If this impl has no matching @interface, hint at possible typo
+         if (ObjCCategoryDecl *ImplCat = IDecl->FindCategoryDeclaration(ImplCatName)) {
+            if (ImplCat->isImplicit())
+               S.Diag(CatImpl->getLocation(),
+                      diag::note_mulle_method_impl_no_category_interface)
+                  << IDecl->getIdentifier()
+                  << ImplCatName;
+         } else {
+            S.Diag(CatImpl->getLocation(),
+                   diag::note_mulle_method_impl_no_category_interface)
+               << IDecl->getIdentifier()
+               << ImplCatName;
+         }
+         break; // one warning per method is enough
+      }
+   }
+}
+// @mulle-objc@ warn category method redeclaration <
+
 // Note: For class/category implementations, allMethods is always null.
 Decl *SemaObjC::ActOnAtEnd(Scope *S, SourceRange AtEnd,
                            ArrayRef<Decl *> allMethods,
@@ -4117,10 +5147,19 @@ Decl *SemaObjC::ActOnAtEnd(Scope *S, SourceRange AtEnd,
             if (ObjCMethodDecl *GetterMethod =
                     Ext->getInstanceMethod(Property->getGetterName()))
               GetterMethod->setPropertyAccessor(true);
-            if (!Property->isReadOnly())
+            // @mulle-objc@ new property attribute container >
+            if (!Property->isReadOnly()) {
               if (ObjCMethodDecl *SetterMethod
                     = Ext->getInstanceMethod(Property->getSetterName()))
                 SetterMethod->setPropertyAccessor(true);
+              if (ObjCMethodDecl *AdderMethod
+                    = Ext->getInstanceMethod(Property->getAdderName()))
+                AdderMethod->setPropertyAccessor(true);
+              if (ObjCMethodDecl *RemoverMethod
+                    = Ext->getInstanceMethod(Property->getRemoverName()))
+                RemoverMethod->setPropertyAccessor(true);
+            }
+            // @mulle-objc@ new property attribute container <
           }
         }
       }
@@ -4194,6 +5233,7 @@ Decl *SemaObjC::ActOnAtEnd(Scope *S, SourceRange AtEnd,
             = IDecl->FindCategoryDeclaration(CatImplClass->getIdentifier())) {
         ImplMethodsVsClassMethods(S, CatImplClass, Cat);
       }
+      DiagnoseCategoryMethodRedeclaration(*this, CatImplClass, IDecl);
     }
   } else if (const auto *IntfDecl = dyn_cast<ObjCInterfaceDecl>(ClassDecl)) {
     if (const ObjCInterfaceDecl *Super = IntfDecl->getSuperClass()) {
@@ -4209,6 +5249,47 @@ Decl *SemaObjC::ActOnAtEnd(Scope *S, SourceRange AtEnd,
       Diag(IntfDecl->getLocation(), diag::err_class_stub_subclassing_mismatch);
   }
   DiagnoseVariableSizedIvars(SemaRef, OCD);
+
+  // @mulle-objc@ dependency synthesis >
+  // Synthesize +dependencies for this @implementation if any @dependency
+  // directives are present (either impl-level or TU-level).
+  if (ObjCImplDecl *ImpDecl = dyn_cast<ObjCImplDecl>(ClassDecl)) {
+    bool hasImplDeps = ImpDecl->depimpl_begin() != ImpDecl->depimpl_end();
+    bool hasTUDeps   = !TUDependencies.empty();
+    if (hasImplDeps || hasTUDeps) {
+      // Append TU-level dependency decls into this impl so CodeGen can see
+      // all entries via dependency_impls() in impl-first, TU-second order.
+      for (ObjCDependencyDecl *TUD : TUDependencies) {
+        ObjCDependencyDecl *Copy = ObjCDependencyDecl::Create(
+            Context, ImpDecl, TUD->getAtLoc(), TUD->getLocation(),
+            TUD->getClassName(), TUD->getCategoryName());
+        ImpDecl->addDecl(Copy);
+      }
+      Selector DepSel = Context.Selectors.getNullarySelector(
+          &Context.Idents.get("dependencies"));
+      if (ImpDecl->getMethod(DepSel, /*isInstance=*/false)) {
+        // Manual +dependencies exists — warn and leave it in place.
+        Diag(ImpDecl->getLocation(),
+             diag::warn_mulle_objc_dependency_manual_method);
+      } else {
+        // Synthesize +dependencies.
+        ObjCMethodDecl *MD = ObjCMethodDecl::Create(
+            Context,
+            ImpDecl->getLocation(), ImpDecl->getAtEndRange().getEnd(),
+            DepSel, Context.VoidPtrTy, /*ReturnTInfo=*/nullptr,
+            ImpDecl,
+            /*isInstance=*/false, /*isVariadic=*/false,
+            /*isPropertyAccessor=*/false,
+            /*isSynthesizedAccessorStub=*/false,
+            /*isImplicitlyDeclared=*/false, /*isDefined=*/false,
+            ObjCImplementationControl::Required,
+            /*HasRelatedResultType=*/false);
+        MD->setSynthesizedDependencies(true);
+        ImpDecl->addDecl(MD);
+      }
+    }
+  }
+  // @mulle-objc@ dependency synthesis <
   if (isInterfaceDeclKind) {
     // Reject invalid vardecls.
     for (unsigned i = 0, e = allTUVars.size(); i != e; i++) {
@@ -4772,11 +5853,146 @@ ParmVarDecl *SemaObjC::ActOnMethodParmDeclaration(Scope *S,
     Diag(Param->getLocation(), diag::err_block_on_nonlocal);
     Param->setInvalidDecl();
   }
-
+  // @mulle-objc@ added isHidden to ActOnParamDeclarator >
+  if( getLangOpts().ObjCRuntime.hasMulleMetaABI())
+    return Param;
+  // @mulle-objc@ added isHidden to ActOnParamDeclarator <
   S->AddDecl(Param);
   SemaRef.IdResolver.AddDecl(Param);
   return Param;
 }
+
+//
+// @mulle-objc@ MetaABI: creates a struct from method parameters
+// >>>
+unsigned int   SemaObjC::metaABIDescription( SmallVector<ParmVarDecl*, 16> &Params,
+                                         QualType resultType)
+{
+   unsigned int   desc;
+   ASTContext &Context = getASTContext();
+
+   desc = 0;
+   if( ! resultType->isVoidType())
+   {
+      desc = MetaABIVoidPtrRval;
+      if( Context.typeNeedsMetaABIAlloca( resultType))
+         desc = MetaABIRvalAsStruct;  // must be as struct then
+   }
+
+   switch( Params.size())
+   {
+   case 0 :
+      break;
+   case 1 :
+      if( Params[ 0]->getType()->isIncompleteType( 0))
+         return( MetaABIParamAsStruct);
+
+      if( Context.typeNeedsMetaABIAlloca( Params[ 0]->getType(), /*isParam=*/true))
+         desc |= MetaABIParamAsStruct;
+      else
+         desc |= MetaABIVoidPtrParam;
+      break;
+
+   default :
+      desc |= MetaABIParamAsStruct;
+      break;
+   }
+   return( desc);
+}
+
+
+void   SemaObjC::SetMulleObjCParam( ObjCMethodDecl *ObjCMethod,
+                                Selector Sel,
+                                SmallVector<ParmVarDecl*, 16> *Params,
+                                QualType resultType,
+                                unsigned int abiDesc,
+                                SourceLocation   Loc)
+{
+   std::string  RecordName;
+   QualType     PtrTy;
+   ASTContext &Context = getASTContext();
+
+   // - (void *) foo; is ez no parameter or bogus parameter
+   if( abiDesc & MetaABIRvalAsStruct)
+   {
+      // i am lazy and stuff records into records...
+      RecordName = "rval." + Sel.getAsString();
+      IdentifierInfo  *RecordID = &Context.Idents.get( RecordName);
+
+      RecordDecl  *RD = RecordDecl::Create( Context, TagTypeKind::Struct, SemaRef.CurContext, Loc, Loc, RecordID);
+      FieldDecl   *FD;
+
+      FD = FieldDecl::Create( Context, RD,
+                             Loc, Loc,
+                             &Context.Idents.get("rval"),
+                             resultType,
+                             nullptr,
+                             nullptr,
+                             false,  // Mutable... only for C++
+                             ICIS_NoInit);
+      RD->addDecl( FD);
+      RD->completeDefinition();
+
+      // some voodoo, blindly copied
+      SemaRef.AddAlignmentAttributesForRecord(RD);
+      SemaRef.AddMsStructLayoutForRecord(RD);
+      ObjCMethod->setRvalRecord( RD);
+   }
+
+   //
+   // this could be trouble, if someone has declared the same method
+   // already ? check this
+   //
+   RecordName = "p." + Sel.getAsString();
+   IdentifierInfo  *RecordID = &Context.Idents.get( RecordName);
+
+   RecordDecl  *RD = RecordDecl::Create( Context, TagTypeKind::Struct, SemaRef.CurContext, Loc, Loc, RecordID);
+
+   for (unsigned i = 0, e = Params->size(); i != e; ++i)
+   {
+      ParmVarDecl *Param = (*Params)[ i];
+      FieldDecl   *FD;
+
+      FD = FieldDecl::Create( Context, RD,
+                             Param->getLocation(), Param->getEndLoc(),
+                             Param->getIdentifier(),
+                             Param->getType(),
+                             Param->getTypeSourceInfo(),
+                             Param->getDefaultArg(),
+                             false,  // Mutable... only for C++
+                             ICIS_NoInit);
+      RD->addDecl( FD);
+   }
+   RD->completeDefinition();
+
+   // some voodoo, blindly copied
+   SemaRef.AddAlignmentAttributesForRecord(RD);
+   SemaRef.AddMsStructLayoutForRecord(RD);
+
+   ObjCMethod->setParamRecord( RD);
+
+   // (nat) fake it up, so that every method looks exactly alike
+   //       add our _param implicit decl now.
+   //
+   // convert record to a QualType
+   QualType RecTy = Context.getTypeDeclType( (TypeDecl *) RD);
+   PtrTy = Context.getPointerType( RecTy);
+
+   ImplicitParamDecl  *Param = ImplicitParamDecl::Create(Context,
+                                                         ObjCMethod,
+                                                         Loc,
+                                                         &Context.Idents.get("_param"),
+                                                         PtrTy,
+                                                         ImplicitParamKind::Other);
+
+   ObjCMethod->setParamDecl( Param);
+   // this is implicitly done later in ActOnStartOfObjCMethodDef
+   //      IdResolver.AddDecl(Param);  // this adds it to search scope!
+}
+
+// <<<
+// @mulle-objc@ MetaABI: creates a struct from method parameters
+
 
 Decl *SemaObjC::ActOnMethodDeclaration(
     Scope *S, SourceLocation MethodLoc, SourceLocation EndLoc,
@@ -4787,7 +6003,8 @@ Decl *SemaObjC::ActOnMethodDeclaration(
     ParmVarDecl **ArgInfo, DeclaratorChunk::ParamInfo *CParamInfo,
     unsigned CNumArgs, // c-style args
     const ParsedAttributesView &AttrList, tok::ObjCKeywordKind MethodDeclKind,
-    bool isVariadic, bool MethodDefinition) {
+    bool isVariadic, bool MethodDefinition)
+{
   ASTContext &Context = getASTContext();
   // Make sure we can establish a context for the method.
   if (!SemaRef.CurContext->isObjCContainer()) {
@@ -4847,6 +6064,54 @@ Decl *SemaObjC::ActOnMethodDeclaration(
   }
 
   ObjCMethod->setMethodParams(Context, Params, SelectorLocs);
+  // @mulle-objc@ MetaABI: create ParamRecord >
+  // the params are what is used for syntax checks and all the
+  // other good stuff.
+  //
+  // The actual ParameterBlock that is used for code generation
+  // is kept separately. For now we assume that there
+  // is alwas a _param block, except if there are no arguments.
+  // If we have only one parameter fitting into a void *,
+  // we also don't need a _param block, but keep the argument as is
+  //
+  if( getLangOpts().ObjCRuntime.hasMulleMetaABI())
+  {
+     unsigned int   desc;
+
+     desc = metaABIDescription( Params, resultDeclType);
+     if( isVariadic)
+        desc |= MetaABIParamAsStruct;
+
+     if( desc == MetaABIVoidPtrParam)
+     {
+        const IdentifierInfo *II;
+        
+        ParmVarDecl *Param = Params[ 0];
+        // reinstitute as regular parameter
+        S->AddDecl(Param);
+        II = Param->getIdentifier();
+        if( II != nullptr)
+           SemaRef.IdResolver.AddDecl(Param);
+        ObjCMethod->setMetaABIVoidPointerParam( true);
+
+        // @mulle-objc@ MetaABI shadow: create void* _param for voidptr-packed >
+        // Create _param as void* so backend sees void*->void* (no reg conflict).
+        // The true param value is unpacked from _param in ActOnStartOfObjCMethodDef.
+        ImplicitParamDecl *ParamDecl = ImplicitParamDecl::Create( Context,
+                                                                   ObjCMethod,
+                                                                   MethodLoc,
+                                                                   &Context.Idents.get("_param"),
+                                                                   Context.VoidPtrTy,
+                                                                   ImplicitParamKind::Other);
+        ObjCMethod->setParamDecl( ParamDecl);
+        // @mulle-objc@ MetaABI shadow: create void* _param for voidptr-packed <
+     }
+     else
+        if( desc)
+           SetMulleObjCParam( ObjCMethod, Sel, &Params, resultDeclType, desc, MethodLoc);
+  }
+  // DONE
+  // @mulle-objc@ MetaABI: create ParamRecord <
   ObjCMethod->setObjCDeclQualifier(
     CvtQTToAstBitMask(ReturnQT.getObjCDeclQualifier()));
 
@@ -4871,6 +6136,22 @@ Decl *SemaObjC::ActOnMethodDeclaration(
     // made visible yet, so it can be overridden by a later
     // user-specified implementation.
     for (ObjCPropertyImplDecl *PropertyImpl : ImpDecl->property_impls()) {
+      // @mulle-objc container adder/setter >
+      if (auto *Remover = PropertyImpl->getRemoverMethodDecl())
+        if (Remover->getSelector() == Sel &&
+            Remover->isInstanceMethod() == ObjCMethod->isInstanceMethod()) {
+          assert(Remover->isSynthesizedAccessorStub() && "autosynth stub expected");
+          PropertyImpl->setRemoverMethodDecl(ObjCMethod);
+          break;
+        }
+      if (auto *Adder = PropertyImpl->getAdderMethodDecl())
+        if (Adder->getSelector() == Sel &&
+            Adder->isInstanceMethod() == ObjCMethod->isInstanceMethod()) {
+          assert(Adder->isSynthesizedAccessorStub() && "autosynth stub expected");
+          PropertyImpl->setAdderMethodDecl(ObjCMethod);
+          break;
+        }
+      // @mulle-objc container adder/setter >
       if (auto *Setter = PropertyImpl->getSetterMethodDecl())
         if (Setter->getSelector() == Sel &&
             Setter->isInstanceMethod() == ObjCMethod->isInstanceMethod()) {
@@ -5092,6 +6373,102 @@ Decl *SemaObjC::ActOnMethodDeclaration(
 
   return ObjCMethod;
 }
+
+// @mulle-objc@ @signature >
+// ActOnMethodDeclarationForSignature - Create a temporary ObjCMethodDecl for
+// @signature prototype parsing.  Identical to ActOnMethodDeclaration but does
+// not require an ObjC container context and does not register the method
+// anywhere — it exists only long enough to compute the type encoding.
+ObjCMethodDecl *SemaObjC::ActOnMethodDeclarationForSignature(
+    Scope *S, SourceLocation MethodLoc, SourceLocation EndLoc,
+    tok::TokenKind MethodType, ObjCDeclSpec &ReturnQT, ParsedType ReturnType,
+    ArrayRef<SourceLocation> SelectorLocs, Selector Sel,
+    ParmVarDecl **ArgInfo, DeclaratorChunk::ParamInfo *CParamInfo,
+    unsigned CNumArgs, const ParsedAttributesView &AttrList, bool isVariadic) {
+  ASTContext &Context = getASTContext();
+
+  QualType resultDeclType;
+  bool HasRelatedResultType = false;
+  TypeSourceInfo *ReturnTInfo = nullptr;
+  if (ReturnType) {
+    resultDeclType = SemaRef.GetTypeFromParser(ReturnType, &ReturnTInfo);
+    if (SemaRef.CheckFunctionReturnType(resultDeclType, MethodLoc))
+      return nullptr;
+    QualType bareResultType = resultDeclType;
+    (void)AttributedType::stripOuterNullability(bareResultType);
+    HasRelatedResultType = (bareResultType == Context.getObjCInstanceType());
+  } else {
+    // Default to void for @signature (no warning — prototype form always
+    // specifies the return type explicitly; silently default otherwise).
+    resultDeclType = Context.VoidTy;
+  }
+
+  // Use TranslationUnitDecl as DC — the method is not added to any container.
+  DeclContext *DC = Context.getTranslationUnitDecl();
+
+  ObjCMethodDecl *ObjCMethod = ObjCMethodDecl::Create(
+      Context, MethodLoc, EndLoc, Sel, resultDeclType, ReturnTInfo,
+      DC, MethodType == tok::minus, isVariadic,
+      /*isPropertyAccessor=*/false, /*isSynthesizedAccessorStub=*/false,
+      /*isImplicitlyDeclared=*/false, /*isDefined=*/false,
+      ObjCImplementationControl::Required, HasRelatedResultType);
+
+  SmallVector<ParmVarDecl *, 16> Params;
+  for (unsigned I = 0; I < Sel.getNumArgs(); ++I) {
+    ParmVarDecl *Param = ArgInfo[I];
+    Param->setDeclContext(ObjCMethod);
+    Params.push_back(Param);
+  }
+
+  for (unsigned i = 0, e = CNumArgs; i != e; ++i) {
+    ParmVarDecl *Param = cast<ParmVarDecl>(CParamInfo[i].Param);
+    QualType ArgType = Param->getType();
+    if (ArgType.isNull())
+      ArgType = Context.getObjCIdType();
+    else
+      ArgType = Context.getAdjustedParameterType(ArgType);
+    Param->setDeclContext(ObjCMethod);
+    Params.push_back(Param);
+  }
+
+  ObjCMethod->setMethodParams(Context, Params, SelectorLocs);
+
+  // MetaABI: set up param record so getObjCEncodingForMethodDecl produces
+  // the correct encoding (same logic as ActOnMethodDeclaration).
+  if (getLangOpts().ObjCRuntime.hasMulleMetaABI()) {
+    unsigned int desc = metaABIDescription(Params, resultDeclType);
+    if (isVariadic)
+      desc |= MetaABIParamAsStruct;
+
+    if (desc == MetaABIVoidPtrParam) {
+      ParmVarDecl *Param = Params[0];
+      S->AddDecl(Param);
+      const IdentifierInfo *II = Param->getIdentifier();
+      if (II != nullptr)
+        SemaRef.IdResolver.AddDecl(Param);
+      ObjCMethod->setMetaABIVoidPointerParam(true);
+
+      ImplicitParamDecl *ParamDecl = ImplicitParamDecl::Create(
+          Context, ObjCMethod, MethodLoc,
+          &Context.Idents.get("_param"), Context.VoidPtrTy,
+          ImplicitParamKind::Other);
+      ObjCMethod->setParamDecl(ParamDecl);
+    } else if (desc) {
+      SetMulleObjCParam(ObjCMethod, Sel, &Params, resultDeclType, desc,
+                        MethodLoc);
+    }
+  }
+
+  ObjCMethod->setObjCDeclQualifier(
+      CvtQTToAstBitMask(ReturnQT.getObjCDeclQualifier()));
+
+  // Insert the implicit self and _cmd parameters so the encoding includes
+  // the correct total frame size.
+  ObjCMethod->createImplicitParams(Context, /*ClassDecl=*/nullptr);
+
+  return ObjCMethod;
+}
+// @mulle-objc@ @signature <
 
 bool SemaObjC::CheckObjCDeclScope(Decl *D) {
   // Following is also an error. But it is caused by a missing @end

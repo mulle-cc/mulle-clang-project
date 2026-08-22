@@ -15,6 +15,7 @@
 #include "clang/Frontend/MultiplexConsumer.h"
 #include "clang/AST/ASTMutationListener.h"
 #include "clang/AST/DeclGroup.h"
+#include "clang/Parse/Parser.h"
 
 using namespace clang;
 
@@ -390,6 +391,13 @@ void MultiplexConsumer::HandleVTable(CXXRecordDecl *RD) {
   for (auto &Consumer : Consumers)
     Consumer->HandleVTable(RD);
 }
+
+// @mulle-objc@ compiler: forward ParserDidFinish to all sub-consumers >
+void MultiplexConsumer::ParserDidFinish(Parser *P) {
+  for (auto &Consumer : Consumers)
+    Consumer->ParserDidFinish(P);
+}
+// @mulle-objc@ compiler: forward ParserDidFinish to all sub-consumers <
 
 ASTMutationListener *MultiplexConsumer::GetASTMutationListener() {
   return MutationListener.get();

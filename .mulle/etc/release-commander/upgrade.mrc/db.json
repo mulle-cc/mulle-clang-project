@@ -1,0 +1,73 @@
+{
+    "files": [
+        {
+            "title": "Determine upgrade target version",
+            "filename": "i-determine_target-0001.md",
+            "scriptFilename": "s-determine_target-0001.sh",
+            "uuid": "00000001-0000-4000-0000-000000000001",
+            "principalTool": "",
+            "status": "done",
+            "skillLevel": "Low"
+        },
+        {
+            "title": "Run migrate-to-next-release (one major step)",
+            "filename": "i-run_migrate-0002.md",
+            "scriptFilename": "s-run_migrate-0002.sh",
+            "uuid": "00000001-0000-4000-0000-000000000002",
+            "principalTool": "",
+            "status": "todo",
+            "skillLevel": "Medium"
+        },
+        {
+            "title": "Resolve cherry-pick conflicts and verify @mulle- markers",
+            "filename": "i-resolve_conflicts-0003.md",
+            "scriptFilename": "s-resolve_conflicts-0003.sh",
+            "uuid": "00000001-0000-4000-0000-000000000003",
+            "principalTool": "",
+            "status": "todo",
+            "skillLevel": "High"
+        },
+        {
+            "title": "Update outer repo version strings",
+            "filename": "i-update_outer_repo-0004.md",
+            "scriptFilename": "s-update_outer_repo-0004.sh",
+            "uuid": "00000001-0000-4000-0000-000000000004",
+            "principalTool": "",
+            "status": "todo",
+            "skillLevel": "Low"
+        },
+        {
+            "title": "Update README.md with new version and features",
+            "filename": "i-update_readme-0004b.md",
+            "scriptFilename": "s-update_readme-0004b.sh",
+            "uuid": "00000001-0000-4000-0000-00000000004b",
+            "principalTool": "",
+            "status": "todo",
+            "skillLevel": "Medium"
+        },
+        {
+            "title": "Build and test",
+            "filename": "i-build_and_test-0005.md",
+            "scriptFilename": "s-build_and_test-0005.sh",
+            "uuid": "00000001-0000-4000-0000-000000000005",
+            "principalTool": "",
+            "status": "todo",
+            "skillLevel": "Low"
+        },
+        {
+            "title": "Iterate if target major > current+1",
+            "filename": "i-iterate-0006.md",
+            "scriptFilename": "s-iterate-0006.sh",
+            "uuid": "00000001-0000-4000-0000-000000000006",
+            "principalTool": "",
+            "status": "todo",
+            "skillLevel": "Low"
+        }
+    ],
+    "environmentVariables": {
+        "PWD": "/home/src/srcL/mulle-clang-22.1.2/mulle-clang-project",
+        "MULLE_CLANG_DIR": "/home/src/srcL/mulle-clang-22.1.2",
+        "MULLE_OBJC_RUNTIME_DIR": "/home/src/srcO/mulle-objc/mulle-objc-runtime",
+        "MULLE_REWRITER_TEST_DIR": "/home/src/srcO/mulle-cc/test-objc-rewriter"
+    }
+}

@@ -428,6 +428,12 @@ ExprDependence clang::computeDependence(ObjCEncodeExpr *E) {
   return toExprDependenceAsWritten(E->getEncodedType()->getDependence());
 }
 
+// @mulle-objc@ @signature >
+ExprDependence clang::computeDependence(ObjCSignatureExpr *E) {
+  return ExprDependence::None;
+}
+// @mulle-objc@ @signature <
+
 ExprDependence clang::computeDependence(ObjCIvarRefExpr *E) {
   return turnTypeToValueDependence(E->getBase()->getDependence());
 }

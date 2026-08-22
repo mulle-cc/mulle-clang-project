@@ -62,6 +62,12 @@ protected:
                                                  StringRef InFile) override;
 };
 
+class RewriteMulleObjCAction : public ASTFrontendAction {
+protected:
+  std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI,
+                                                 StringRef InFile) override;
+};
+
 class RewriteMacrosAction : public PreprocessorFrontendAction {
 protected:
   void ExecuteAction() override;

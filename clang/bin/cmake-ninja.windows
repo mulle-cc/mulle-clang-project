@@ -1,0 +1,104 @@
+#! /bin/sh
+
+# It's assumed that the mono repo is unpacked in the current directory as
+# mulle-clang-project. Lets build it in 'build'.
+#
+# If you are in a docker container or VM or otherwise a fresh install use
+# mulle-clang-project/clang/bin/install-prerequisites
+#
+# MEMO: If you can't use ninja copy this file and make it cmake-make or so.
+
+PREFIX="${PREFIX:-${HOME}}"
+# VERSION / RC are passed in via mulle-clang-cpack
+VERSION="${VERSION:-22.1.2.7}"
+INSTALL_PREFIX="${PREFIX}/mulle-clang-project/${VERSION}${RC}"
+
+# @mulle-objc@ extract mulle-clang patch version (4th component) for clang version suffix >
+MULLE_PATCH="${VERSION##*.}"
+CLANG_VERSION_SUFFIX=".${MULLE_PATCH:-0}"
+# @mulle-objc@ extract mulle-clang patch version (4th component) for clang version suffix <
+
+if [ ! -d "${INSTALL_PREFIX}" ]
+then
+   mkdir -p "${INSTALL_PREFIX}" || exit 1
+fi
+if [ "${CMAKE_BUILD_TYPE:-Release}" != 'Release' ]
+then
+   ASSERTIONS="${ASSERTIONS:-ON}"
+fi
+
+[ ! -d build ] && mkdir build
+
+# compiler_rt no compiley on windows
+cd build &&
+cmake.exe \
+   -DLLVM_BUILD_LLVM_DYLIB=OFF \
+   -DLLVM_BUILD_TESTS="OFF"  \
+   -DLLVM_ENABLE_ASSERTIONS="${ASSERTIONS:-OFF}" \
+   -DLLVM_ENABLE_PROJECTS="clang;clang-tools-extra" \
+   -DLLVM_ENABLE_RUNTIMES=""  \
+   -DLLVM_PARALLEL_LINK_JOBS=2 \
+   -DLLVM_TARGETS_TO_BUILD="X86;ARM;AArch64" \
+\
+   -DCLANG_VENDOR='mulle' \
+   -DCLANG_VERSION_SUFFIX="${CLANG_VERSION_SUFFIX}" \
+\
+   -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE:-Release}" \
+   -DCMAKE_INSTALL_MESSAGE='LAZY' \
+   -DCMAKE_INSTALL_PREFIX="`wslpath -w "${INSTALL_PREFIX}" `"  \
+\
+   -Thost=x64 \
+   -G Ninja \
+   ${CMAKEFLAGS} \
+   ../mulle-clang-project/llvm &&
+ninja.exe ${NINJAFLAGS} "$@"  &&
+echo "===> Installing into ${INSTALL_PREFIX} ..." >&2 &&
+echo "     (may require a password for sudo)" >&2 &&
+${INSTALL_SUDO} cmake --install .  &&
+(
+   ${INSTALL_SUDO} cd "${INSTALL_PREFIX}/bin" || exit 1
+
+   # remove possible older mulle-stuff from previous build
+   ${INSTALL_SUDO} rm mulle-* 2> /dev/null
+
+   # rename stuff we need to mulle
+   ${INSTALL_SUDO} mv llvm-nm.exe mulle-nm.exe &&
+
+   # rename stuff we need to mulle
+   ${INSTALL_SUDO} mv llvm-cov.exe mulle-cov.exe &&
+
+   for i in scan-build* clang-cl.exe
+   do
+      ${INSTALL_SUDO} mv "$i" mulle-"$i"
+   done &&
+
+   # junk rest
+   for i in *
+   do
+      case "$i" in
+         *.dll|mulle-*)
+         ;;
+
+         *)
+            ${INSTALL_SUDO} rm "$i" || exit 1
+         ;;
+      esac
+   done
+) &&
+(
+   # pass in INSTALL_SUDO via env if needed
+   #
+   # remove more stuff we don't need for the compiler and scanbuild
+   # to keep the compiler package down
+   #
+   ${INSTALL_SUDO} rm -f "${INSTALL_PREFIX}"/lib/libLLVM*.a
+   ${INSTALL_SUDO} rm -f "${INSTALL_PREFIX}"/lib/libc++*
+   ${INSTALL_SUDO} rm -f "${INSTALL_PREFIX}"/lib/libclang*.a
+   ${INSTALL_SUDO} rm -f "${INSTALL_PREFIX}"/lib/libclang.*
+   ${INSTALL_SUDO} rm -f "${INSTALL_PREFIX}"/lib/libRemarks.so
+   ${INSTALL_SUDO} rm -f "${INSTALL_PREFIX}"/lib/libLTO.so*
+   ${INSTALL_SUDO} rm -f "${INSTALL_PREFIX}"/lib/libRemarks.so*
+   ${INSTALL_SUDO} rm -rf "${INSTALL_PREFIX}"/include/
+) &&
+echo "===> Updating ${PREFIX}/mulle-clang-project/latest symlink ..." >&2 &&
+${INSTALL_SUDO} ln -sfn "${VERSION}${RC}" "${PREFIX}/mulle-clang-project/latest"

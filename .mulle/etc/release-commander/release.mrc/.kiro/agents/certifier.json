@@ -1,0 +1,23 @@
+{
+  "name": "certifier",
+  "description": "MRC task certifier — independent adversarial log reviewer.",
+  "prompt": "file://certifier.md",
+  "tools": [
+    "read",
+    "glob",
+    "grep",
+    "shell"
+  ],
+  "toolAliases": {},
+  "allowedTools": [
+    "@builtin"
+  ],
+  "resources": [
+    "file://.kiro/steering/**/*.md",
+    "skill://.kiro/skills/**/SKILL.md"
+  ],
+  "hooks": {},
+  "toolsSettings": {},
+  "useLegacyMcpJson": false,
+  "model": "claude-sonnet-4.6"
+}

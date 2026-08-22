@@ -100,6 +100,7 @@ CreateFrontendBaseAction(CompilerInstance &CI) {
       return std::make_unique<cir::EmitObjAction>();
 #endif
     return std::make_unique<EmitObjAction>();
+  case EmitNH:                 return std::make_unique<MulleNHEmitAction>();
   case ExtractAPI:
     return std::make_unique<ExtractAPIAction>();
   case FixIt:                  return std::make_unique<FixItAction>();
@@ -155,6 +156,9 @@ CreateFrontendBaseAction(CompilerInstance &CI) {
 #else
   case RewriteObjC:            Action = "RewriteObjC"; break;
 #endif
+  // @mulle-objc@ --mulle-objc-emit-c action >
+  case RewriteMulleObjC:       return std::make_unique<RewriteMulleObjCAction>();
+  // @mulle-objc@ --mulle-objc-emit-c action <
 #if CLANG_ENABLE_STATIC_ANALYZER
   case RunAnalysis:            return std::make_unique<ento::AnalysisAction>();
 #else

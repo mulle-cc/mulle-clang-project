@@ -202,6 +202,10 @@ static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
   case Expr::ObjCDictionaryLiteralClass:
   case Expr::ObjCBoolLiteralExprClass:
   case Expr::ObjCAvailabilityCheckExprClass:
+  // @mulle-objc@ @signature >
+  case Expr::ObjCSignatureExprClass:
+  case Expr::ObjCInvocationExprClass:
+  // @mulle-objc@ @signature <
   case Expr::ParenListExprClass:
   case Expr::SizeOfPackExprClass:
   case Expr::SubstNonTypeTemplateParmPackExprClass:

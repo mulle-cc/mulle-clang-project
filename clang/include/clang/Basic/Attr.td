@@ -2694,6 +2694,20 @@ def NoReturn : InheritableAttr {
   let Documentation = [Undocumented];
 }
 
+// @mulle-objc@ mulle_confined_loop attribute >
+def MulleConfinedLoop : StmtAttr {
+  let Spellings = [GNU<"mulle_confined_loop">];
+  let Documentation = [Undocumented];
+}
+// @mulle-objc@ mulle_confined_loop attribute <
+
+// @mulle-objc@ mulle_confined_return attribute >
+def MulleConfinedReturn : StmtAttr {
+  let Spellings = [GNU<"mulle_confined_return">];
+  let Documentation = [Undocumented];
+}
+// @mulle-objc@ mulle_confined_return attribute <
+
 def NoInstrumentFunction : InheritableAttr {
   let Spellings = [GCC<"no_instrument_function">];
   let Subjects = SubjectList<[Function, ObjCMethod]>;

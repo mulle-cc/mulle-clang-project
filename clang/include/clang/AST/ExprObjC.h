@@ -448,6 +448,217 @@ public:
   }
 };
 
+// @mulle-objc@ @signature >
+/// ObjCSignatureExpr, used for \@signature in mulle-objc.
+/// Produces a static NSMethodSignature* instance for a given selector.
+/// The type encoding is resolved at compile time via selector lookup.
+class ObjCSignatureExpr : public Expr {
+  // Pre-computed ObjC type encoding string (allocated in ASTContext).
+  // Format: same as getObjCEncodingForMethodDecl (e.g. "v16@0:8").
+  const char *TypeEncoding;
+  // Method descriptor bits (e.g. _mulle_objc_method_variadic = 0x08).
+  uint32_t Bits;
+  // Number of type info entries: 3 + param_count (rval + self + cmd + params).
+  uint16_t Count;
+  SourceLocation AtLoc, RParenLoc;
+
+public:
+  ObjCSignatureExpr(QualType T, const char *Enc, uint32_t Bits, uint16_t Count,
+                    SourceLocation AtLoc, SourceLocation RParenLoc)
+      : Expr(ObjCSignatureExprClass, T, VK_PRValue, OK_Ordinary),
+        TypeEncoding(Enc), Bits(Bits), Count(Count),
+        AtLoc(AtLoc), RParenLoc(RParenLoc) {
+    setDependence(ExprDependence::None);
+  }
+
+  explicit ObjCSignatureExpr(EmptyShell Empty)
+      : Expr(ObjCSignatureExprClass, Empty), TypeEncoding(nullptr),
+        Bits(0), Count(0) {}
+
+  StringRef getTypeEncoding() const {
+    return TypeEncoding ? TypeEncoding : "";
+  }
+  void setTypeEncoding(const char *E) { TypeEncoding = E; }
+
+  uint32_t getBits() const { return Bits; }
+  void setBits(uint32_t B) { Bits = B; }
+
+  uint16_t getCount() const { return Count; }
+  void setCount(uint16_t C) { Count = C; }
+
+  SourceLocation getAtLoc() const { return AtLoc; }
+  void setAtLoc(SourceLocation L) { AtLoc = L; }
+  SourceLocation getRParenLoc() const { return RParenLoc; }
+  void setRParenLoc(SourceLocation L) { RParenLoc = L; }
+
+  SourceLocation getBeginLoc() const LLVM_READONLY { return AtLoc; }
+  SourceLocation getEndLoc() const LLVM_READONLY { return RParenLoc; }
+
+  child_range children() {
+    return child_range(child_iterator(), child_iterator());
+  }
+
+  const_child_range children() const {
+    return const_child_range(const_child_iterator(), const_child_iterator());
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == ObjCSignatureExprClass;
+  }
+};
+// @mulle-objc@ @signature <
+
+// @mulle-objc@ @invocation >
+/// ObjCInvocationExpr, used for \@invocation(...) in mulle-objc.
+/// Produces an NSInvocation* for a call, filling target/selector/frame at
+/// compile time from a pre-computed @signature static instance.
+///
+/// SubExprs layout: [0] = target, [1..NumArgs] = positional arguments.
+/// NumArgs = Count - 3  (Count covers rval + self + cmd + params).
+class ObjCInvocationExpr : public Expr {
+  // Pre-computed ObjC type encoding (allocated in ASTContext).
+  const char *TypeEncoding;
+  // Method descriptor bits (same as ObjCSignatureExpr::Bits).
+  uint32_t Bits;
+  // Number of type info entries: 3 + param_count.
+  uint16_t Count;
+  // Number of positional argument expressions (= Count - 3).
+  unsigned NumArgs;
+  // The method selector.
+  Selector SelName;
+  // The resolved method declaration (for ParamRecord / MetaABI frame).
+  ObjCMethodDecl *Method;
+  // Optional IMP expression for @invocation(...) = IMP form.
+  // Null unless the = IMP suffix was present.
+  Expr *ImpExpr;
+  // SubExprs[0] = target, SubExprs[1..NumArgs] = positional args.
+  // explicit form: SubExprs[0]=target, [1]=selExpr, [2]=sigExpr, [3..]=args.
+  Stmt **SubExprs;
+  SourceLocation AtLoc, RParenLoc;
+  // true = explicit form explicit form: SubExprs=[target, selExpr, sigExpr, arg...]
+  bool IsExplicit;
+  // Total number of SubExprs slots: compile=NumArgs+1, runtime=NumArgs+3.
+  unsigned TotalSubExprs;
+
+  // Used by Create and CreateEmpty; SubExprs allocated in trailing storage.
+  ObjCInvocationExpr(EmptyShell Empty, unsigned numArgs)
+      : Expr(ObjCInvocationExprClass, Empty), TypeEncoding(nullptr),
+        Bits(0), Count(0), NumArgs(numArgs), Method(nullptr),
+        ImpExpr(nullptr), SubExprs(nullptr), IsExplicit(false), TotalSubExprs(0) {}
+
+  friend class ASTStmtReader;
+
+public:
+  static ObjCInvocationExpr *Create(const ASTContext &C, QualType T,
+                                    const char *Enc, uint32_t Bits,
+                                    uint16_t Count, Selector Sel,
+                                    ObjCMethodDecl *MD,
+                                    ArrayRef<Expr *> Args,
+                                    SourceLocation AtLoc,
+                                    SourceLocation RParenLoc);
+
+  // explicit form (explicit form): target + selExpr + sigExpr + args.
+  static ObjCInvocationExpr *CreateExplicit(const ASTContext &C, QualType T,
+                                           Expr *Target, Expr *SelExpr,
+                                           Expr *SigExpr,
+                                           ArrayRef<Expr *> Args,
+                                           SourceLocation AtLoc,
+                                           SourceLocation RParenLoc);
+
+  // For deserialization: allocates space for numArgs+1 SubExprs (compile form).
+  static ObjCInvocationExpr *CreateEmpty(const ASTContext &C,
+                                         unsigned numArgs);
+
+  // For deserialization: allocates space for numArgs+3 SubExprs (explicit form).
+  static ObjCInvocationExpr *CreateEmptyExplicit(const ASTContext &C,
+                                                unsigned numArgs);
+
+  StringRef getTypeEncoding() const {
+    return TypeEncoding ? TypeEncoding : "";
+  }
+  void setTypeEncoding(const char *E) { TypeEncoding = E; }
+
+  uint32_t getBits() const { return Bits; }
+  void setBits(uint32_t B) { Bits = B; }
+
+  uint16_t getCount() const { return Count; }
+  void setCount(uint16_t C) { Count = C; }
+
+  unsigned getNumArgs() const { return NumArgs; }
+
+  Selector getSelector() const { return SelName; }
+  void setSelector(Selector S) { SelName = S; }
+
+  ObjCMethodDecl *getMethodDecl() const { return Method; }
+  void setMethodDecl(ObjCMethodDecl *MD) { Method = MD; }
+
+  // Optional IMP expression (@invocation(...) = IMP form).
+  Expr *getImpExpr() const { return ImpExpr; }
+  void setImpExpr(Expr *E) { ImpExpr = E; }
+
+  bool isExplicit() const { return IsExplicit; }
+
+  // SubExprs[0] is the target expression.
+  Expr *getTarget() { return cast<Expr>(SubExprs[0]); }
+  const Expr *getTarget() const { return cast<Expr>(SubExprs[0]); }
+  void setTarget(Expr *E) { SubExprs[0] = E; }
+
+  // SubExprs[1] is the selector expression (explicit form only).
+  Expr *getSelExpr() {
+    assert(IsExplicit && "getSelExpr only valid for explicit form");
+    return cast<Expr>(SubExprs[1]);
+  }
+  const Expr *getSelExpr() const {
+    assert(IsExplicit && "getSelExpr only valid for explicit form");
+    return cast<Expr>(SubExprs[1]);
+  }
+
+  // SubExprs[2] is the signature expression (explicit form only).
+  Expr *getSigExpr() {
+    assert(IsExplicit && "getSigExpr only valid for explicit form");
+    return cast<Expr>(SubExprs[2]);
+  }
+  const Expr *getSigExpr() const {
+    assert(IsExplicit && "getSigExpr only valid for explicit form");
+    return cast<Expr>(SubExprs[2]);
+  }
+
+  // Positional arguments: SubExprs[Idx+1] (compile) or SubExprs[Idx+3] (runtime).
+  Expr *getArg(unsigned Idx) {
+    assert(Idx < NumArgs && "Arg index out of range");
+    return cast<Expr>(SubExprs[Idx + (IsExplicit ? 3u : 1u)]);
+  }
+  const Expr *getArg(unsigned Idx) const {
+    assert(Idx < NumArgs && "Arg index out of range");
+    return cast<Expr>(SubExprs[Idx + (IsExplicit ? 3u : 1u)]);
+  }
+  void setArg(unsigned Idx, Expr *E) {
+    assert(Idx < NumArgs && "Arg index out of range");
+    SubExprs[Idx + (IsExplicit ? 3u : 1u)] = E;
+  }
+
+  SourceLocation getAtLoc() const { return AtLoc; }
+  void setAtLoc(SourceLocation L) { AtLoc = L; }
+  SourceLocation getRParenLoc() const { return RParenLoc; }
+  void setRParenLoc(SourceLocation L) { RParenLoc = L; }
+
+  SourceLocation getBeginLoc() const LLVM_READONLY { return AtLoc; }
+  SourceLocation getEndLoc() const LLVM_READONLY { return RParenLoc; }
+
+  child_range children() {
+    return child_range(&SubExprs[0], &SubExprs[TotalSubExprs]);
+  }
+
+  const_child_range children() const {
+    return const_child_range(&SubExprs[0], &SubExprs[TotalSubExprs]);
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == ObjCInvocationExprClass;
+  }
+};
+// @mulle-objc@ @invocation <
+
 /// ObjCSelectorExpr used for \@selector in Objective-C.
 class ObjCSelectorExpr : public Expr {
   Selector SelName;

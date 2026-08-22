@@ -2449,6 +2449,24 @@ void StmtProfiler::VisitObjCEncodeExpr(const ObjCEncodeExpr *S) {
   VisitType(S->getEncodedType());
 }
 
+// @mulle-objc@ @signature >
+void StmtProfiler::VisitObjCSignatureExpr(const ObjCSignatureExpr *S) {
+  VisitExpr(S);
+  ID.AddString(S->getTypeEncoding());
+}
+// @mulle-objc@ @signature <
+
+// @mulle-objc@ @invocation >
+void StmtProfiler::VisitObjCInvocationExpr(const ObjCInvocationExpr *S) {
+  VisitExpr(S);
+  VisitName(S->getSelector());
+  ID.AddString(S->getTypeEncoding());
+  ID.AddBoolean(S->getImpExpr() != nullptr);
+  if (S->getImpExpr())
+    Visit(S->getImpExpr());
+}
+// @mulle-objc@ @invocation <
+
 void StmtProfiler::VisitObjCSelectorExpr(const ObjCSelectorExpr *S) {
   VisitExpr(S);
   VisitName(S->getSelector());

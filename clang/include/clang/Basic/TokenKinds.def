@@ -485,6 +485,15 @@ KEYWORD(__FUNCTION__                , KEYALL)
 KEYWORD(__PRETTY_FUNCTION__         , KEYALL)
 KEYWORD(__auto_type                 , KEYALL)
 
+// @mulle-objc@ > add __OBJC_CLASS__ keyword
+// Mulle Extensions it's KEYALL coz I am too lazy to research how to turn
+// on KEYMULLE by default
+KEYWORD(__OBJC_CLASS__              , KEYALL)
+KEYWORD(__OBJC_CATEGORY__           , KEYALL)
+KEYWORD(__MULLE_OBJC_CLASSID__      , KEYALL)
+KEYWORD(__MULLE_OBJC_CATEGORYID__   , KEYALL)
+// @mulle-objc@ < add __OBJC_CLASS__ keyword
+
 // MS Extensions
 KEYWORD(__FUNCDNAME__               , KEYMS)
 KEYWORD(__FUNCSIG__                 , KEYMS)
@@ -854,6 +863,26 @@ OBJC_AT_KEYWORD(synthesize)
 OBJC_AT_KEYWORD(dynamic)
 OBJC_AT_KEYWORD(import)
 OBJC_AT_KEYWORD(available)
+
+// @mulle-objc@ mixin keywords >
+OBJC_AT_KEYWORD(mixin)                    // mixin forward declaration or definition
+// @mulle-objc@ mixin keywords <
+
+// @mulle-objc@ method_implementation keyword >
+OBJC_AT_KEYWORD(method_implementation)
+// @mulle-objc@ method_implementation keyword <
+
+// @mulle-objc@ dependency keyword >
+OBJC_AT_KEYWORD(dependency)
+// @mulle-objc@ dependency keyword <
+
+// @mulle-objc@ signature keyword >
+OBJC_AT_KEYWORD(signature)
+// @mulle-objc@ signature keyword <
+
+// @mulle-objc@ invocation keyword >
+OBJC_AT_KEYWORD(invocation)
+// @mulle-objc@ invocation keyword <
 
 //===----------------------------------------------------------------------===//
 // Notable identifiers.

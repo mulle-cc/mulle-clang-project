@@ -463,6 +463,13 @@ FrontendAction::CreateWrappedASTConsumer(CompilerInstance &CI,
 
   // Add to Consumers the main consumer, then all the plugins that go after it
   Consumers.push_back(std::move(Consumer));
+  // @mulle-objc@ --mulle-objc-emit-deps >
+  if (CI.getFrontendOpts().MulleObjCEmitDeps) {
+    extern std::unique_ptr<ASTConsumer>
+        CreateMulleObjCDepsEmitter(CompilerInstance &);
+    Consumers.push_back(CreateMulleObjCDepsEmitter(CI));
+  }
+  // @mulle-objc@ --mulle-objc-emit-deps <
   if (!AfterConsumers.empty()) {
     // If we have plugins after the main consumer, which may be the codegen
     // action, they likely will need the ASTContext, so don't clear it in the

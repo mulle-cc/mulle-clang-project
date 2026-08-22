@@ -184,6 +184,9 @@ public:
   bool VisitStringLiteral(const StringLiteral *E);
   bool VisitObjCStringLiteral(const ObjCStringLiteral *E);
   bool VisitObjCEncodeExpr(const ObjCEncodeExpr *E);
+  // @mulle-objc@ @signature >
+  bool VisitObjCSignatureExpr(const ObjCSignatureExpr *E);
+  // @mulle-objc@ @signature <
   bool VisitSYCLUniqueStableNameExpr(const SYCLUniqueStableNameExpr *E);
   bool VisitCharacterLiteral(const CharacterLiteral *E);
   bool VisitCompoundAssignOperator(const CompoundAssignOperator *E);

@@ -1,0 +1,20 @@
+{
+  "name": "executor",
+  "description": "MRC task executor — runs scripts and performs task work.",
+  "prompt": "file://executor.md",
+  "tools": [
+    "*"
+  ],
+  "toolAliases": {},
+  "allowedTools": [
+    "@builtin"
+  ],
+  "resources": [
+    "file://.kiro/steering/**/*.md",
+    "skill://.kiro/skills/**/SKILL.md"
+  ],
+  "hooks": {},
+  "toolsSettings": {},
+  "useLegacyMcpJson": false,
+  "model": "claude-sonnet-4.6"
+}

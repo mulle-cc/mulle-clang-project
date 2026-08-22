@@ -29,6 +29,12 @@ add_clang_library(clangFrontend
   LayoutOverrideSource.cpp
   LogDiagnosticPrinter.cpp
   ModuleDependencyCollector.cpp
+# @mulle-objc@ --mulle-objc-emit-deps >
+  MulleObjCDepsEmitter.cpp
+# @mulle-objc@ --mulle-objc-emit-deps <
+# @mulle-objc@ -emit-nh >
+  MulleNHEmitter.cpp
+# @mulle-objc@ -emit-nh <
   MultiplexConsumer.cpp
   PrecompiledPreamble.cpp
   PrintPreprocessedOutput.cpp

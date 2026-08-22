@@ -1737,6 +1737,10 @@ DEF_TRAVERSE_DECL(ExportDecl, {})
 DEF_TRAVERSE_DECL(ObjCPropertyImplDecl, {// FIXME: implement this
                                         })
 
+// @mulle-objc@ dependency directive >
+DEF_TRAVERSE_DECL(ObjCDependencyDecl, {})
+// @mulle-objc@ dependency directive <
+
 DEF_TRAVERSE_DECL(StaticAssertDecl, {
   TRY_TO(TraverseStmt(D->getAssertExpr()));
   TRY_TO(TraverseStmt(D->getMessage()));
@@ -2958,6 +2962,17 @@ DEF_TRAVERSE_STMT(ObjCEncodeExpr, {
   if (TypeSourceInfo *TInfo = S->getEncodedTypeSourceInfo())
     TRY_TO(TraverseTypeLoc(TInfo->getTypeLoc()));
 })
+
+// @mulle-objc@ @signature >
+DEF_TRAVERSE_STMT(ObjCSignatureExpr, {})
+// @mulle-objc@ @signature <
+
+// @mulle-objc@ @invocation >
+DEF_TRAVERSE_STMT(ObjCInvocationExpr, {
+  if (S->getImpExpr())
+    TRY_TO(TraverseStmt(S->getImpExpr()));
+})
+// @mulle-objc@ @invocation <
 
 DEF_TRAVERSE_STMT(ObjCIsaExpr, {})
 DEF_TRAVERSE_STMT(ObjCIvarRefExpr, {})

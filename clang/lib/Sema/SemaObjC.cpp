@@ -1220,6 +1220,20 @@ bool SemaObjC::CheckObjCString(Expr *Arg) {
     return true;
   }
 
+// @mulle-objc@ literal is not ASCII >
+  if (Literal->containsNonAsciiOrNull()) {
+    StringRef Str = Literal->getString();
+    const llvm::UTF8 *Start = (const llvm::UTF8 *)Str.data();
+    const llvm::UTF8 *End   = Start + Str.size();
+    if (!llvm::isLegalUTF8String(&Start, End)) {
+      Diag(Arg->getBeginLoc(), diag::err_mulle_nsstring_invalid_utf8)
+          << Arg->getSourceRange();
+      return true;
+    }
+    // Valid non-ASCII UTF-8 — tier selection (UCS-2 / UCS-4) happens in codegen.
+  }
+// @mulle-objc@ literal is not ASCII <
+
   if (Literal->containsNonAsciiOrNull()) {
     StringRef String = Literal->getString();
     unsigned NumBytes = String.size();

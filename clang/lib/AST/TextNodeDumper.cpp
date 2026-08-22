@@ -1867,6 +1867,12 @@ void TextNodeDumper::VisitObjCEncodeExpr(const ObjCEncodeExpr *Node) {
   dumpType(Node->getEncodedType());
 }
 
+// @mulle-objc@ @signature >
+void TextNodeDumper::VisitObjCSignatureExpr(const ObjCSignatureExpr *Node) {
+  OS << " \"" << Node->getTypeEncoding() << '"';
+}
+// @mulle-objc@ @signature <
+
 void TextNodeDumper::VisitObjCSelectorExpr(const ObjCSelectorExpr *Node) {
   OS << " ";
   Node->getSelector().print(OS);
@@ -3040,6 +3046,24 @@ void TextNodeDumper::VisitObjCPropertyDecl(const ObjCPropertyDecl *D) {
       OS << " strong";
     if (Attrs & ObjCPropertyAttribute::kind_unsafe_unretained)
       OS << " unsafe_unretained";
+    // @mulle-objc@ new property attributes serializable, container, dynamic >
+    if (Attrs & ObjCPropertyAttribute::kind_dynamic)
+      OS << " dynamic";
+    if (Attrs & ObjCPropertyAttribute::kind_forward)
+      OS << " forward";
+    if (Attrs & ObjCPropertyAttribute::kind_serializable)
+      OS << " serializable";
+    if (Attrs & ObjCPropertyAttribute::kind_nonserializable)
+      OS << " nonserializable";
+    if (Attrs & ObjCPropertyAttribute::kind_autorelease)
+      OS << " autorelease";
+    if (Attrs & ObjCPropertyAttribute::kind_noautorelease)
+      OS << " noautorelease";
+    if (Attrs & ObjCPropertyAttribute::kind_container)
+      OS << " container";
+    if (Attrs & ObjCPropertyAttribute::kind_observable)
+      OS << " observable";
+    // @mulle-objc@ new property attributes serializable, container, dynamic <
     if (Attrs & ObjCPropertyAttribute::kind_class)
       OS << " class";
     if (Attrs & ObjCPropertyAttribute::kind_direct)
@@ -3048,6 +3072,13 @@ void TextNodeDumper::VisitObjCPropertyDecl(const ObjCPropertyDecl *D) {
       dumpDeclRef(D->getGetterMethodDecl(), "getter");
     if (Attrs & ObjCPropertyAttribute::kind_setter)
       dumpDeclRef(D->getSetterMethodDecl(), "setter");
+
+    // @mulle-objc@ new property attributes serializable, container, dynamic >
+    if (Attrs & ObjCPropertyAttribute::kind_adder)
+      dumpDeclRef(D->getGetterMethodDecl(), "adder");
+    if (Attrs & ObjCPropertyAttribute::kind_remover)
+      dumpDeclRef(D->getSetterMethodDecl(), "remover");
+    // @mulle-objc@ new property attributes serializable, container, dynamic <
   }
 }
 

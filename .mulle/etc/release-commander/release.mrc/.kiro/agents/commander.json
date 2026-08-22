@@ -1,0 +1,31 @@
+{
+  "name": "commander",
+  "description": "MRC task commander — dispatches executor and certifier per task.",
+  "prompt": "file://commander.md",
+  "tools": [
+    "*"
+  ],
+  "toolAliases": {},
+  "allowedTools": [
+    "@builtin"
+  ],
+  "resources": [
+    "file://.kiro/steering/**/*.md",
+    "skill://.kiro/skills/**/SKILL.md"
+  ],
+  "hooks": {},
+  "toolsSettings": {
+    "subagent": {
+      "availableAgents": [
+        "executor",
+        "certifier"
+      ],
+      "trustedAgents": [
+        "executor",
+        "certifier"
+      ]
+    }
+  },
+  "useLegacyMcpJson": false,
+  "model": "claude-sonnet-4.6"
+}

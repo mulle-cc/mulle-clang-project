@@ -986,6 +986,7 @@ unsigned Decl::getIdentifierNamespaceForKind(Kind DeclKind) {
     case TopLevelStmt:
     case StaticAssert:
     case ObjCPropertyImpl:
+    case ObjCDependency: // @mulle-objc@
     case PragmaComment:
     case PragmaDetectMismatch:
     case Block:

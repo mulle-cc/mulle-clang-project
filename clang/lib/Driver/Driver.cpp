@@ -54,6 +54,7 @@
 #include "ToolChains/XCore.h"
 #include "ToolChains/ZOS.h"
 #include "clang/Basic/DiagnosticDriver.h"
+#include "clang/Basic/ObjCRuntime.h"
 #include "clang/Basic/TargetID.h"
 #include "clang/Basic/Version.h"
 #include "clang/Config/config.h"
@@ -354,6 +355,12 @@ phases::ID Driver::getFinalPhase(const DerivedArgList &DAL,
              (PhaseArg = DAL.getLastArg(options::OPT_module_file_info)) ||
              (PhaseArg = DAL.getLastArg(options::OPT_verify_pch)) ||
              (PhaseArg = DAL.getLastArg(options::OPT_rewrite_objc)) ||
+             // @mulle-objc@ --mulle-objc-emit-c action >
+             (PhaseArg = DAL.getLastArg(options::OPT_rewrite_mulle_objc)) ||
+             // @mulle-objc@ --mulle-objc-emit-c action <
+             // @mulle-objc@ -emit-nh action >
+             (PhaseArg = DAL.getLastArg(options::OPT_emit_nh)) ||
+             // @mulle-objc@ -emit-nh action <
              (PhaseArg = DAL.getLastArg(options::OPT_rewrite_legacy_objc)) ||
              (PhaseArg = DAL.getLastArg(options::OPT__analyze)) ||
              (PhaseArg = DAL.getLastArg(options::OPT_emit_cir)) ||
@@ -2328,6 +2335,10 @@ void Driver::PrintVersion(const Compilation &C, raw_ostream &OS) const {
     // know what the client would like to do.
     OS << getClangFullVersion() << '\n';
   }
+  // @mulle-objc@ print compatible runtime load version >
+  OS << "mulle-objc-runtime (load-version: "
+     << COMPATIBLE_MULLE_OBJC_RUNTIME_LOAD_VERSION << ")\n";
+  // @mulle-objc@ print compatible runtime load version <
   const ToolChain &TC = C.getDefaultToolChain();
   OS << "Target: " << TC.getTripleString() << '\n';
 
@@ -5137,8 +5148,16 @@ Action *Driver::ConstructPhaseAction(
   case phases::Compile: {
     if (Args.hasArg(options::OPT_fsyntax_only))
       return C.MakeAction<CompileJobAction>(Input, types::TY_Nothing);
+    // @mulle-objc@ -emit-nh action >
+    if (Args.hasArg(options::OPT_emit_nh))
+      return C.MakeAction<CompileJobAction>(Input, types::TY_Nothing);
+    // @mulle-objc@ -emit-nh action <
     if (Args.hasArg(options::OPT_rewrite_objc))
       return C.MakeAction<CompileJobAction>(Input, types::TY_RewrittenObjC);
+    // @mulle-objc@ --mulle-objc-emit-c action >
+    if (Args.hasArg(options::OPT_rewrite_mulle_objc))
+      return C.MakeAction<CompileJobAction>(Input, types::TY_RewrittenMulleObjC);
+    // @mulle-objc@ --mulle-objc-emit-c action <
     if (Args.hasArg(options::OPT_rewrite_legacy_objc))
       return C.MakeAction<CompileJobAction>(Input,
                                             types::TY_RewrittenLegacyObjC);
@@ -6274,6 +6293,15 @@ const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
   if (AtTopLevel && !CCGenDiagnostics && HasPreprocessOutput(JA)) {
     return "-";
   }
+
+  // @mulle-objc@ --mulle-objc-emit-c defaults to stdout like -E >
+  // --mulle-objc-emit-c (alias: -rewrite-mulle-objc) defaults to stdout
+  // when no -o is given, matching the behaviour of -E.
+  if (AtTopLevel && !CCGenDiagnostics &&
+      JA.getType() == types::TY_RewrittenMulleObjC) {
+    return "-";
+  }
+  // @mulle-objc@ --mulle-objc-emit-c defaults to stdout like -E <
 
   if (JA.getType() == types::TY_ModuleFile &&
       C.getArgs().getLastArg(options::OPT_module_file_info)) {

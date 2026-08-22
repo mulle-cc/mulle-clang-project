@@ -1472,6 +1472,9 @@ def note_direct_method_declared_at : Note<"direct method %0 declared here">;
 def note_property_attribute : Note<"property %0 is declared "
   "%select{deprecated|unavailable|partial}1 here">;
 def err_setter_type_void : Error<"type of setter must be void">;
+// @mulle-objc@ new property attribute container >
+def err_property_method_type_void : Error<"type of %0 must be void">;
+// @mulle-objc@ new property attribute container <
 def err_duplicate_method_decl : Error<"duplicate declaration of method %0">;
 def warn_duplicate_method_decl :
   Warning<"multiple declarations of method %0 found and ignored">,
@@ -1684,6 +1687,25 @@ def warn_undeclared_selector : Warning<
 def warn_undeclared_selector_with_typo : Warning<
   "undeclared selector %0; did you mean %1?">,
   InGroup<UndeclaredSelector>, DefaultIgnore;
+// @mulle-objc@ @signature >
+def err_signature_undeclared_selector : Error<
+  "@signature: undeclared selector %0">;
+def err_signature_ambiguous_selector : Error<
+  "@signature: ambiguous selector %0; use a full method prototype to disambiguate">;
+def err_signature_not_available : Error<
+  "@signature is only available with the mulle-objc runtime">;
+// @mulle-objc@ @signature <
+// @mulle-objc@ @invocation >
+def err_invocation_nil_selector : Error<
+  "@invocation: selector expression is a null constant; use a valid SEL">;
+def err_invocation_nil_target_nil_sig : Error<
+  "@invocation: target and methodSignature are both nil; signature cannot be resolved at creation time">;
+def err_objc_invocation_body_requires_typed_target : Error<
+  "@invocation { body } requires a target with a known Objective-C class type">;
+def warn_invocation_imp_signature : Warning<
+  "@invocation = IMP: function should have signature 'void *(id, SEL, void *)'">,
+  InGroup<DiagGroup<"objc-invocation-imp-signature">>;
+// @mulle-objc@ @invocation <
 def warn_implicit_atomic_property : Warning<
   "property is assumed atomic by default">, InGroup<ImplicitAtomic>, DefaultIgnore;
 def note_auto_readonly_iboutlet_fixup_suggest : Note<
@@ -8293,6 +8315,140 @@ def err_attribute_arm_mve_polymorphism : Error<
 def err_attribute_webassembly_funcref : Error<
   "'__funcref' attribute can only be applied to a function pointer type">;
 
+// @mulle-objc@ compiler: error message definitions begin >
+def error_mulle_aam_ivar_access : Error<"in AAM instance variables such as %0 are not accessible">, AccessControl;
+def err_mulle_aam_unsupported_method_family : Error<
+"in AAM method %0 can not be defined, use a non AAM category">;
+def err_mulle_aam_illegal_explicit_message : Error<
+"in AAM method %0 is not available">;
+def err_mulle_aam_illegal_retained_message : Error<
+"in AAM method %0 is not available, because it returns a retained object">;
+def err_mulle_aam_illegal_consumed_message : Error<
+"in AAM method %0 is not available, because it needs a retained argument">;
+def err_mulle_objc_runtime_function_missing : Error<
+"the mulle-objc runtime function %0 has not been declared yet">;
+def err_mulle_objc_property_synthesize_wrong_name : Error<
+"the mulle-objc runtime synthesized instance variable name must be the name of the property, prefixed by an underscore">;
+def err_mulle_objc_no_property_dot_expression : Error<
+"the mulle-objc runtime does not support . expressions with properties, use regular method calls">;
+def err_mulle_error_missing_property_ivar_decl : Error<
+  "synthesized property %0 needs a compatible"
+  " instance variable of the same name, prefixed with an underscore">;
+// these are really CodeGen errors
+def err_mulle_objc_preprocessor_not_integer_value : Error<
+  "special preprocessor directives for the mulle-objc runtime must be integers only">;
+def err_mulle_objc_preprocessor_missing_include : Error<
+  "missing #include <mulle-objc-runtime/mulle-objc-runtime.h> in compilation. Can not emit runtime information">;
+def err_mulle_objc_compiler_info_malformed : Error<
+  "JIT struct __mulle_objc_compiler_info must be a struct { unsigned int runtime_version, load_version; }">;
+def err_mulle_objc_runtime_version_mismatch: Error<
+   "the runtime load version %0 is not compatible with this compiler %1">;
+def err_mulle_objc_hash_invalid: Error<
+   "your string '%0' hashed to an invalid value. Please tweet it to @mulle_nat then reword it">;
+def err_mulle_objc_setjmp_not_included: Error<
+   "include <setjmp.h> before using Mulle ObjC exceptions">;
+def err_mulle_objc_jmpbuf_size_unknown: Error<
+   "the compiler failed to figure out sizeof( struct jmpbuf)">;
+def err_mulle_objc_universename_not_a_string: Error<
+   "the universename '%0' must be a string (in double quotes)">;
+def err_mulle_objc_universename_not_an_identifier: Error<
+   "the universename '%0' must only contain lowercase identifier characters">;
+def err_mulle_dynamic_property_synthesize  : Error<
+  "%0 is a dynamic property, that can not be synthesized">;
+def err_mulle_optional_property_not_dynamic : Error<
+  "@optional property %0 must be declared 'dynamic' or 'forward'">;
+
+// @mulle-objc@ dependency directive >
+def warn_mulle_objc_dependency_manual_method : Warning<
+  "@dependency directives ignored: +dependencies is defined manually">,
+  InGroup<ObjCProtocolMethodImpl>;
+def err_mulle_objc_dependency_in_interface : Error<
+  "@dependency is not valid inside @interface or @protocol">;
+// @mulle-objc@ dependency directive <
+
+// @mulle-objc@ compiler: error message definitions end <
+
+// @mulle-objc@ mulle_confined_loop diagnostics >
+def err_mulle_confined_loop_has_return : Error<
+  "return statement not allowed in mulle_confined_loop">;
+def err_mulle_confined_loop_has_goto_outside : Error<
+  "goto to label outside of mulle_confined_loop is not allowed">;
+def warn_mulle_confined_loop_has_indirect_goto : Warning<
+  "indirect goto in mulle_confined_loop may exit the block">,
+  InGroup<MulleConfinedLoop>;
+def warn_mulle_confined_loop_has_longjmp : Warning<
+  "longjmp in mulle_confined_loop may exit the block">,
+  InGroup<MulleConfinedLoop>;
+def warn_mulle_confined_loop_has_throw : Warning<
+  "@throw in mulle_confined_loop may exit the block">,
+  InGroup<MulleConfinedLoop>;
+// @mulle-objc@ mulle_confined_loop diagnostics <
+
+// @mulle-objc@ mulle_confined_return diagnostics >
+def err_mulle_confined_return_in_nested_loop : Error<
+  "mulle_confined_return only allowed in the outermost mulle_confined_loop, not inside a nested mulle_confined_loop">;
+// @mulle-objc@ mulle_confined_return diagnostics <
+
+// @mulle-objc@ mixin diagnostics >
+def err_mulle_mixin_conflict_class : Error<
+  "%0 was already forward-declared as a class; cannot redeclare as mixin">;
+def err_mulle_mixin_conflict_protocol : Error<
+  "%0 was already forward-declared as a protocol; cannot redeclare as mixin">;
+def err_mulle_class_conflicts_mixin : Error<
+  "%0 is a mixin; use @mixin for forward declaration">;
+def err_mulle_protocol_def_conflicts_mixin : Error<
+  "%0 is a mixin; use @mixin for definition">;
+def warn_mulle_protocol_fwd_after_mixin : Warning<
+  "%0 is a mixin; @protocol forward declaration is redundant">,
+  InGroup<MulleMixin>;
+def err_mulle_mixin_no_definition : Error<
+  "mixin %0 has no definition; add @mixin %0 ... @end before @implementation">;
+def err_mulle_subclass_of_mixin : Error<
+  "%0 cannot subclass %1 because it is a mixin">;
+// @mulle-objc@ mixin diagnostics <
+
+// @mulle-objc@ method_implementation diagnostics >
+def err_mulle_method_impl_not_in_implementation : Error<
+  "@method_implementation is only allowed inside @implementation">;
+def err_mulle_method_impl_missing_minus_plus : Error<
+  "expected '-' or '+' before selector in @method_implementation">;
+def err_mulle_method_impl_rhs_not_found : Error<
+  "%select{instance|class}0 method %1 not found in %2">;
+def err_mulle_method_impl_cfunc_not_found : Error<
+  "C function %0 not found for @method_implementation">;
+def warn_mulle_method_impl_arity_mismatch : Warning<
+  "number of arguments mismatch in @method_implementation: %0 vs %1; "
+  "runtime alias will be resolved by name at load time">,
+  InGroup<MulleMethodImplementation>;
+def err_mulle_method_impl_arity_mismatch : Error<
+  "number of arguments mismatch in @method_implementation: %0 vs %1">;
+def err_mulle_method_impl_return_type_mismatch : Error<
+  "return type mismatch in @method_implementation: %0 vs %1">;
+def err_mulle_method_impl_param_type_mismatch : Error<
+  "parameter %0 type mismatch in @method_implementation: %1 vs %2">;
+def err_mulle_method_impl_runtime_alias_in_root_class : Error<
+  "@method_implementation %0 = '%1' requires runtime alias resolution "
+  "which is not available in root classes">;
+def warn_mulle_method_impl_instance_class_mismatch : Warning<
+  "@method_implementation mixes instance and class method">,
+  InGroup<MulleMethodImplementation>;
+def warn_mulle_method_impl_lhs_not_in_interface : Warning<
+  "@method_implementation '%0' not declared in @interface">,
+  InGroup<MulleMethodImplementation>;
+def warn_mulle_method_impl_in_other_category : Warning<
+  "method %0 is already declared in category %1; "
+  "add '@dependency %2(%1)' to suppress this warning">,
+  InGroup<MulleMethodImplementation>;
+def warn_mulle_method_impl_rhs_undeclared : Warning<
+  "%select{instance|class}0 method %1 is not declared anywhere; "
+  "runtime alias will be resolved by name at load time">,
+  InGroup<MulleMethodImplementation>;
+def note_mulle_method_impl_no_category_interface : Note<
+  "no @interface %0(%1) found; check for a category name typo">;
+// @mulle-objc@ method_implementation diagnostics <
+
+// @mulle-objc@ compiler: error message definitions end2 <
+
 def warn_setter_getter_impl_required : Warning<
   "property %0 requires method %1 to be defined - "
   "use @synthesize, @dynamic or provide a method implementation "
@@ -10939,6 +11095,12 @@ def err_msvc_annotation_wide_str : Error<
 // CFString checking
 def err_cfstring_literal_not_string_constant : Error<
   "CFString literal is not a string constant">;
+// @mulle-objc@ literal is not ASCII >
+def err_mulle_nsstring_literal_not_ascii : Error<
+  "the NSString literal is not ASCII">;
+def err_mulle_nsstring_invalid_utf8 : Error<
+  "invalid UTF-8 sequence in NSString literal">;
+// @mulle-objc@ literal is not ASCII <
 def warn_cfstring_truncated : Warning<
   "input conversion stopped due to an input byte that does not "
   "belong to the input codeset UTF-8">,

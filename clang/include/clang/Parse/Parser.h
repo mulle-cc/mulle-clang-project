@@ -5583,7 +5583,11 @@ private:
   ///     @optional
   /// \endverbatim
   ///
-  void ParseObjCInterfaceDeclList(tok::ObjCKeywordKind contextKey, Decl *CDecl);
+  void ParseObjCInterfaceDeclList(tok::ObjCKeywordKind contextKey, Decl *CDecl,
+      // @mulle-objc@ mixin default optional >
+      tok::ObjCKeywordKind DefaultMethodImplKind = tok::objc_not_keyword
+      // @mulle-objc@ mixin default optional <
+      );
 
   /// \verbatim
   ///   objc-protocol-declaration:
@@ -5646,6 +5650,16 @@ private:
   /// \endverbatim
   DeclGroupPtrTy ParseObjCAtImplementationDeclaration(SourceLocation AtLoc,
                                                       ParsedAttributes &Attrs);
+  // @mulle-objc@ mixin declarations >
+  DeclGroupPtrTy ParseObjCAtMixinDeclaration(SourceLocation AtLoc,
+                                             ParsedAttributes &attrs);
+  // @mulle-objc@ mixin declarations <
+  // @mulle-objc@ method_implementation declaration >
+  Decl *ParseObjCMethodImplementation(SourceLocation AtLoc, Decl *ClassDecl);
+  // @mulle-objc@ method_implementation declaration <
+  // @mulle-objc@ dependency directive >
+  Decl *ParseObjCDependency(SourceLocation atLoc);
+  // @mulle-objc@ dependency directive <
   DeclGroupPtrTy ParseObjCAtEndDeclaration(SourceRange atEnd);
 
   /// \verbatim
@@ -5756,10 +5770,12 @@ private:
   ///     __attribute__((unused))
   /// \endverbatim
   ///
+  // @mulle-objc@ @signature >
   Decl *ParseObjCMethodDecl(
       SourceLocation mLoc, tok::TokenKind mType,
       tok::ObjCKeywordKind MethodImplKind = tok::objc_not_keyword,
-      bool MethodDefinition = true);
+      bool MethodDefinition = true, bool ForSignature = false);
+  // @mulle-objc@ @signature <
 
   ///   Parse property attribute declarations.
   ///
@@ -5842,6 +5858,21 @@ private:
   ///      \@encode ( type-name )
   /// \endverbatim
   ExprResult ParseObjCEncodeExpression(SourceLocation AtLoc);
+
+  // @mulle-objc@ @signature >
+  /// \verbatim
+  ///     objc-signature-expression
+  ///       \@signature ( objc-selector )
+  /// \endverbatim
+  ExprResult ParseObjCSignatureExpression(SourceLocation AtLoc);
+  // @mulle-objc@ @signature <
+
+  // @mulle-objc@ @invocation >
+  /// \verbatim
+  ///   @invocation ( target, method-call-args )
+  /// \endverbatim
+  ExprResult ParseObjCInvocationExpression(SourceLocation AtLoc);
+  // @mulle-objc@ @invocation <
 
   /// \verbatim
   ///     objc-selector-expression

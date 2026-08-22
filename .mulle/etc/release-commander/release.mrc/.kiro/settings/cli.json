@@ -1,0 +1,7 @@
+{
+  "chat.defaultAgent": "commander",
+  "chat.defaultModel": "claude-sonnet-4.6",
+  "chat.enableSubagent": true,
+  "chat.enableThinking": true,
+  "chat.enableNotifications": true
+}

@@ -57,6 +57,9 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+// @mulle-objc@ @signature >
+#include <cstring>
+// @mulle-objc@ @signature <
 #include <optional>
 #include <string>
 
@@ -1531,6 +1534,50 @@ void ASTStmtReader::VisitObjCEncodeExpr(ObjCEncodeExpr *E) {
   E->setAtLoc(readSourceLocation());
   E->setRParenLoc(readSourceLocation());
 }
+
+// @mulle-objc@ @signature >
+void ASTStmtReader::VisitObjCSignatureExpr(ObjCSignatureExpr *E) {
+  VisitExpr(E);
+  std::string Enc = Record.readString();
+  ASTContext &Ctx = Record.getContext();
+  char *Buf = new (Ctx) char[Enc.size() + 1];
+  std::memcpy(Buf, Enc.c_str(), Enc.size() + 1);
+  E->setTypeEncoding(Buf);
+  E->setBits((uint32_t) Record.readInt());
+  E->setCount((uint16_t) Record.readInt());
+  E->setAtLoc(readSourceLocation());
+  E->setRParenLoc(readSourceLocation());
+}
+// @mulle-objc@ @signature <
+
+// @mulle-objc@ @invocation >
+void ASTStmtReader::VisitObjCInvocationExpr(ObjCInvocationExpr *E) {
+  VisitExpr(E);
+  // NumArgs was read by the switch to call CreateEmpty/CreateEmptyExplicit,
+  // but we re-read it here to keep the record position in sync.
+  /*numArgs=*/ Record.readInt();
+  // Re-read IsExplicit (also consumed by the switch).
+  E->IsExplicit = Record.readInt() != 0;
+  std::string Enc = Record.readString();
+  ASTContext &Ctx = Record.getContext();
+  char *Buf = new (Ctx) char[Enc.size() + 1];
+  std::memcpy(Buf, Enc.c_str(), Enc.size() + 1);
+  E->setTypeEncoding(Buf);
+  E->setBits((uint32_t) Record.readInt());
+  E->setCount((uint16_t) Record.readInt());
+  E->setSelector(Record.readSelector());
+  E->setMethodDecl(cast_or_null<ObjCMethodDecl>(Record.readDecl()));
+  E->setImpExpr(cast_or_null<Expr>(Record.readSubStmt()));
+  E->setAtLoc(readSourceLocation());
+  E->setRParenLoc(readSourceLocation());
+  // Read target + (selExpr + sigExpr for explicit form) + positional args.
+  unsigned TotalExprs = E->IsExplicit ? E->getNumArgs() + 3
+                                         : E->getNumArgs() + 1;
+  E->TotalSubExprs = TotalExprs;
+  for (unsigned I = 0; I < TotalExprs; ++I)
+    E->SubExprs[I] = Record.readSubStmt();
+}
+// @mulle-objc@ @invocation <
 
 void ASTStmtReader::VisitObjCSelectorExpr(ObjCSelectorExpr *E) {
   VisitExpr(E);
@@ -3479,6 +3526,24 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
     case EXPR_OBJC_ENCODE:
       S = new (Context) ObjCEncodeExpr(Empty);
       break;
+
+    // @mulle-objc@ @signature >
+    case EXPR_OBJC_SIGNATURE_EXPR:
+      S = new (Context) ObjCSignatureExpr(Empty);
+      break;
+    // @mulle-objc@ @signature <
+
+    // @mulle-objc@ @invocation >
+    case EXPR_OBJC_INVOCATION_EXPR: {
+      unsigned NumArgs = Record[ASTStmtReader::NumExprFields];
+      bool IsRuntime = Record[ASTStmtReader::NumExprFields + 1] != 0;
+      if (IsRuntime)
+        S = ObjCInvocationExpr::CreateEmptyExplicit(Context, NumArgs);
+      else
+        S = ObjCInvocationExpr::CreateEmpty(Context, NumArgs);
+      break;
+    }
+    // @mulle-objc@ @invocation <
 
     case EXPR_OBJC_SELECTOR_EXPR:
       S = new (Context) ObjCSelectorExpr(Empty);

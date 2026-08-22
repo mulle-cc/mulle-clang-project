@@ -2827,6 +2827,30 @@ void StmtPrinter::VisitObjCEncodeExpr(ObjCEncodeExpr *Node) {
   OS << ')';
 }
 
+// @mulle-objc@ @signature >
+void StmtPrinter::VisitObjCSignatureExpr(ObjCSignatureExpr *Node) {
+  OS << "@signature(" << Node->getTypeEncoding() << ')';
+}
+// @mulle-objc@ @signature <
+
+// @mulle-objc@ @invocation >
+void StmtPrinter::VisitObjCInvocationExpr(ObjCInvocationExpr *Node) {
+  OS << "@invocation(";
+  PrintExpr(Node->getTarget());
+  OS << ", ";
+  Node->getSelector().print(OS);
+  for (unsigned I = 0, N = Node->getNumArgs(); I != N; ++I) {
+    OS << ", ";
+    PrintExpr(Node->getArg(I));
+  }
+  OS << ')';
+  if (Node->getImpExpr()) {
+    OS << " = ";
+    PrintExpr(Node->getImpExpr());
+  }
+}
+// @mulle-objc@ @invocation <
+
 void StmtPrinter::VisitObjCSelectorExpr(ObjCSelectorExpr *Node) {
   OS << "@selector(";
   Node->getSelector().print(OS);

@@ -17087,6 +17087,22 @@ TreeTransform<Derived>::TransformObjCSelectorExpr(ObjCSelectorExpr *E) {
   return E;
 }
 
+// @mulle-objc@ @signature >
+template<typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformObjCSignatureExpr(ObjCSignatureExpr *E) {
+  return E;
+}
+// @mulle-objc@ @signature <
+
+// @mulle-objc@ @invocation >
+template<typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformObjCInvocationExpr(ObjCInvocationExpr *E) {
+  return E;
+}
+// @mulle-objc@ @invocation <
+
 template<typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformObjCProtocolExpr(ObjCProtocolExpr *E) {

@@ -446,6 +446,7 @@ public:
   void VisitObjCCompatibleAliasDecl(ObjCCompatibleAliasDecl *D);
   void VisitObjCPropertyDecl(ObjCPropertyDecl *D);
   void VisitObjCPropertyImplDecl(ObjCPropertyImplDecl *D);
+  void VisitObjCDependencyDecl(ObjCDependencyDecl *D); // @mulle-objc@
   void VisitOMPThreadPrivateDecl(OMPThreadPrivateDecl *D);
   void VisitOMPAllocateDecl(OMPAllocateDecl *D);
   void VisitOMPDeclareReductionDecl(OMPDeclareReductionDecl *D);
@@ -1178,6 +1179,7 @@ void ASTDeclReader::VisitObjCMethodDecl(ObjCMethodDecl *MD) {
   MD->setVariadic(Record.readInt());
   MD->setPropertyAccessor(Record.readInt());
   MD->setSynthesizedAccessorStub(Record.readInt());
+  MD->setSynthesizedDependencies(Record.readInt());
   MD->setDefined(Record.readInt());
   MD->setOverriding(Record.readInt());
   MD->setHasSkippedBody(Record.readInt());
@@ -1497,6 +1499,10 @@ void ASTDeclReader::VisitObjCPropertyDecl(ObjCPropertyDecl *D) {
   D->setSetterName(SetterName.getObjCSelector(), SetterLoc);
   D->setGetterMethodDecl(readDeclAs<ObjCMethodDecl>());
   D->setSetterMethodDecl(readDeclAs<ObjCMethodDecl>());
+  // @mulle-objc@ Container methods >
+  D->setAdderMethodDecl(readDeclAs<ObjCMethodDecl>());
+  D->setRemoverMethodDecl(readDeclAs<ObjCMethodDecl>());
+  // @mulle-objc@ Container methods <
   D->setPropertyIvarDecl(readDeclAs<ObjCIvarDecl>());
 }
 
@@ -1531,9 +1537,35 @@ void ASTDeclReader::VisitObjCPropertyImplDecl(ObjCPropertyImplDecl *D) {
   D->IvarLoc = readSourceLocation();
   D->setGetterMethodDecl(readDeclAs<ObjCMethodDecl>());
   D->setSetterMethodDecl(readDeclAs<ObjCMethodDecl>());
+  // @mulle-objc@ Container methods >
+  D->setAdderMethodDecl(readDeclAs<ObjCMethodDecl>());
+  D->setRemoverMethodDecl(readDeclAs<ObjCMethodDecl>());
+  // @mulle-objc@ Container methods <
   D->setGetterCXXConstructor(Record.readExpr());
   D->setSetterCXXAssignment(Record.readExpr());
 }
+
+// @mulle-objc@ dependency directive >
+void ASTDeclReader::VisitObjCDependencyDecl(ObjCDependencyDecl *D) {
+  VisitDecl(D);
+  // AtLoc is not stored as a field accessor — access directly via the private
+  // member by using the Create path; here we reconstruct from the serialized
+  // locations. Store AtLoc into the field that getAtLoc() returns.
+  // Since ObjCDependencyDecl has no setAtLoc(), we reconstruct via placement:
+  // just read the values in the same order the writer stored them.
+  SourceLocation AtLoc = readSourceLocation();
+  IdentifierInfo *ClassName    = Record.readIdentifier();
+  IdentifierInfo *CategoryName = Record.readIdentifier();
+  // Re-initialize the fields. ObjCDependencyDecl is a simple struct-like
+  // node — we reach in via a helper that mirrors the constructor.
+  // The Decl base was already initialized by CreateDeserialized; patch fields.
+  // We use the same trick as ObjCPropertyImplDecl (direct field access via
+  // the friend ASTDeclReader).
+  D->ClassName    = ClassName;
+  D->CategoryName = CategoryName;
+  D->AtLoc        = AtLoc;
+}
+// @mulle-objc@ dependency directive <
 
 void ASTDeclReader::VisitFieldDecl(FieldDecl *FD) {
   VisitDeclaratorDecl(FD);
@@ -4131,6 +4163,9 @@ Decl *ASTReader::ReadDeclRecord(GlobalDeclID ID) {
     break;
   case DECL_OBJC_PROPERTY_IMPL:
     D = ObjCPropertyImplDecl::CreateDeserialized(Context, ID);
+    break;
+  case DECL_OBJC_DEPENDENCY: // @mulle-objc@
+    D = ObjCDependencyDecl::CreateDeserialized(Context, ID);
     break;
   case DECL_FIELD:
     D = FieldDecl::CreateDeserialized(Context, ID);
