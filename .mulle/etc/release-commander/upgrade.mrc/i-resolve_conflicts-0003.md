@@ -23,19 +23,36 @@ of conflicts. The working tree is in a conflicted cherry-pick state on branch
    git cherry-pick --continue
    ```
 
-4. Run the cleanup/verify step. Use `-f` if paths changed (e.g. Options.td):
+4. Run the cleanup/verify step. Use `-f` if paths changed:
    ```bash
    bash /tmp/migrate-to-next-release -f continue
    ```
    This diffs `.before-markers.txt` vs `.after-markers.txt`. Any missing
    `@mulle-` tag is printed — fix and re-run until clean.
 
-## llvm 21 → 22 conflict notes
+## Verify markers (alternate check)
 
-Conflicts encountered and how they were resolved:
+If the `.before-markers.txt` file was lost (e.g. on a tmp branch that was
+deleted), do a raw count:
+```bash
+grep -R '@mulle-' clang/include/ clang/lib/ | wc -l
+```
+
+## Same-major patch bumps
+
+Patch bumps within the same major (e.g. 22.1.2 → 22.1.8) typically produce
+**zero conflicts**. The cherry-pick auto-merges cleanly because there are no
+structural changes between minor LLVM releases.
+
+## Historical: conflicts from llvm 21 → 22
+
+These notes are kept as reference for the kinds of problems to expect during
+future major version jumps.
+
+### Cherry-pick conflicts
 
 - **ASTConsumer.h**: HEAD added `OpenACCRoutineDecl` forward decl. Keep HEAD + add our `Parser` forward decl after it.
-- **Type.h**: llvm 22 split `Type.h` into `TypeBase.h` + thin `Type.h`. Take HEAD for both conflicts (our mulle changes go into `TypeBase.h` instead — see below).
+- **Type.h**: llvm 22 split `Type.h` into `TypeBase.h` + thin `Type.h`. Take HEAD for both conflicts (mulle changes go into `TypeBase.h` instead).
 - **Type.cpp**: `isArithmeticType` — keep HEAD's range but add our `ObjCSel`/`ObjCProtocol` conditions.
 - **CGException.cpp**: HEAD added `CGOpts` param to `getObjCPersonality`. Keep HEAD's call + our `Mulle:` case.
 - **CGObjCRuntime.h**: Keep our `isSuper` param addition to `getMessageSendInfo`.
@@ -43,7 +60,7 @@ Conflicts encountered and how they were resolved:
 - **SemaDecl.cpp**: HEAD added `isRedefinitionAllowedFor`. Take HEAD (no mulle changes here).
 - **SemaExpr.cpp**: Keep our `GetMulle_paramExpr` functions, but update `PerformObjectMemberConversion` signature to HEAD's value type (`NestedNameSpecifier` not pointer).
 
-## TypeBase.h migration (Type.h split)
+### TypeBase.h migration (Type.h split)
 
 After resolving conflicts, manually apply mulle changes from old `Type.h` to new `TypeBase.h`:
 
@@ -54,7 +71,7 @@ After resolving conflicts, manually apply mulle changes from old `Type.h` to new
 5. Add `isObjCProtocolType()` declaration in `Type` class (after `isObjCSelType`)
 6. Add `isObjCProtocolType()` inline definition (after `isObjCClassType` inline)
 
-## llvm 22 API changes that cause build errors (fix in task 5)
+### LLVM 22 API changes that caused build errors
 
 - `getTagDeclType` renamed to `getTypeDeclType` — affects `CGCall.cpp`, `CGObjC.cpp`, `CGObjCMulleRuntime.cpp`
 - `getTypeDeclType(TypedefDecl*)` deleted — cast to `(TypeDecl*)` instead — affects `ASTContext.h`

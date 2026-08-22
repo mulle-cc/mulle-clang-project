@@ -1,10 +1,9 @@
-Run `migrate-to-next-release` for one major version step.
+Run `migrate-to-next-release` for one version step (major or same-major patch).
 
 ## Preparation
 
-The script `s-run_migrate-0002.sh` patches `clang/bin/migrate-to-next-release` and
-runs it. It reads the current NEW_* vars as the OLD_* values, so the script must
-be run from the correct branch with the correct vars already committed.
+Patch `clang/bin/migrate-to-next-release` with the new OLD/NEW values,
+commit, then run the migrate script.
 
 **Before running:** make sure all working tree changes in `mulle-clang-project`
 are committed — the script does a `git checkout` internally and will abort if
@@ -12,52 +11,70 @@ there are uncommitted changes.
 
 ## Steps
 
-1. Make sure you are in `mulle-clang-project` and on the current dev branch:
+1. Make sure you are on the current dev branch:
    ```bash
    cd mulle-clang-project
-   git checkout mulle/21.1.8
+   git checkout <current-dev-branch>
    ```
 
-2. Run the script with NEW_LLVM_TAG and NEW_MULLE_DEV_BRANCH from step 1:
+2. Patch `clang/bin/migrate-to-next-release` vars:
    ```bash
-   NEW_LLVM_TAG=llvmorg-22.1.2 NEW_MULLE_DEV_BRANCH=mulle/22.1.2 \
-     bash .mulle/etc/release-commander/upgrade.mrc/s-run_migrate-0002.sh
+   MIGRATE=clang/bin/migrate-to-next-release
+   sed -i \
+     -e "s|^OLD_LLVM_TAG=.*|OLD_LLVM_TAG=\"<old-llvm-tag>\"|" \
+     -e "s|^OLD_MULLE_DEV_BRANCH=.*|OLD_MULLE_DEV_BRANCH=\"<old-dev-branch>\"|" \
+     -e "s|^NEW_LLVM_TAG=.*|NEW_LLVM_TAG=\"${NEW_LLVM_TAG}\"|" \
+     -e "s|^NEW_MULLE_DEV_BRANCH=.*|NEW_MULLE_DEV_BRANCH=\"${NEW_MULLE_DEV_BRANCH}\"|" \
+     "${MIGRATE}"
+   cp "${MIGRATE}" ../migrate-to-next-release  # outer copy
+   git add -A && git commit -m "Prepare migration: <old> → <new>"
    ```
-   The script patches the version vars in `clang/bin/migrate-to-next-release`
-   (and the outer repo copy), commits, then runs the migrate script.
 
-3. If the cherry-pick fails with conflicts, the script exits after step 9.
-   Resolve conflicts manually (see step 3), then run:
+3. Run the migration:
+   ```bash
+   bash clang/bin/migrate-to-next-release
+   ```
+   This squashes the old dev branch into one commit, cherry-picks it onto
+   the new llvm tag, and creates the new dev branch.
+
+4. If the cherry-pick fails with conflicts, the script stops after step 9.
+   Resolve conflicts manually (see step 3), then continue:
    ```bash
    bash /tmp/migrate-to-next-release continue
    ```
-   Use `-f` flag to skip the marker diff check if paths changed (e.g. Options.td
-   moved from `Driver/` to `Options/` in llvm 22 — markers are present, just
-   in a new path, which is a false positive):
+   Use `-f` flag to skip the marker diff check if file paths changed
+   (false positive — markers moved to a new path):
    ```bash
    bash /tmp/migrate-to-next-release -f continue
    ```
 
-4. On success the script verifies all `@mulle-` markers are intact and
-   deletes the tmp branch automatically.
+5. On success the script verifies `@mulle-` markers and deletes the tmp
+   branch automatically.
 
 ## Pitfalls
 
-- **Uncommitted changes abort the script** — it does `git checkout` internally.
-  Commit everything in `mulle-clang-project` before running.
-- **Script reads OLD vars from the already-patched file** — if a previous run
-  already patched `migrate-to-next-release`, the script will read wrong OLD values.
-  Always verify before running:
+- **Script bug: don't use s-run_migrate-0002.sh directly** — it patches vars
+  then launches migrate without committing first. The migrate script does
+  `git checkout` internally and will abort on uncommitted changes. Instead,
+  manually patch + commit + run as shown above.
+
+- **Uncommitted changes abort the script** — commit everything in
+  `mulle-clang-project` before running.
+
+- **Always verify the vars before running:**
   ```bash
   grep '^OLD_LLVM_TAG\|^OLD_MULLE\|^NEW_LLVM_TAG\|^NEW_MULLE' clang/bin/migrate-to-next-release
   ```
 
-- `clang/include/clang/Driver/Options.td` moved to `clang/include/clang/Options/Options.td`
-  → use `-f` flag on continue to suppress false-positive marker diff
-- `clang/include/clang/AST/Type.h` split into `TypeBase.h` + thin `Type.h`
-  → mulle changes to Type.h must be applied to `TypeBase.h` instead
+## Same-major patch bumps
 
-## Known llvm 22 structural changes
+The process works for same-major patch bumps (e.g. 22.1.2 → 22.1.8) just like
+major jumps. Patch bumps typically have **zero cherry-pick conflicts** since
+there are no structural changes between minor releases.
+
+## Historical: structural changes from previous major upgrades
+
+### llvm 21 → 22
 
 - `clang/include/clang/Driver/Options.td` moved to `clang/include/clang/Options/Options.td`
   → use `-f` flag on continue to suppress false-positive marker diff

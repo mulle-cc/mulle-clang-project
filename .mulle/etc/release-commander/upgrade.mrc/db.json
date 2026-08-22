@@ -15,7 +15,7 @@
             "scriptFilename": "s-run_migrate-0002.sh",
             "uuid": "00000001-0000-4000-0000-000000000002",
             "principalTool": "",
-            "status": "todo",
+            "status": "done",
             "skillLevel": "Medium"
         },
         {
@@ -24,7 +24,7 @@
             "scriptFilename": "s-resolve_conflicts-0003.sh",
             "uuid": "00000001-0000-4000-0000-000000000003",
             "principalTool": "",
-            "status": "todo",
+            "status": "done",
             "skillLevel": "High"
         },
         {
@@ -33,7 +33,7 @@
             "scriptFilename": "s-update_outer_repo-0004.sh",
             "uuid": "00000001-0000-4000-0000-000000000004",
             "principalTool": "",
-            "status": "todo",
+            "status": "done",
             "skillLevel": "Low"
         },
         {
@@ -42,7 +42,7 @@
             "scriptFilename": "s-update_readme-0004b.sh",
             "uuid": "00000001-0000-4000-0000-00000000004b",
             "principalTool": "",
-            "status": "todo",
+            "status": "done",
             "skillLevel": "Medium"
         },
         {
@@ -51,7 +51,7 @@
             "scriptFilename": "s-build_and_test-0005.sh",
             "uuid": "00000001-0000-4000-0000-000000000005",
             "principalTool": "",
-            "status": "todo",
+            "status": "done",
             "skillLevel": "Low"
         },
         {
@@ -60,13 +60,13 @@
             "scriptFilename": "s-iterate-0006.sh",
             "uuid": "00000001-0000-4000-0000-000000000006",
             "principalTool": "",
-            "status": "todo",
+            "status": "done",
             "skillLevel": "Low"
         }
     ],
     "environmentVariables": {
-        "PWD": "/home/src/srcL/mulle-clang-22.1.2/mulle-clang-project",
-        "MULLE_CLANG_DIR": "/home/src/srcL/mulle-clang-22.1.2",
+        "PWD": "/home/src/srcL/mulle-clang-22.1.8/mulle-clang-project",
+        "MULLE_CLANG_DIR": "/home/src/srcL/mulle-clang-22.1.8",
         "MULLE_OBJC_RUNTIME_DIR": "/home/src/srcO/mulle-objc/mulle-objc-runtime",
         "MULLE_REWRITER_TEST_DIR": "/home/src/srcO/mulle-cc/test-objc-rewriter"
     }

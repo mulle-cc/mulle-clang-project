@@ -13,4 +13,5 @@ for f in "${MULLE_CLANG_DIR}/BUILD-AND-TEST.md" "${MULLE_CLANG_DIR}/migrate-to-n
 done
 
 echo "Updated version strings: ${OLD_VERSION} → ${NEW_VERSION}"
-echo "Remember to rename the outer repo directory and reconfigure cmake if needed."
+echo "Remember to cp -a the outer repo to 'mulle-clang-${NEW_VERSION}'"
+echo "(not rename — keep the old one as reference) and reconfigure cmake."
