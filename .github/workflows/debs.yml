@@ -1,0 +1,125 @@
+name: Linux debs
+
+# Manually-triggered workflow that builds mulle-clang Debian packages (.deb) for
+# mulle-clang-project on Namespace (namespace.so) Ubuntu runners — one per
+# {arch × ubuntu-version} — and uploads them to the matching GitHub release.
+#
+# AUTHORED by mulle-clang-project-deb-ci.mrc. Edit the template in the bundle and
+# re-run the MRC; do not hand-edit the copy in the repo.
+#
+# ---------------------------------------------------------------------------
+# UBUNTU-ONLY. We build on Ubuntu runners and let each runner's own
+# /etc/os-release VERSION_CODENAME name the .deb (jammy / noble / <26 codename>).
+# We do NOT build pure-Debian (trixie/bookworm) or forky here — those are
+# hand-built or produced by the local release MRC.
+#
+# Ubuntu -> Debian base / libxml2 ABI reference (informative; authoritative
+# mapping + verification procedure lives in the compiler repo's release MRC,
+# task "Create mulle-clang-project x86_64 debian package" / github-ci install.sh):
+#
+#   Ubuntu 22.04 LTS  jammy   ~ Debian bookworm (12)   libxml2.so.2
+#   Ubuntu 24.04 LTS  noble   ~ Debian trixie   (13)   libxml2.so.2
+#   Ubuntu 26.04 LTS  <tbd>   ~ Debian trixie   (13)   libxml2.so.2
+#   (Ubuntu 25.10     questing ~ Debian forky   (14)   libxml2.so.16  <- ABI break,
+#    non-LTS, NOT built here.)
+# ---------------------------------------------------------------------------
+#
+# PRE-RELEASE SAFE: builds the compiler from source (cmake/ninja) straight from the
+# release source tarball via mulle-clang-cpack's package-build. No public apt repo
+# is published here; uploading a .deb to the GitHub release does not hoist any
+# end user onto the new compiler.
+#
+# IDEMPOTENT / COST-AWARE: each build job first checks whether its .deb already
+# exists on the release and SKIPS the build if so (not an error). One dispatch
+# builds all missing debs; a re-dispatch only fills the MISSING ones. force=true
+# rebuilds.
+#
+# CANARY (note: NOT the same principle as bottle.yml's canary):
+#   bottle.yml needs a canary-SELECT job because `macos-latest` is a moving target
+#   — it must DISCOVER at runtime which macOS/codename/runner to use. Ubuntu has no
+#   such unknown here: all six {arch x ver} runners are enumerated statically below.
+#   So this canary is purely a cheap SMOKE TEST: build ONE combo (amd64-22) first;
+#   only if it is green do the other five FAN OUT. This catches systemic breakage
+#   (script typo, missing cpack branch, broken prereqs) on ONE runner's minutes
+#   instead of six. There is no runtime detection and no canary-select job.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build the deb for (e.g. 22.1.8.7)"
+        required: true
+        type: string
+      force:
+        description: "Rebuild even if a deb already exists on the release"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  FORMULA_NAME: "mulle-clang-project"
+  GITHUB_REPO: "mulle-cc/mulle-clang-project"
+  CPACK_REPO: "https://github.com/mulle-cc/mulle-clang-cpack.git"
+  BUILD_SCRIPT_IN_REPO: ".github/workflows/deb-build.sh"
+
+jobs:
+  # ----------------------------------------------------------------------------
+  # canary — SMOKE TEST (not a detector). Build ONE combo first (amd64 on the
+  # oldest LTS) to prove the whole path — script, cpack fetch, prereqs, upload —
+  # on a single runner before spending minutes on the other five.
+  # ----------------------------------------------------------------------------
+  canary:
+    runs-on: namespace-profile-ubuntu-amd64-22
+    steps:
+      - name: Check out repo (staged build script)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - name: Build and upload deb (amd64 / ubuntu-22)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          ARCH: amd64
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          bash "${GITHUB_WORKSPACE}/${BUILD_SCRIPT_IN_REPO}"
+
+  # ----------------------------------------------------------------------------
+  # fanout — the OTHER {arch × ubuntu-version} combos, in parallel, after canary.
+  # fail-fast:false so one flaky combo can't kill the peers.
+  # ----------------------------------------------------------------------------
+  fanout:
+    needs: canary
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: namespace-profile-ubuntu-amd64-24
+            arch: amd64
+          - runner: namespace-profile-ubuntu-amd64-26
+            arch: amd64
+          - runner: namespace-profile-ubuntu-arm64-22
+            arch: arm64
+          - runner: namespace-profile-ubuntu-arm64-24
+            arch: arm64
+          - runner: namespace-profile-ubuntu-arm64-26
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out repo (staged build script)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - name: Build and upload deb (${{ matrix.arch }} / ${{ matrix.runner }})
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          ARCH: ${{ matrix.arch }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          bash "${GITHUB_WORKSPACE}/${BUILD_SCRIPT_IN_REPO}"
