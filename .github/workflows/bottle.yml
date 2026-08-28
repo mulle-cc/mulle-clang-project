@@ -62,24 +62,12 @@ jobs:
           echo "release '${TAG}' present"
           echo "::endgroup::"
 
-          echo "::group::Check this token can write (upload) to ${GITHUB_REPO}"
-          # `.permissions.push` reflects upload/write capability without
-          # actually uploading anything.
-          push_perm="$( gh api "repos/${GITHUB_REPO}" --jq '.permissions.push' 2>/dev/null || echo "false" )"
-          if [ "${push_perm}" != "true" ]
-          then
-            echo "::error::The workflow token lacks push/write permission on ${GITHUB_REPO}; cannot upload the bottle. Aborting before build." >&2
-            exit 1
-          fi
-          echo "token has push permission"
-          echo "::endgroup::"
-
-          # --- LIVE UPLOAD PROOF -------------------------------------------
-          # `.permissions.push` is necessary but NOT sufficient: the actual
-          # release-asset upload path can still fail. This is the #1 way an
-          # hour-long build gets wasted. So prove the ENTIRE upload path works
-          # here, with a throwaway asset, then delete it. Fail now = fail cheap.
-          echo "::group::Prove asset upload works (dummy asset round-trip)"
+          echo "::group::Prove this run's token can upload to the release"
+          # NOTE: we deliberately do NOT gate on `gh api repos/{repo} .permissions.push`
+          # here. For the ephemeral Actions GITHUB_TOKEN that field does not reliably
+          # report write capability (it reflects the actor/installation differently
+          # than a user PAT), so it produces false negatives. The AUTHORITATIVE test
+          # is an actual asset upload round-trip, below.
           probe="__bottle-upload-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.txt"
           printf 'bottle upload preflight probe for %s\n' "${TAG}" > "${probe}"
 
