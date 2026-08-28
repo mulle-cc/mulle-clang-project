@@ -1,24 +1,31 @@
 name: macOS bottle
 
-# Manually-triggered workflow that builds a macOS arm64 Homebrew bottle for
-# mulle-clang-project on a Namespace (namespace.so) runner and uploads it to the
-# matching GitHub release.
+# Manually-triggered workflow that builds macOS arm64 Homebrew bottles for
+# mulle-clang-project on Namespace (namespace.so) runners — one per macOS
+# version — and uploads them to the matching GitHub release.
 #
-# This file is AUTHORED by the mulle-clang-project-bottle-ci.mrc bundle. Do not
-# hand-edit in place; edit the template in the .mrc bundle and re-run the MRC so
-# the source of truth stays the bundle.
+# AUTHORED by mulle-clang-project-bottle-ci.mrc. Edit the template in the bundle
+# and re-run the MRC; do not hand-edit the copy in the repo.
 #
-# COST NOTE: the build compiles all of LLVM/clang and runs ~1h on a paid arm64
-# macOS runner. The `preflight` step below verifies the things that can only be
-# known at run time and would otherwise waste that hour:
-#   1. the release for <tag> still exists
-#   2. this run's token reports write permission
-#   3. an actual asset upload to that release SUCCEEDS (proven with a throwaway
-#      dummy asset that is uploaded, verified, then deleted) — this is the #1
-#      real-world failure and MUST be caught before the build, not after.
-# Everything else (formula validity, tap resolution, runner label, release
-# existence at authoring time) is guaranteed earlier by the MRC, so it is NOT
-# re-checked here.
+# EXECUTION SHAPE (one dispatch → four bottles, canary-first):
+#   1. canary-select : runs on GitHub's `macos-latest` ONLY to detect which OS
+#                      `macos-latest` currently is, maps it to a codename, and
+#                      resolves the matching Namespace runner. If there is no
+#                      matching namespace-profile-macos-arm-<codename>, it HARD
+#                      FAILS — intervention time: create the namespace runner.
+#                      (No building here; macos-latest is too weak for clang.)
+#   2. canary        : builds+uploads on the Namespace runner for the detected
+#                      OS. Proves the whole path on ONE powerful runner first.
+#   3. fanout        : the OTHER macOS versions build in parallel, after canary
+#                      is green. fail-fast:false so a beta flake can't kill peers.
+#
+# PRE-RELEASE SAFE: builds from an IN-REPO staged formula via a FAKED LOCAL TAP
+# (brew tap-new). The public mulle-kybernetik/software tap is never tapped or
+# published here, so users are not hoisted onto the new compiler.
+#
+# IDEMPOTENT / COST-AWARE: each build job first checks whether its bottle already
+# exists on the release and SKIPS the ~1h build if so (no error). One dispatch
+# builds the four; a re-dispatch only fills the MISSING ones. force=true rebuilds.
 
 on:
   workflow_dispatch:
@@ -27,201 +34,122 @@ on:
         description: "Release tag to build the bottle for (e.g. 22.1.8.7)"
         required: true
         type: string
+      force:
+        description: "Rebuild even if a bottle already exists on the release"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
-  contents: write   # required for `gh release upload`
+  contents: write
 
 env:
-  # We build from an IN-REPO formula via a FAKED LOCAL TAP (brew tap-new on the
-  # runner). We deliberately do NOT tap the public mulle-kybernetik/software tap:
-  # this is a pre-release, and tapping/publishing there would hoist the new
-  # compiler onto users. The local tap exists only on the runner for this job.
   LOCAL_TAP: "mulle-cc/prerelease"
   FORMULA_NAME: "mulle-clang-project"
-  # Path to the formula inside this repo checkout (installed alongside bottle.yml
-  # by the MRC). This is the 22.1.8.7 formula, staged for the pre-release.
   FORMULA_IN_REPO: ".github/workflows/mulle-clang-project.rb"
   GITHUB_REPO: "mulle-cc/mulle-clang-project"
+  # All macOS versions we build, and their Namespace runner profiles.
+  # Used by fanout; canary is chosen dynamically from macos-latest.
+  ALL_CODENAMES: "sonoma sequoia tahoe golden-gate"
 
 jobs:
-  bottle:
-    # Namespace macOS arm64 runner profile (Apple silicon). This label is
-    # account/profile-specific and is recorded in the MRC db.json.
-    runs-on: namespace-profile-mulle-clang
+  # ----------------------------------------------------------------------------
+  # canary-select — detect what `macos-latest` is RIGHT NOW and map to a runner.
+  # Runs on macos-latest purely to read the OS version (cheap; no build).
+  # ----------------------------------------------------------------------------
+  canary-select:
+    runs-on: macos-latest
+    outputs:
+      codename: ${{ steps.detect.outputs.codename }}
+      runner: ${{ steps.detect.outputs.runner }}
+      others: ${{ steps.detect.outputs.others }}
     steps:
-      # --------------------------------------------------------------------
-      # PREFLIGHT — cheap, run BEFORE the expensive build. Abort on any failure
-      # so we never pay for a build we cannot publish.
-      # --------------------------------------------------------------------
-      - name: Preflight — release exists and token can upload
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ inputs.tag }}
+      - name: Detect macos-latest OS and resolve namespace runner
+        id: detect
         run: |
           set -euo pipefail
+          major="$( sw_vers -productVersion | cut -d. -f1 )"
+          echo "macos-latest productVersion: $( sw_vers -productVersion ) (major=${major})"
 
-          echo "::group::Check release '${TAG}' exists on ${GITHUB_REPO}"
-          if ! gh release view "${TAG}" --repo "${GITHUB_REPO}" >/dev/null 2>&1
-          then
-            echo "::error::Release '${TAG}' does not exist on ${GITHUB_REPO}. Create the release before dispatching this workflow." >&2
-            exit 1
-          fi
-          echo "release '${TAG}' present"
-          echo "::endgroup::"
+          # OS major -> Homebrew codename. Update when a new macOS goes GA.
+          case "${major}" in
+            14) codename="sonoma" ;;
+            15) codename="sequoia" ;;
+            26) codename="tahoe" ;;
+            *)
+              echo "::error::macos-latest is macOS major ${major}, which has no codename mapping. INTERVENTION NEEDED: add the mapping and create a namespace-profile-macos-arm-<codename> runner." >&2
+              exit 1
+              ;;
+          esac
+          echo "detected codename: ${codename}"
 
-          echo "::group::Prove this run's token can upload to the release"
-          # NOTE: we deliberately do NOT gate on `gh api repos/{repo} .permissions.push`
-          # here. For the ephemeral Actions GITHUB_TOKEN that field does not reliably
-          # report write capability (it reflects the actor/installation differently
-          # than a user PAT), so it produces false negatives. The AUTHORITATIVE test
-          # is an actual asset upload round-trip, below.
-          probe="__bottle-upload-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.txt"
-          printf 'bottle upload preflight probe for %s\n' "${TAG}" > "${probe}"
-
-          # Upload (clobber in case a prior attempt left one behind).
-          if ! gh release upload "${TAG}" "${probe}" --repo "${GITHUB_REPO}" --clobber
-          then
-            echo "::error::Dummy asset upload FAILED — the real bottle upload would also fail. Aborting before the expensive build." >&2
-            rm -f "${probe}"
+          # Must have a matching namespace runner profile among ALL_CODENAMES.
+          match=0
+          for c in ${ALL_CODENAMES}; do [ "${c}" = "${codename}" ] && match=1; done
+          if [ "${match}" != "1" ]; then
+            echo "::error::No namespace runner for '${codename}' (not in ALL_CODENAMES='${ALL_CODENAMES}'). INTERVENTION NEEDED: create namespace-profile-macos-arm-${codename}." >&2
             exit 1
           fi
 
-          # Verify it is actually listed on the release.
-          if ! gh release view "${TAG}" --repo "${GITHUB_REPO}" --json assets \
-                 --jq '.assets[].name' | grep -qxF "${probe}"
-          then
-            echo "::error::Dummy asset uploaded but not found on the release; upload path is unreliable. Aborting." >&2
-            gh release delete-asset "${TAG}" "${probe}" --repo "${GITHUB_REPO}" --yes >/dev/null 2>&1 || true
-            rm -f "${probe}"
-            exit 1
-          fi
+          runner="namespace-profile-macos-arm-${codename}"
 
-          # Clean up the probe — it must never linger next to real bottles.
-          if ! gh release delete-asset "${TAG}" "${probe}" --repo "${GITHUB_REPO}" --yes
-          then
-            echo "::warning::Could not delete probe asset '${probe}'; please remove it manually." >&2
-          fi
-          rm -f "${probe}"
-          echo "upload path verified end-to-end (probe uploaded, listed, and removed)"
-          echo "::endgroup::"
+          # Compute the OTHER codenames (fanout) as a JSON matrix.
+          others_json=""
+          for c in ${ALL_CODENAMES}; do
+            [ "${c}" = "${codename}" ] && continue
+            others_json="${others_json}{\"codename\":\"${c}\",\"runner\":\"namespace-profile-macos-arm-${c}\"},"
+          done
+          others="{\"include\":[${others_json%,}]}"
 
-      - name: Check out repo (for the staged formula)
+          echo "canary runner: ${runner}"
+          echo "fanout matrix: ${others}"
+          echo "codename=${codename}" >> "${GITHUB_OUTPUT}"
+          echo "runner=${runner}"     >> "${GITHUB_OUTPUT}"
+          echo "others=${others}"     >> "${GITHUB_OUTPUT}"
+
+  # ----------------------------------------------------------------------------
+  # canary — build+upload the detected OS on its Namespace runner (prove path).
+  # ----------------------------------------------------------------------------
+  canary:
+    needs: canary-select
+    runs-on: ${{ needs.canary-select.outputs.runner }}
+    steps:
+      - name: Check out repo (staged formula + build script)
         uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
-
-      - name: Set up Homebrew
-        run: |
-          set -euo pipefail
-          if ! command -v brew >/dev/null 2>&1
-          then
-            echo "::error::brew not found on runner" >&2
-            exit 1
-          fi
-          brew --version
-
-      - name: Create fake local tap from staged formula
-        run: |
-          set -euo pipefail
-          if [ ! -f "${FORMULA_IN_REPO}" ]
-          then
-            echo "::error::staged formula not found at ${FORMULA_IN_REPO}" >&2
-            exit 1
-          fi
-          # Create an EMPTY local tap on the runner (no GitHub repo involved) and
-          # drop our staged formula into it. This avoids tapping/publishing the
-          # public tap during a pre-release.
-          brew tap-new "${LOCAL_TAP}" --no-git
-          tap_dir="$( brew --repository )/Library/Taps/${LOCAL_TAP%/*}/homebrew-${LOCAL_TAP#*/}"
-          mkdir -p "${tap_dir}/Formula"
-          cp -v "${FORMULA_IN_REPO}" "${tap_dir}/Formula/${FORMULA_NAME}.rb"
-          echo "staged formula version: $( brew info --json=v2 "${LOCAL_TAP}/${FORMULA_NAME}" | jq -r '.formulae[0].versions.stable' )"
-
-      # --------------------------------------------------------------------
-      # BUILD — the expensive step. Only reached if preflight passed.
-      # --------------------------------------------------------------------
-      - name: Build bottle from source
-        run: |
-          set -euo pipefail
-          brew install --build-bottle "${LOCAL_TAP}/${FORMULA_NAME}"
-
-      - name: Generate bottle and resolve canonical filename
-        id: bottle
-        env:
-          TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-
-          workdir="$( mktemp -d )"
-          cd "${workdir}"
-
-          # Produce the bottle + its authoritative JSON manifest.
-          brew bottle --json --no-rebuild "${LOCAL_TAP}/${FORMULA_NAME}"
-
-          json_file="$( ls -1 ./*.bottle.json | head -n1 )"
-          if [ -z "${json_file}" ]
-          then
-            echo "::error::no bottle json produced by 'brew bottle'" >&2
-            exit 1
-          fi
-
-          # Use the AUTHORITATIVE filename/local_filename/sha256 from the JSON.
-          # Do NOT string-munge names — brew computes the expected name from the
-          # tag and will not find a hand-customized one.
-          canonical="$( jq -r '.. | objects | select(has("tags")) | .tags | to_entries[0].value.filename' "${json_file}" )"
-          localname="$( jq -r '.. | objects | select(has("tags")) | .tags | to_entries[0].value.local_filename' "${json_file}" )"
-          sha="$(       jq -r '.. | objects | select(has("tags")) | .tags | to_entries[0].value.sha256' "${json_file}" )"
-          tagkey="$(    jq -r '.. | objects | select(has("tags")) | .tags | to_entries[0].key' "${json_file}" )"
-
-          if [ -z "${canonical}" ] || [ "${canonical}" = "null" ]
-          then
-            echo "::error::could not read canonical filename from ${json_file}" >&2
-            exit 1
-          fi
-
-          # Rename the local artifact to the canonical brew name.
-          if [ "${localname}" != "${canonical}" ] && [ -f "${localname}" ]
-          then
-            mv -v "${localname}" "${canonical}"
-          fi
-
-          echo "resolved bottle: ${canonical} (tag=${tagkey}, sha256=${sha})"
-
-          # Export for later steps + job summary.
-          echo "canonical=${canonical}"      >> "${GITHUB_OUTPUT}"
-          echo "sha256=${sha}"               >> "${GITHUB_OUTPUT}"
-          echo "tagkey=${tagkey}"            >> "${GITHUB_OUTPUT}"
-          echo "workdir=${workdir}"          >> "${GITHUB_OUTPUT}"
-
-          {
-            echo "### Bottle built"
-            echo ""
-            echo "| field | value |"
-            echo "| --- | --- |"
-            echo "| file | \`${canonical}\` |"
-            echo "| tag  | \`${tagkey}\` |"
-            echo "| sha256 | \`${sha}\` |"
-            echo ""
-            echo "Add to the formula \`bottle do\` block:"
-            echo ""
-            echo '```ruby'
-            echo "  sha256 cellar: :any, ${tagkey}: \"${sha}\""
-            echo '```'
-          } >> "${GITHUB_STEP_SUMMARY}"
-
-      # --------------------------------------------------------------------
-      # UPLOAD — publish to the release verified in preflight.
-      # --------------------------------------------------------------------
-      - name: Upload bottle to release
+      - name: Build and upload bottle (${{ needs.canary-select.outputs.codename }})
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag }}
-          CANONICAL: ${{ steps.bottle.outputs.canonical }}
-          WORKDIR: ${{ steps.bottle.outputs.workdir }}
+          CODENAME: ${{ needs.canary-select.outputs.codename }}
+          FORCE: ${{ inputs.force }}
         run: |
           set -euo pipefail
-          cd "${WORKDIR}"
-          gh release upload "${TAG}" "${CANONICAL}" \
-            --repo "${GITHUB_REPO}" \
-            --clobber
-          echo "uploaded ${CANONICAL} to ${GITHUB_REPO}@${TAG}"
+          bash "${GITHUB_WORKSPACE}/${FORMULA_IN_REPO%/*}/bottle-build.sh"
+        # Build logic is factored into bottle-build.sh (staged in-repo by the MRC)
+        # so canary and fanout run byte-identical steps.
+
+  # ----------------------------------------------------------------------------
+  # fanout — the OTHER macOS versions, in parallel, only after canary is green.
+  # ----------------------------------------------------------------------------
+  fanout:
+    needs: [canary-select, canary]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.canary-select.outputs.others) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out repo (staged formula + build script)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - name: Build and upload bottle (${{ matrix.codename }})
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          CODENAME: ${{ matrix.codename }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          bash "${GITHUB_WORKSPACE}/${FORMULA_IN_REPO%/*}/bottle-build.sh"
