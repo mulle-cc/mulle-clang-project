@@ -32,8 +32,15 @@ permissions:
   contents: write   # required for `gh release upload`
 
 env:
-  TAP_NAME: "mulle-kybernetik/software"
+  # We build from an IN-REPO formula via a FAKED LOCAL TAP (brew tap-new on the
+  # runner). We deliberately do NOT tap the public mulle-kybernetik/software tap:
+  # this is a pre-release, and tapping/publishing there would hoist the new
+  # compiler onto users. The local tap exists only on the runner for this job.
+  LOCAL_TAP: "mulle-cc/prerelease"
   FORMULA_NAME: "mulle-clang-project"
+  # Path to the formula inside this repo checkout (installed alongside bottle.yml
+  # by the MRC). This is the 22.1.8.7 formula, staged for the pre-release.
+  FORMULA_IN_REPO: ".github/workflows/mulle-clang-project.rb"
   GITHUB_REPO: "mulle-cc/mulle-clang-project"
 
 jobs:
@@ -98,6 +105,11 @@ jobs:
           echo "upload path verified end-to-end (probe uploaded, listed, and removed)"
           echo "::endgroup::"
 
+      - name: Check out repo (for the staged formula)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
       - name: Set up Homebrew
         run: |
           set -euo pipefail
@@ -108,18 +120,30 @@ jobs:
           fi
           brew --version
 
-      - name: Tap mulle-kybernetik/software
+      - name: Create fake local tap from staged formula
         run: |
           set -euo pipefail
-          brew tap "${TAP_NAME}"
+          if [ ! -f "${FORMULA_IN_REPO}" ]
+          then
+            echo "::error::staged formula not found at ${FORMULA_IN_REPO}" >&2
+            exit 1
+          fi
+          # Create an EMPTY local tap on the runner (no GitHub repo involved) and
+          # drop our staged formula into it. This avoids tapping/publishing the
+          # public tap during a pre-release.
+          brew tap-new "${LOCAL_TAP}" --no-git
+          tap_dir="$( brew --repository )/Library/Taps/${LOCAL_TAP%/*}/homebrew-${LOCAL_TAP#*/}"
+          mkdir -p "${tap_dir}/Formula"
+          cp -v "${FORMULA_IN_REPO}" "${tap_dir}/Formula/${FORMULA_NAME}.rb"
+          echo "staged formula version: $( brew info --json=v2 "${LOCAL_TAP}/${FORMULA_NAME}" | jq -r '.formulae[0].versions.stable' )"
 
       # --------------------------------------------------------------------
-      # BUILD — the expensive step (~1h). Only reached if preflight passed.
+      # BUILD — the expensive step. Only reached if preflight passed.
       # --------------------------------------------------------------------
       - name: Build bottle from source
         run: |
           set -euo pipefail
-          brew install --build-bottle "${TAP_NAME}/${FORMULA_NAME}"
+          brew install --build-bottle "${LOCAL_TAP}/${FORMULA_NAME}"
 
       - name: Generate bottle and resolve canonical filename
         id: bottle
@@ -132,7 +156,7 @@ jobs:
           cd "${workdir}"
 
           # Produce the bottle + its authoritative JSON manifest.
-          brew bottle --json --no-rebuild "${TAP_NAME}/${FORMULA_NAME}"
+          brew bottle --json --no-rebuild "${LOCAL_TAP}/${FORMULA_NAME}"
 
           json_file="$( ls -1 ./*.bottle.json | head -n1 )"
           if [ -z "${json_file}" ]
