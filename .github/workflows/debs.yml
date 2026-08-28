@@ -8,10 +8,16 @@ name: Linux debs
 # re-run the MRC; do not hand-edit the copy in the repo.
 #
 # ---------------------------------------------------------------------------
-# UBUNTU-ONLY. We build on Ubuntu runners and let each runner's own
-# /etc/os-release VERSION_CODENAME name the .deb (jammy / noble / <26 codename>).
-# We do NOT build pure-Debian (trixie/bookworm) or forky here — those are
-# hand-built or produced by the local release MRC.
+# UBUNTU-ONLY. We build on Ubuntu runners. Each .deb is published as
+#   mulle-clang-<TAG>-ubuntu<VERSION_ID>-<ARCH>.deb   (e.g. ...-ubuntu24.04-amd64.deb)
+# where ubuntu<VERSION_ID> is derived from the runner's /etc/os-release (ID must be
+# "ubuntu"; VERSION_ID gives 22.04/24.04/26.04). We deliberately publish under the
+# "ubuntu<ver>" identifier rather than the codename (jammy/noble/...) so these are
+# unambiguous and clearly DISTINCT from the pure-Debian codename debs
+# (trixie/bookworm/forky) that also live on this release. (cpack itself still names
+# its output with the codename internally; deb-build.sh renames before upload.)
+# We do NOT build pure-Debian or forky here — those are hand-built or produced by
+# the local release MRC.
 #
 # Ubuntu -> Debian base / libxml2 ABI reference (informative; authoritative
 # mapping + verification procedure lives in the compiler repo's release MRC,
