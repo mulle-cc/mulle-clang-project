@@ -1,0 +1,176 @@
+name: macOS bottle
+
+# Manually-triggered workflow that builds a macOS arm64 Homebrew bottle for
+# mulle-clang-project on a Namespace (namespace.so) runner and uploads it to the
+# matching GitHub release.
+#
+# This file is AUTHORED by the mulle-clang-project-bottle-ci.mrc bundle. Do not
+# hand-edit in place; edit the template in the .mrc bundle and re-run the MRC so
+# the source of truth stays the bundle.
+#
+# COST NOTE: the build compiles all of LLVM/clang and runs ~1h on a paid arm64
+# macOS runner. The `preflight` step below verifies the two things that can only
+# be known at run time and would otherwise waste that hour:
+#   1. the release for <tag> still exists
+#   2. this run's token is actually allowed to upload to it
+# Everything else (formula validity, tap resolution, runner label, release
+# existence at authoring time) is guaranteed earlier by the MRC, so it is NOT
+# re-checked here.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build the bottle for (e.g. 22.1.8.7)"
+        required: true
+        type: string
+
+permissions:
+  contents: write   # required for `gh release upload`
+
+env:
+  TAP_NAME: "mulle-kybernetik/software"
+  FORMULA_NAME: "mulle-clang-project"
+  GITHUB_REPO: "mulle-cc/mulle-clang-project"
+
+jobs:
+  bottle:
+    # Namespace macOS arm64 runner profile (Apple silicon). This label is
+    # account/profile-specific and is recorded in the MRC db.json.
+    runs-on: namespace-profile-mulle-clang
+    steps:
+      # --------------------------------------------------------------------
+      # PREFLIGHT — cheap, run BEFORE the expensive build. Abort on any failure
+      # so we never pay for a build we cannot publish.
+      # --------------------------------------------------------------------
+      - name: Preflight — release exists and token can upload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          echo "::group::Check release '${TAG}' exists on ${GITHUB_REPO}"
+          if ! gh release view "${TAG}" --repo "${GITHUB_REPO}" >/dev/null 2>&1
+          then
+            echo "::error::Release '${TAG}' does not exist on ${GITHUB_REPO}. Create the release before dispatching this workflow." >&2
+            exit 1
+          fi
+          echo "release '${TAG}' present"
+          echo "::endgroup::"
+
+          echo "::group::Check this token can write (upload) to ${GITHUB_REPO}"
+          # `.permissions.push` reflects upload/write capability without
+          # actually uploading anything.
+          push_perm="$( gh api "repos/${GITHUB_REPO}" --jq '.permissions.push' 2>/dev/null || echo "false" )"
+          if [ "${push_perm}" != "true" ]
+          then
+            echo "::error::The workflow token lacks push/write permission on ${GITHUB_REPO}; cannot upload the bottle. Aborting before build." >&2
+            exit 1
+          fi
+          echo "token has push permission"
+          echo "::endgroup::"
+
+      - name: Set up Homebrew
+        run: |
+          set -euo pipefail
+          if ! command -v brew >/dev/null 2>&1
+          then
+            echo "::error::brew not found on runner" >&2
+            exit 1
+          fi
+          brew --version
+
+      - name: Tap mulle-kybernetik/software
+        run: |
+          set -euo pipefail
+          brew tap "${TAP_NAME}"
+
+      # --------------------------------------------------------------------
+      # BUILD — the expensive step (~1h). Only reached if preflight passed.
+      # --------------------------------------------------------------------
+      - name: Build bottle from source
+        run: |
+          set -euo pipefail
+          brew install --build-bottle "${TAP_NAME}/${FORMULA_NAME}"
+
+      - name: Generate bottle and resolve canonical filename
+        id: bottle
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          workdir="$( mktemp -d )"
+          cd "${workdir}"
+
+          # Produce the bottle + its authoritative JSON manifest.
+          brew bottle --json --no-rebuild "${TAP_NAME}/${FORMULA_NAME}"
+
+          json_file="$( ls -1 ./*.bottle.json | head -n1 )"
+          if [ -z "${json_file}" ]
+          then
+            echo "::error::no bottle json produced by 'brew bottle'" >&2
+            exit 1
+          fi
+
+          # Use the AUTHORITATIVE filename/local_filename/sha256 from the JSON.
+          # Do NOT string-munge names — brew computes the expected name from the
+          # tag and will not find a hand-customized one.
+          canonical="$( jq -r '.. | objects | select(has("tags")) | .tags | to_entries[0].value.filename' "${json_file}" )"
+          localname="$( jq -r '.. | objects | select(has("tags")) | .tags | to_entries[0].value.local_filename' "${json_file}" )"
+          sha="$(       jq -r '.. | objects | select(has("tags")) | .tags | to_entries[0].value.sha256' "${json_file}" )"
+          tagkey="$(    jq -r '.. | objects | select(has("tags")) | .tags | to_entries[0].key' "${json_file}" )"
+
+          if [ -z "${canonical}" ] || [ "${canonical}" = "null" ]
+          then
+            echo "::error::could not read canonical filename from ${json_file}" >&2
+            exit 1
+          fi
+
+          # Rename the local artifact to the canonical brew name.
+          if [ "${localname}" != "${canonical}" ] && [ -f "${localname}" ]
+          then
+            mv -v "${localname}" "${canonical}"
+          fi
+
+          echo "resolved bottle: ${canonical} (tag=${tagkey}, sha256=${sha})"
+
+          # Export for later steps + job summary.
+          echo "canonical=${canonical}"      >> "${GITHUB_OUTPUT}"
+          echo "sha256=${sha}"               >> "${GITHUB_OUTPUT}"
+          echo "tagkey=${tagkey}"            >> "${GITHUB_OUTPUT}"
+          echo "workdir=${workdir}"          >> "${GITHUB_OUTPUT}"
+
+          {
+            echo "### Bottle built"
+            echo ""
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| file | \`${canonical}\` |"
+            echo "| tag  | \`${tagkey}\` |"
+            echo "| sha256 | \`${sha}\` |"
+            echo ""
+            echo "Add to the formula \`bottle do\` block:"
+            echo ""
+            echo '```ruby'
+            echo "  sha256 cellar: :any, ${tagkey}: \"${sha}\""
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      # --------------------------------------------------------------------
+      # UPLOAD — publish to the release verified in preflight.
+      # --------------------------------------------------------------------
+      - name: Upload bottle to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          CANONICAL: ${{ steps.bottle.outputs.canonical }}
+          WORKDIR: ${{ steps.bottle.outputs.workdir }}
+        run: |
+          set -euo pipefail
+          cd "${WORKDIR}"
+          gh release upload "${TAG}" "${CANONICAL}" \
+            --repo "${GITHUB_REPO}" \
+            --clobber
+          echo "uploaded ${CANONICAL} to ${GITHUB_REPO}@${TAG}"
