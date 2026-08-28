@@ -18,20 +18,42 @@ set -euo pipefail
 : "${FORMULA_NAME:?}"; : "${CPACK_REPO:?}"
 FORCE="${FORCE:-false}"
 
-# --- DIST comes from THIS runner (never guessed) --------------------------------
-# package-build's get_dist reads /etc/os-release VERSION_CODENAME; mirror it here so
-# the skip-if-exists check knows the target filename BEFORE building.
-get_dist()
+# --- Distribution identifiers from THIS runner (never guessed) ------------------
+# Two distinct values, both read from /etc/os-release:
+#
+#   CODENAME = VERSION_CODENAME (jammy/noble/...). This is what cpack's package-build
+#              (its own get_dist) embeds in the file it produces. We need it ONLY to
+#              locate cpack's output artifact.
+#   DIST     = the identifier WE publish under: "ubuntu<VERSION_ID>" (e.g. ubuntu24.04).
+#              This is the release-facing name. Chosen (vs the bare codename) so the
+#              Ubuntu debs are unambiguous and clearly distinct from the Debian
+#              codename debs (bookworm/trixie/forky) that share this release.
+#
+# Ubuntu-only workflow, so ID must be "ubuntu"; assert it rather than guess.
+read_osrel()
 {
-  if [ -f /etc/os-release ]; then ( . /etc/os-release && echo "${VERSION_CODENAME}" ); return; fi
-  lsb_release -sc 2>/dev/null | tail -1
+  # $1 = field name; echoes its value from /etc/os-release
+  if [ -f /etc/os-release ]; then ( . /etc/os-release && eval "printf '%s' \"\${$1}\"" ); fi
 }
-DIST="$( get_dist )"
-[ -n "${DIST}" ] || { echo "::error::could not determine DIST (VERSION_CODENAME) on this runner"; exit 1; }
+os_id="$( read_osrel ID )"
+CODENAME="$( read_osrel VERSION_CODENAME )"
+[ -z "${CODENAME}" ] && CODENAME="$( lsb_release -sc 2>/dev/null | tail -1 )"
+version_id="$( read_osrel VERSION_ID )"
+[ -z "${version_id}" ] && version_id="$( lsb_release -sr 2>/dev/null | tail -1 )"
 
-# cpack names the artifact: mulle-clang-${VERSION}-${DIST}-${ARCH}.deb
+if [ "${os_id}" != "ubuntu" ]; then
+  echo "::error::this workflow is Ubuntu-only but /etc/os-release ID='${os_id}'. Aborting."; exit 1
+fi
+[ -n "${CODENAME}" ]   || { echo "::error::could not determine VERSION_CODENAME on this runner"; exit 1; }
+[ -n "${version_id}" ] || { echo "::error::could not determine VERSION_ID on this runner"; exit 1; }
+
+DIST="ubuntu${version_id}"   # e.g. ubuntu24.04
+
+# cpack produces:            mulle-clang-${VERSION}-${CODENAME}-${ARCH}.deb  (codename)
+# we upload it renamed as:   mulle-clang-${VERSION}-${DIST}-${ARCH}.deb      (ubuntu<ver>)
+produced_by_cpack="mulle-clang-${TAG}-${CODENAME}-${ARCH}.deb"
 expected="mulle-clang-${TAG}-${DIST}-${ARCH}.deb"
-echo "== ${DIST}/${ARCH}: target deb ${expected} =="
+echo "== ${DIST} (${CODENAME})/${ARCH}: target deb ${expected} =="
 
 # --- PREFLIGHT: release exists + upload path actually works (cheap, pre-build) --
 echo "::group::Preflight (release + upload probe)"
@@ -83,13 +105,18 @@ VERSION="${TAG}" RC="" ARCH="${ARCH}" MAKETOOL="ninja" \
   ./mulle-clang-cpack/package-build clean download build verpack
 echo "::endgroup::"
 
-# --- LOCATE + verify the produced artifact --------------------------------------
-produced="./mulle-clang-${TAG}-${DIST}-${ARCH}.deb"
-if [ ! -f "${produced}" ]; then
-  echo "::error::expected artifact not found: ${produced}"
+# --- LOCATE cpack's output (codename-named) + RENAME to the ubuntu<ver> name ----
+# cpack's verpack names the file with the CODENAME (e.g. ...-noble-amd64.deb). Find
+# that, then rename to our release-facing DIST name (...-ubuntu24.04-amd64.deb).
+if [ ! -f "${produced_by_cpack}" ]; then
+  echo "::error::cpack artifact not found: ${produced_by_cpack}"
   echo "debs present:"; ls -1 ./*.deb 2>/dev/null || true
   exit 1
 fi
+produced="./${expected}"
+mv -v "${produced_by_cpack}" "${produced}"
+
+# --- verify the produced artifact -----------------------------------------------
 # sanity: dpkg metadata arch should match ARCH
 if command -v dpkg-deb >/dev/null 2>&1; then
   deb_arch="$( dpkg-deb -f "${produced}" Architecture 2>/dev/null || echo '?' )"
