@@ -1,0 +1,132 @@
+name: Debian debs
+
+# Manually-triggered workflow that builds mulle-clang pure-Debian packages (.deb)
+# for mulle-clang-project INSIDE debian:<codename> containers on Namespace
+# (namespace.so) Ubuntu runners — one per {arch × debian-codename} — and uploads
+# them to the matching GitHub release.
+#
+# AUTHORED by mulle-clang-project-deb-ci.mrc. Edit the template in the bundle and
+# re-run the MRC; do not hand-edit the copy in the repo.
+#
+# ---------------------------------------------------------------------------
+# WHY CONTAINERS (Option 1). A .deb's real compatibility comes from the glibc /
+# libstdc++ / dependency versions it links against, not from its filename. The
+# namespace.so runners are Ubuntu hosts, so a "bookworm" deb built on the bare
+# runner would link against Ubuntu's glibc and compute Debian-wrong Depends: — it
+# could install yet fail at runtime on real Debian. We therefore build each Debian
+# deb INSIDE its matching debian:<codename> container, which supplies that
+# release's ACTUAL glibc and package versions. Result: bookworm-labeled means
+# bookworm-correct.
+#
+# This is the sibling of debs.yml (native Ubuntu builds). Ubuntu debs are published
+# as ubuntu<VERSION_ID> (e.g. ubuntu24.04); Debian debs are published under their
+# CODENAME (bookworm/trixie/forky), which for Debian IS the canonical, unambiguous
+# identifier — so there is NO rename step here (unlike the Ubuntu path). cpack's
+# package-build, run in-container, names the artifact by the container's
+# VERSION_CODENAME directly.
+#
+# ARCH: each combo runs on a matching-arch host runner (amd64 deb on an amd64
+# runner, arm64 deb on an arm64 runner) so the container build is NATIVE — no qemu
+# emulation, no multi-hour builds.
+#
+# Ubuntu <-> Debian base / libxml2 ABI reference (informative; authoritative
+# mapping + verification lives in the compiler repo's release MRC):
+#
+#   Debian bookworm (12)   ~ Ubuntu 22.04 LTS jammy    libxml2.so.2
+#   Debian trixie   (13)   ~ Ubuntu 24.04 LTS noble    libxml2.so.2
+#   Debian forky    (14)   ~ Ubuntu 25.10     questing libxml2.so.16  <- ABI break
+# ---------------------------------------------------------------------------
+#
+# PRE-RELEASE SAFE: builds the compiler from source (cmake/ninja) straight from the
+# release source tarball via mulle-clang-cpack's package-build. Uploading a .deb to
+# the GitHub release does not hoist any end user onto the new compiler.
+#
+# IDEMPOTENT / COST-AWARE: each build job first checks whether its .deb already
+# exists on the release and SKIPS the build if so (not an error). One dispatch
+# builds all missing debs; a re-dispatch only fills the MISSING ones. force=true
+# rebuilds.
+#
+# CANARY: cheap SMOKE TEST (same principle as debs.yml). Build ONE combo
+# (bookworm/amd64) first; only if it is green do the other five FAN OUT. Catches
+# systemic breakage (script typo, missing cpack branch, docker/network issue) on
+# ONE runner's minutes instead of six. All six {arch × codename} runners are
+# enumerated statically; there is no runtime detection.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build the deb for (e.g. 22.1.8.7)"
+        required: true
+        type: string
+      force:
+        description: "Rebuild even if a deb already exists on the release"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  FORMULA_NAME: "mulle-clang-project"
+  GITHUB_REPO: "mulle-cc/mulle-clang-project"
+  CPACK_REPO: "https://github.com/mulle-cc/mulle-clang-cpack.git"
+  BUILD_SCRIPT_IN_REPO: ".github/workflows/debian-deb-build.sh"
+
+jobs:
+  # ----------------------------------------------------------------------------
+  # canary — SMOKE TEST. Build ONE combo first (bookworm/amd64) to prove the whole
+  # containerized path — script, docker run, cpack fetch, in-container prereqs,
+  # upload — on a single runner before spending minutes on the other five.
+  # ----------------------------------------------------------------------------
+  canary:
+    runs-on: namespace-profile-ubuntu-amd64-24
+    steps:
+      - name: Check out repo (staged build script)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - name: Build and upload deb (bookworm / amd64, containerized)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          ARCH: amd64
+          DEB_DIST: bookworm
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          bash "${GITHUB_WORKSPACE}/${BUILD_SCRIPT_IN_REPO}"
+
+  # ----------------------------------------------------------------------------
+  # fanout — the OTHER {arch × debian-codename} combos, in parallel, after canary.
+  # Each on a matching-arch host runner so the container build is native.
+  # fail-fast:false so one flaky combo can't kill the peers.
+  # ----------------------------------------------------------------------------
+  fanout:
+    needs: canary
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: namespace-profile-ubuntu-amd64-24, arch: amd64, dist: trixie }
+          - { runner: namespace-profile-ubuntu-amd64-24, arch: amd64, dist: forky }
+          - { runner: namespace-profile-ubuntu-arm64-24, arch: arm64, dist: bookworm }
+          - { runner: namespace-profile-ubuntu-arm64-24, arch: arm64, dist: trixie }
+          - { runner: namespace-profile-ubuntu-arm64-24, arch: arm64, dist: forky }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out repo (staged build script)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - name: Build and upload deb (${{ matrix.dist }} / ${{ matrix.arch }}, containerized)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          ARCH: ${{ matrix.arch }}
+          DEB_DIST: ${{ matrix.dist }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          bash "${GITHUB_WORKSPACE}/${BUILD_SCRIPT_IN_REPO}"
