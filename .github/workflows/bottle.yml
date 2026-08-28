@@ -9,10 +9,13 @@ name: macOS bottle
 # the source of truth stays the bundle.
 #
 # COST NOTE: the build compiles all of LLVM/clang and runs ~1h on a paid arm64
-# macOS runner. The `preflight` step below verifies the two things that can only
-# be known at run time and would otherwise waste that hour:
+# macOS runner. The `preflight` step below verifies the things that can only be
+# known at run time and would otherwise waste that hour:
 #   1. the release for <tag> still exists
-#   2. this run's token is actually allowed to upload to it
+#   2. this run's token reports write permission
+#   3. an actual asset upload to that release SUCCEEDS (proven with a throwaway
+#      dummy asset that is uploaded, verified, then deleted) — this is the #1
+#      real-world failure and MUST be caught before the build, not after.
 # Everything else (formula validity, tap resolution, runner label, release
 # existence at authoring time) is guaranteed earlier by the MRC, so it is NOT
 # re-checked here.
@@ -69,6 +72,42 @@ jobs:
             exit 1
           fi
           echo "token has push permission"
+          echo "::endgroup::"
+
+          # --- LIVE UPLOAD PROOF -------------------------------------------
+          # `.permissions.push` is necessary but NOT sufficient: the actual
+          # release-asset upload path can still fail. This is the #1 way an
+          # hour-long build gets wasted. So prove the ENTIRE upload path works
+          # here, with a throwaway asset, then delete it. Fail now = fail cheap.
+          echo "::group::Prove asset upload works (dummy asset round-trip)"
+          probe="__bottle-upload-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.txt"
+          printf 'bottle upload preflight probe for %s\n' "${TAG}" > "${probe}"
+
+          # Upload (clobber in case a prior attempt left one behind).
+          if ! gh release upload "${TAG}" "${probe}" --repo "${GITHUB_REPO}" --clobber
+          then
+            echo "::error::Dummy asset upload FAILED — the real bottle upload would also fail. Aborting before the expensive build." >&2
+            rm -f "${probe}"
+            exit 1
+          fi
+
+          # Verify it is actually listed on the release.
+          if ! gh release view "${TAG}" --repo "${GITHUB_REPO}" --json assets \
+                 --jq '.assets[].name' | grep -qxF "${probe}"
+          then
+            echo "::error::Dummy asset uploaded but not found on the release; upload path is unreliable. Aborting." >&2
+            gh release delete-asset "${TAG}" "${probe}" --repo "${GITHUB_REPO}" --yes >/dev/null 2>&1 || true
+            rm -f "${probe}"
+            exit 1
+          fi
+
+          # Clean up the probe — it must never linger next to real bottles.
+          if ! gh release delete-asset "${TAG}" "${probe}" --repo "${GITHUB_REPO}" --yes
+          then
+            echo "::warning::Could not delete probe asset '${probe}'; please remove it manually." >&2
+          fi
+          rm -f "${probe}"
+          echo "upload path verified end-to-end (probe uploaded, listed, and removed)"
           echo "::endgroup::"
 
       - name: Set up Homebrew
