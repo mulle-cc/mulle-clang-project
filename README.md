@@ -27,7 +27,7 @@ for all Objective-C method calls. C function calls use the platform convention.
 The resultant `.o` files are linkable like any other compiled C code.
 
 
-### `@method_implementation`
+### `@mixin`
 
 Add a new ObjC language constructs for mulle-objc mixin (formerly protocolclass):
 
