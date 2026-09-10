@@ -42,5 +42,6 @@ in these files
 * foundation-developer/src/foundation/github-actions/project/all/.github/workflows/mulle-sde-ci.yml
 * foundation-developer/src/foundation/github-actions/project/all/.github/workflows/mulle-sde-artifacts.yml
 * mulle-web-developer/.github/workflows/mulle-sde-ci.yml
+* mulle-core-developer/src/mulle-core/github-actions/project/all/.github/workflows/mulle-sde-ci.yml
 
 Later we will freshen up the CI files in the project to get the newest version

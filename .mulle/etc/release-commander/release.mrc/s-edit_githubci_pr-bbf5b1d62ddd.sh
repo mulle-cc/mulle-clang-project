@@ -41,10 +41,14 @@ MulleFoundation/mulle-foundation-developer/src/mulle-foundation/github-actions/p
 MulleFoundation/foundation-developer/.github/workflows/mulle-sde-ci.yml
 MulleFoundation/foundation-developer/src/foundation/github-actions/project/all/.github/workflows/mulle-sde-ci.yml
 MulleFoundation/foundation-developer/src/foundation/github-actions/project/all/.github/workflows/mulle-sde-artifacts.yml
-MulleWeb/mulle-web-developer/.github/workflows/mulle-sde-ci.yml"
+MulleWeb/mulle-web-developer/.github/workflows/mulle-sde-ci.yml
+mulle-core/mulle-core-developer/src/mulle-core/github-actions/project/all/.github/workflows/mulle-sde-ci.yml"
 
-# Update yml files (idempotent - mulle-replace won't change if already correct)
-mulle-replace "mulle-cc/github-ci@${PREVIOUS_TAG}" \
+# Update yml files. Use a version-agnostic replace so that any drifted or
+# never-bumped reference (e.g. mulle-core-developer was historically stuck at
+# @v4 because it was missing from this list) is brought up to NEXT_TAG.
+# Idempotent - mulle-replace won't change a file already at NEXT_TAG.
+mulle-replace --regex "mulle-cc/github-ci@v[0-9][0-9]*" \
               "mulle-cc/github-ci@${NEXT_TAG}" \
               ${FILES}
 
@@ -62,7 +66,8 @@ cd "${MULLE_REPOS_DIR}"
 for repo in mulle-objc/mulle-objc-developer \
             MulleFoundation/mulle-foundation-developer \
             MulleFoundation/foundation-developer \
-            MulleWeb/mulle-web-developer
+            MulleWeb/mulle-web-developer \
+            mulle-core/mulle-core-developer
 do
    if git -C "${repo}" status --porcelain | grep -q '.'
    then

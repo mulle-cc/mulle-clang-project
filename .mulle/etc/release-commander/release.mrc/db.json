@@ -8,9 +8,9 @@
       "principalTool": "",
       "status": "done",
       "skillLevel": "Low",
-      "certHash": "0a63e1d8a286c44f",
-      "certTimestamp": "2026-07-24T23:43:31+02:00",
-      "logFilename": "l-figure_out_versi-a1b2c3d4e5f6-2026-07-24T23-42-35.log"
+      "certHash": "3ba5c195d30d5773",
+      "certTimestamp": "2026-08-25T22:59:00+02:00",
+      "logFilename": "l-figure_out_versi-a1b2c3d4e5f6-2026-08-25T22-58-32.log"
     },
     {
       "title": "Push branch to mulle and GitHub",
@@ -20,9 +20,9 @@
       "principalTool": "",
       "status": "done",
       "skillLevel": "Low",
-      "certHash": "dc0ffbe7587fea55",
-      "certTimestamp": "2026-07-24T23:45:32+02:00",
-      "logFilename": "l-push_branch_to_m-1a2b3c4d5e6f-2026-07-24T23-44-43.log"
+      "certHash": "852a20683b70dc2c",
+      "certTimestamp": "2026-08-25T22:57:00+02:00",
+      "logFilename": "l-push_branch_to_m-1a2b3c4d5e6f-2026-08-25T22-54-02.log"
     },
     {
       "title": "Release mulle-clang compiler",
@@ -33,9 +33,9 @@
       "status": "done",
       "skillLevel": "Low",
       "backgroundColor": "#FFCF9F",
-      "certHash": "ee96104737476d45",
-      "certTimestamp": "2026-07-24T23:46:57+02:00",
-      "logFilename": "l-release_mullecla-d519668af8fa-2026-07-24T23-46-18.log"
+      "certHash": "d22a6ccfc60750a1",
+      "certTimestamp": "2026-08-25T23:02:00+02:00",
+      "logFilename": "l-release_mullecla-d519668af8fa-2026-08-25T23-01-27.log"
     },
     {
       "title": "Create a debian VM if needed",
@@ -45,9 +45,9 @@
       "principalTool": "",
       "status": "done",
       "skillLevel": "Low",
-      "certHash": "c138dfb07378fd81",
-      "certTimestamp": "2026-07-24T23:48:43+02:00",
-      "logFilename": "l-create_a_vm_for_-bb5a1bc46d58-2026-07-24T23-47-59.log"
+      "certHash": "66f0d3808d0b80d9",
+      "certTimestamp": "2026-08-25T23:06:00+02:00",
+      "logFilename": "l-create_a_vm_for_-bb5a1bc46d58-2026-08-25T23-05-26.log"
     },
     {
       "title": "Prepare mulle-clang-cpack and commit",
@@ -57,9 +57,9 @@
       "principalTool": "",
       "status": "done",
       "skillLevel": "Low",
-      "certHash": "a3f7c2e91b4d8f05",
-      "certTimestamp": "2026-07-25T12:50:38+02:00",
-      "logFilename": "l-prepare_for_mull-8708711f3369-2026-07-25T12-49-43.log"
+      "certHash": "00d4b6c00ca604b3",
+      "certTimestamp": "2026-08-25T23:07:00+02:00",
+      "logFilename": "l-prepare_mullecl-8708711f3369-2026-08-25T23-06-51.log"
     },
     {
       "title": "Create mulle-clang-project x86_64 debian package",
@@ -69,9 +69,9 @@
       "principalTool": "",
       "status": "done",
       "skillLevel": "Low",
-      "certHash": "763f1fb400aa1bce",
-      "certTimestamp": "2026-07-25T14:53:08+02:00",
-      "logFilename": "l-create_mulleobjc-f66cc8f0570b-2026-07-25T12-57-02.log"
+      "certHash": "d4afa6f06cef04bc",
+      "certTimestamp": "2026-08-25T23:15:00+02:00",
+      "logFilename": "l-create_mulleobjc-f66cc8f0570b-2026-08-25T23-08-55.log"
     },
     {
       "title": "Upload debian package to release",
@@ -81,9 +81,21 @@
       "principalTool": "",
       "status": "done",
       "skillLevel": "Low",
-      "certHash": "f4f99e316c5ecf9a",
-      "certTimestamp": "2026-07-25T15:00:14+02:00",
-      "logFilename": "l-upload_debian_pa-bb720d437457-2026-07-25T14-55-07.log"
+      "certHash": "c4f2b5dc76ab3468",
+      "certTimestamp": "2026-08-26T01:18:00+02:00",
+      "logFilename": "l-upload_debian_pa-bb720d437457-2026-08-26T01-16-18.log"
+    },
+    {
+      "title": "Write GitHub release notes",
+      "filename": "i-write_release_no-8f4a9c2b.md",
+      "scriptFilename": "s-write_release_no-8f4a9c2b.sh",
+      "uuid": "8f4a9c2b-e7d1-4a55-9b2c-3d6f8a1e4b77",
+      "principalTool": "gh",
+      "status": "done",
+      "skillLevel": "Low",
+      "certHash": "0a5baefb4e3c4f3d",
+      "certTimestamp": "2026-08-26T09:45:00+02:00",
+      "logFilename": "l-write_release_no-8f4a9c2b-2026-08-26T09-44-11.log"
     },
     {
       "title": "Edit homebrew bottle formula  (macos)",
@@ -120,9 +132,9 @@
       "principalTool": "",
       "status": "done",
       "skillLevel": "Low",
-      "certHash": "7a329826dc4fd16e",
-      "certTimestamp": "2026-07-25T15:36:34+02:00",
-      "logFilename": "l-edit_githubci_pr-bbf5b1d62ddd-2026-07-25T15-35-33.log"
+      "certHash": "c73064de89955769",
+      "certTimestamp": "2026-08-26T01:27:00+02:00",
+      "logFilename": "l-edit_githubci_pr-bbf5b1d62ddd-2026-08-26T01-25-21.log"
     },
     {
       "title": "Update mulle-clang-mingw version and commit",
@@ -132,9 +144,9 @@
       "principalTool": "",
       "status": "done",
       "skillLevel": "Low",
-      "certHash": "732e5afdacd33514",
-      "certTimestamp": "2026-07-25T15:38:56+02:00",
-      "logFilename": "l-update_mulleming-c7d3e2f1a8b9-2026-07-25T15-38-07.log"
+      "certHash": "92caec76126bb4e0",
+      "certTimestamp": "2026-08-26T01:30:00+02:00",
+      "logFilename": "l-update_mulleming-c7d3e2f1a8b9-2026-08-26T01-28-59.log"
     },
     {
       "title": "Update README.md version info",
@@ -144,15 +156,15 @@
       "principalTool": "",
       "status": "done",
       "skillLevel": "Low",
-      "certHash": "7f3d309dacacfe99",
-      "certTimestamp": "2026-07-25T15:41:04+02:00",
-      "logFilename": "l-update_readmemd-8fc927dbde3c-2026-07-25T15-39-58.log"
+      "certHash": "cf2f5d8da67ecf37",
+      "certTimestamp": "2026-08-26T01:32:00+02:00",
+      "logFilename": "l-update_readmemd-8fc927dbde3c-2026-08-25T23-31-10.log"
     }
   ],
   "environmentVariables": {
-    "MULLE_CLANG_PROJECT_TAG": "22.1.2.6",
-    "MULLE_CLANG_BRANCH": "mulle/22.1.2",
-    "PWD": "/home/src/srcL/mulle-clang-22.1.2/mulle-clang-project",
+    "MULLE_CLANG_PROJECT_TAG": "22.1.8.7",
+    "MULLE_CLANG_BRANCH": "mulle/22.1.8",
+    "PWD": "/home/src/srcL/mulle-clang-22.1.8/mulle-clang-project",
     "MULLE_CLANG_CPACK_DIR": "/home/src/srcO/mulle-cc/mulle-clang-cpack",
     "MULLE_REPOS_DIR": "/home/src/srcO",
     "MULLE_OBJC_RUNTIME_LOAD_VERSION": "21",

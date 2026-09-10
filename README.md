@@ -27,47 +27,33 @@ for all Objective-C method calls. C function calls use the platform convention.
 The resultant `.o` files are linkable like any other compiled C code.
 
 
-### `@protocol_class` and `@protocol_implementation`
+### `@method_implementation`
 
-Add two new ObjC language constructs for mulle-objc protocolclasses:
+Add a new ObjC language constructs for mulle-objc mixin (formerly protocolclass):
 
-1. **`@protocol_class`** — Declares a protocolclass. Works like `@protocol`:
-   - `@protocol_class Foo;` — forward declaration
-   - `@protocol_class Foo, Bar;` — multiple forward declarations
-   - `@protocol_class Foo <NSObject> @optional ... @end` — full definition
+1. **`@mixin`** — Declares a protocolclass. Works like `@protocol`:
+   - `@mixin Foo;` — forward declaration
+   - `@mixin Foo, Bar;` — multiple forward declarations
+   - `@mixin Foo <NSObject> @optional ... @end` — full definition
 
-   `@protocol_interface` is an accepted alias for `@protocol_class`, anticipating
-   a future where `@protocol_interface`, `@protocol_class`, and `@protocol_implementation`
-   form a symmetric triple.
-
-2. **`@protocol_implementation Foo`** — Provides default method implementations.
-   Ends with `@end`.
-
-> **Compatibility**: the older spellings `@protocolclass` and `@protocolimplementation`
-> (without underscores) are still accepted as aliases.
-
-This was already available through macros in previous versions, but the
-syntax is now nicer and the compiler can issue better warnings and error
-messages.
 
 ```objc
 // Forward declaration (in headers that use the type)
-@protocol_class Foo;
+@mixin Foo;
 
 // Full declaration (in the defining header)
-@protocol_class Foo < NSObject>
+@mixin Foo < NSObject>
 - (void) doSomething;
 @end
 
 // Default implementations (in .m file)
-@protocol_implementation Foo
+@implementation Foo
 - (void) doSomething
 {
     // default impl
 }
 @end
 ```
-
 
 ### `@dependency`
 
