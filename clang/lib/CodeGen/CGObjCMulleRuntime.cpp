@@ -2959,7 +2959,13 @@ static EncTypeResult encTypeForChar( char c, const ASTContext &Ctx)
    case 'v':  return {0,    0,     0};
    case '@':  return {ptrSz, ptrAl, 1};  // retain_id
    case '#':  return {ptrSz, ptrAl, 0};
-   case ':':  return {ptrSz, ptrAl, 0};
+   case ':': {
+      // @mulle-objc@ uniqueid: SEL is mulle_objc_methodid_t (4/4), not a
+      // pointer. Derive from the actual SEL type so _cmd and SEL args/returns
+      // match the runtime's scalar typeinfo supplier.
+      QualType SelTy = Ctx.getObjCSelType();
+      return {SZ( SelTy), AL( SelTy), 0};
+   }
    case '*':  return {ptrSz, ptrAl, 1};  // char*
    case '%':  return {ptrSz, ptrAl, 0};  // atom (static char*)
    case '~':  return {ptrSz, ptrAl, 1};  // copy_id

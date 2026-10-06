@@ -27,52 +27,65 @@ for all Objective-C method calls. C function calls use the platform convention.
 The resultant `.o` files are linkable like any other compiled C code.
 
 
-### `@mixin`
+## Language features
 
-Add a new ObjC language constructs for mulle-objc mixin (formerly protocolclass):
+mulle-objc keeps Objective-C's core and makes deliberate additions and
+subtractions. The [De Re mulle-objc](//www.mulle-kybernetik.com/de-re-mulle-objc)
+developer guide covers them in full; this is the index.
 
-1. **`@mixin`** — Declares a protocolclass. Works like `@protocol`:
-   - `@mixin Foo;` — forward declaration
-   - `@mixin Foo, Bar;` — multiple forward declarations
-   - `@mixin Foo <NSObject> @optional ... @end` — full definition
+### Additions
+
+| Feature | What it adds | Guide |
+|---------|--------------|-------|
+| `@mixin` | a protocol that ships default implementations (formerly "protocolclass") | [Mixins](//www.mulle-kybernetik.com/de-re-mulle-objc/mixin.html) |
+| `@dependency` | declares that a category loads after another, and silences the redeclaration warning | [Organizing a Project](//www.mulle-kybernetik.com/de-re-mulle-objc/project.html) |
+| `@method_implementation` | aliases one selector to another method, or to a C function | [@method_implementation](//www.mulle-kybernetik.com/de-re-mulle-objc/method-implementation.html) |
+| `@signature` / `@invocation` | builds and replays a method invocation as an object (the block replacement) | [Invocations](//www.mulle-kybernetik.com/de-re-mulle-objc/invocations.html) |
+| `@defs` | exposes a class's ivar layout as a C struct | [Instance Variables](//www.mulle-kybernetik.com/de-re-mulle-objc/ivars.html) |
+| `NS_ENUM_TABLE` | gives enum values names you can print and parse | [C Interop and Types](//www.mulle-kybernetik.com/de-re-mulle-objc/c-interop.html) |
+| Thread-Affine Objects (TAO) | the runtime flags cross-thread use of an object (`-fobjc-tao`) | [Thread-Affine Objects](//www.mulle-kybernetik.com/de-re-mulle-objc/tao.html) |
+| Always Autorelease Mode | an ARC-like subset for `.aam` files (see [AAM](#aam)) | |
+
+### Removals
+
+| Feature | Instead | Guide |
+|---------|---------|-------|
+| ARC | manual reference counting | [Memory Management](//www.mulle-kybernetik.com/de-re-mulle-objc/memory.html) |
+| Blocks (`^`) | `NSInvocation` via `@invocation` | [Porting](//www.mulle-kybernetik.com/de-re-mulle-objc/porting.html) |
+| Dot syntax (`obj.prop`) | `[obj prop]` / `[obj setProp:x]` | [Porting](//www.mulle-kybernetik.com/de-re-mulle-objc/porting.html) |
+| `@synchronized` | `mulle_thread_mutex_t`, or `NSLock` | [Locks](//www.mulle-kybernetik.com/de-re-mulle-objc/locks.html) |
+| `weak` / `strong` | `retain`/`copy`, and `assign` for back-references | [Properties](//www.mulle-kybernetik.com/de-re-mulle-objc/property.html) |
+| Atomic properties | properties aren't atomic; lock around access | |
+| Lightweight generics (`NSArray<NSString *>`) | `id` and protocols, check at runtime | [Porting](//www.mulle-kybernetik.com/de-re-mulle-objc/porting.html) |
+| Class extensions (`@interface Foo ()`) | declare in the main `@interface`, or a named category | |
+| Subscripting (`array[0]`) | `[array objectAtIndex:0]` | [Porting](//www.mulle-kybernetik.com/de-re-mulle-objc/porting.html) |
+| `@import` / modules | `#import` | |
+| Objective-C++ | bridge across a C boundary | [Porting](//www.mulle-kybernetik.com/de-re-mulle-objc/porting.html) |
+| `nullable` / `nonnull` | Objective-C is nullable by design | |
+
+The full comparison lives in [Differences to Objective-C 2.0](//www.mulle-kybernetik.com/de-re-mulle-objc/differences.html).
+
+### Property attributes
+
+The familiar `assign`, `retain`, `copy`, `readonly` and `nonatomic` work as
+expected, and mulle-objc adds several attributes of its own.
+[De Re @property](//www.mulle-kybernetik.com/de-re-property) is the full
+reference.
+
+| Attribute | What it adds | Guide |
+|-----------|--------------|-------|
+| `class` | the property lives on the class object, not the instances | [class](//www.mulle-kybernetik.com/de-re-property/class.html) |
+| `container` | a collection property; adds `addTo<Prop>:` / `removeFrom<Prop>:` | [container](//www.mulle-kybernetik.com/de-re-property/container.html) |
+| `dynamic` | no instance variable or accessors are generated | [dynamic](//www.mulle-kybernetik.com/de-re-property/dynamic.html) |
+| `forward` | accessors aren't synthesized; they're handed off to another receiver | [forward](//www.mulle-kybernetik.com/de-re-property/forward.html) |
+| `observable` | calls `willChange` before the value changes | [observable](//www.mulle-kybernetik.com/de-re-property/observable.html) |
+| `serializable` / `nonserializable` | marks the property for (or out of) archiving | [serializable](//www.mulle-kybernetik.com/de-re-property/serializable.html) |
+
+`atomic`, `weak` and `strong` are the property attributes mulle-objc leaves out
+(see the removals table above).
 
 
-```objc
-// Forward declaration (in headers that use the type)
-@mixin Foo;
-
-// Full declaration (in the defining header)
-@mixin Foo < NSObject>
-- (void) doSomething;
-@end
-
-// Default implementations (in .m file)
-@implementation Foo
-- (void) doSomething
-{
-    // default impl
-}
-@end
-```
-
-### `@dependency`
-
-Declares that a category implementation depends on another category of the
-same class being loaded first:
-
-```objc
-@implementation Foo (Bar)
-@dependency Foo(Base);   // suppress redeclaration warning, declare load order
-- (int) value { return 42; }
-@end
-```
-
-The compiler warns if a method implemented in a category is already declared
-in another category of the same class, unless suppressed by `@dependency` or
-the other category name contains `forward`, `future`, or `prototype`.
-
-
-### ObjC to C Rewriter
+## ObjC to C Rewriter
 
 The compiler can rewrite Objective-C source to portable C via `--mulle-objc-emit-c`.
 This is used to produce C output that can be compiled by any C compiler targeting
@@ -92,49 +105,7 @@ Relevant flags for rewriter output:
 | `-fobjc-encode-no-offsets`    | Strip byte offsets from type encodings in rewriter output
 
 
-### `@method_implementation` — method alias directive
-
-`@method_implementation` is a mulle-clang extension that lets you alias one method
-selector to another method or to a plain C function, inside an `@implementation` block.
-
-**Method-to-method alias:**
-
-```objc
-@implementation Foo
-
-- (void) doWork { ... }
-
-@method_implementation - work = - doWork;   // -work routes to -doWork
-
-@end
-```
-
-The compiler checks that both selectors have the same arity, return type, and
-parameter types. A warning is issued if the LHS selector is not declared in
-the `@interface`.
-
-**Method-to-C-function alias:**
-
-The C function must follow the mulle MetaABI calling convention:
-
-```c
-// 0-arg method:  (id self, SEL sel) -> void *
-// n-arg method:  (id self, SEL sel, void *_param) -> void *  (or -> void)
-void *my_impl(id self, mulle_objc_methodid_t sel, void *_param);
-```
-
-```objc
-@implementation Bar
-
-@method_implementation - compute: = my_impl;
-
-@end
-```
-
-The compiler validates parameter count and types at the point of the directive.
-
-
-### AAM - Always Autorelease Mode
+## AAM
 
 The compiler has a special mode called AAM. This changes the Objective-C
 language in the following ways:
