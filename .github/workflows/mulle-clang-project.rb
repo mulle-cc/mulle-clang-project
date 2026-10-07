@@ -2,7 +2,7 @@ class MulleClangProject < Formula
   desc "Objective-C compiler for the mulle-kybernetik runtime"
   homepage "https://github.com/mulle-cc/mulle-clang-project"
   license "BSD-3-Clause"
-  version "22.1.8.7"
+  version "22.1.8.8"
 #  revision 1
   head "https://github.com/mulle-cc/mulle-clang-project.git", branch: "mulle/17.0.6"
 
@@ -30,11 +30,11 @@ class MulleClangProject < Formula
 #    3. Run shasum over it `shasum -a 256 -b 22.1.8.7.tar.gz`
 #    4. Remove bottle urls
 #
-  url "https://github.com/mulle-cc/mulle-clang-project/archive/refs/tags/22.1.8.7.tar.gz"
-  sha256 "a6c3ea6ee6ab44f4b5ff0e0cd7d6f3ac3245f2da1b56cc72660a663edad6b05f"
+  url "https://github.com/mulle-cc/mulle-clang-project/archive/refs/tags/22.1.8.8.tar.gz"
+  sha256 "4b441b5b84b5122ffd8f2c260e8b9ddead56d8e4a7de1f850adc8f84f98f2385"
 
   def vendor
-    "mulle-clang 22.1.8.7 (runtime-load-version: 19)"
+    "mulle-clang 22.1.8.8 (runtime-load-version: 21)"
   end
 
 #
@@ -54,10 +54,6 @@ class MulleClangProject < Formula
 #            ./mulle-clang-22.1.8.7.sequoia.bottle.tar.gz \
 #            codeon@www262.your-server.de:public_html/_site/bottles/
 #
-  bottle do
-    root_url "https://github.com/mulle-cc/mulle-clang-project/releases/download/22.1.8.7/"
-    sha256 cellar: :any, sequoia: "c421aee60a17ce1a83f109161c265d1ad99d6c04185a132b80ceb5be26b425ed"
-  end
 
 #
 # MEMO:
