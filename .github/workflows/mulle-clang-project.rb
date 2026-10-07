@@ -31,7 +31,7 @@ class MulleClangProject < Formula
 #    4. Remove bottle urls
 #
   url "https://github.com/mulle-cc/mulle-clang-project/archive/refs/tags/22.1.8.8.tar.gz"
-  sha256 "4b441b5b84b5122ffd8f2c260e8b9ddead56d8e4a7de1f850adc8f84f98f2385"
+  sha256 "6fa3e37ba629f2e6fca03781943cbaf1bb7af03e8a08a55e46d1f2e5a09b6c75"
 
   def vendor
     "mulle-clang 22.1.8.8 (runtime-load-version: 21)"
