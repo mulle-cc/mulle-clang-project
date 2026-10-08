@@ -41,13 +41,75 @@ substituted. It contains:
 The script builds this section from the release's actual assets, so never list a
 distro or a bottle that is not there.
 
+### Install instructions to carry over (verbatim from the 22.1.8.7 release note)
+
+This is the exact text that shipped in `22.1.8.7`. Reproduce it in the new body
+substituting `@@VERSION@@` and keeping only the rows/bottles actually present:
+
+````markdown
+## Installation
+
+### Debian / Ubuntu (`.deb`)
+
+| Distro               | codename      |
+|----------------------|---------------|
+| Debian 12 (bookworm) | `bookworm`    |
+| Debian 13 (trixie)   | `trixie`      |
+| Debian 14 (forky)    | `forky`       |
+| Ubuntu 22.04 (jammy) | `ubuntu22.04` |
+| Ubuntu 24.04 (noble) | `ubuntu24.04` |
+| Ubuntu 26.04         | `ubuntu26.04` |
+
+`amd64` and `arm64` are provided. Pick your codename and architecture, then:
+
+```sh
+version=@@VERSION@@
+codename=bookworm                                  # see table above
+arch=$(dpkg --print-architecture)                  # amd64 or arm64
+
+curl -LO "https://github.com/mulle-cc/mulle-clang-project/releases/download/${version}/mulle-clang-${version}-${codename}-${arch}.deb"
+sudo apt-get install -y "./mulle-clang-${version}-${codename}-${arch}.deb"
+```
+
+The package installs the toolchain under `/opt/mulle-clang-project/${version}/`
+and puts `mulle-clang`, `mulle-nm` and `mulle-scan-build` on your `PATH`
+(via `/usr/bin` symlinks).
+
+> Note: the **forky** build ships **without compiler runtimes** (no ASAN/etc.).
+
+### macOS (Homebrew)
+
+```sh
+brew install mulle-objc/software/mulle-clang-project
+```
+
+Bottles are attached to this release for <bottle tags actually present>.
+
+### Verify
+
+```sh
+mulle-clang --version
+```
+
+### From source
+
+```sh
+git clone --branch @@VERSION@@ --depth 1 https://github.com/mulle-cc/mulle-clang-project.git
+cd mulle-clang-project
+PREFIX="$HOME/opt/mulle-clang-project/@@VERSION@@" NAME=@@VERSION@@ clang/bin/cmake-ninja.linux
+```
+````
+
+Do NOT drop this section, and do NOT list a distro or bottle tag that is not
+actually attached to the release.
+
 ## Authoritative facts — NEVER guess
 
 Only write lines you can verify from authoritative sources:
 
 | Fact | Authoritative source |
 |---|---|
-| Required runtime version | parent `MULLE_RELEASE_TAG` (e.g. `0.30`); note "mulle-objc-runtime 0.30 or better" |
+| Required runtime version | `MULLE_OBJC_RUNTIME_MIN_VERSION` (e.g. `0.30`); write "requires mulle-objc-runtime 0.30 or better". This is the compiler's **minimum compatible** runtime, NOT `MULLE_RELEASE_TAG` (the objc release, `0.31`) |
 | Load version | `COMPATIBLE_MULLE_OBJC_RUNTIME_LOAD_VERSION` in `clang/include/clang/Basic/ObjCRuntime.h` |
 | Prebuilt .deb distros present | run `gh release view <VER> --json assets -q '.assets[].name'` and list the `.deb` codenames actually present |
 | Forky no-sanitizers note | the forky `.deb` was built with `-DLLVM_ENABLE_RUNTIMES=` (no ASAN/compiler-rt). State only that it has no compiler runtimes — do NOT add an explanatory "because" clause unless (and only if) you can verify it from source

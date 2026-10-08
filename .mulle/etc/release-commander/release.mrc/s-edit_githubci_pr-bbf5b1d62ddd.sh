@@ -48,8 +48,10 @@ mulle-core/mulle-core-developer/src/mulle-core/github-actions/project/all/.githu
 # never-bumped reference (e.g. mulle-core-developer was historically stuck at
 # @v4 because it was missing from this list) is brought up to NEXT_TAG.
 # Idempotent - mulle-replace won't change a file already at NEXT_TAG.
-mulle-replace --regex "mulle-cc/github-ci@v[0-9][0-9]*" \
-              "mulle-cc/github-ci@${NEXT_TAG}" \
+# NOTE: mulle-replace --regex feeds sed, so '/' in pattern AND replacement must
+# be escaped as '\/' (see mulle-replace --help).
+mulle-replace --regex "mulle-cc\/github-ci@v[0-9][0-9]*" \
+              "mulle-cc\/github-ci@${NEXT_TAG}" \
               ${FILES}
 
 #

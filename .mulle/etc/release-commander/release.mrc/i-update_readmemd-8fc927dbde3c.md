@@ -8,7 +8,7 @@ It corresponds to mulle-objc-runtime vX.YY or better (load version N).
 
 | Field | Source |
 |---|---|
-| `vX.YY` | `MULLE_RELEASE_TAG` from parent .mrc (e.g. v0.29) |
+| `vX.YY` | `MULLE_OBJC_RUNTIME_MIN_VERSION` (e.g. v0.30) — the compiler's minimum compatible runtime. Do NOT use `MULLE_RELEASE_TAG` (the objc release, `0.31`) |
 | `load version N` | `COMPATIBLE_MULLE_OBJC_RUNTIME_LOAD_VERSION` from `clang/include/clang/Basic/ObjCRuntime.h` |
 
 ## Procedure

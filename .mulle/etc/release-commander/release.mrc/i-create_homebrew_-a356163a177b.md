@@ -1,16 +1,59 @@
-Ok we don't have a VM for that yet. Copy over the project to a Mac. You may need to patch the script a little.
+# Stage the mulle-clang-project formula into the release branch for the CI bottles
 
-[Check](https://www.perplexity.ai/search/?q=what%20version%20is%20the%20macosx-latest%20runner%20on%20github%20currently%2C%20and%20what%20will%20it%20be%20in%20the%20future) what macosx-latest on github is currently and what it will be soon. Build bottles for both and upload to the mulle-cc release page.
+Put `.github/workflows/mulle-clang-project.rb` on `MULLE_CLANG_BRANCH` at exactly
+`MULLE_CLANG_PROJECT_TAG`, so the following bottle-CI task builds bottles for the
+right version.
 
-## Where is the preview ?
+## Why this is required
 
-The recipe is in [homebrew-prerelease](https://github.com/mulle-objc/homebrew-prerelease/blob/master/mulle-clang-project.rb)
+The bottle CI (`.github/workflows/bottle.yml`) builds from the **in-repo staged
+formula** via a faked local tap. `bottle-build.sh` does **not** check that the
+formula's `version` matches the requested tag — a stale formula silently produces
+mis-versioned bottles (e.g. it was still at `22.1.8.7` and would have built
+`22.1.8.7` bottles onto the `22.1.8.8` release). This task is the guard against
+that.
 
-At the end we will have a new `mulle-clang-project.rb` file.
+## What the script does
 
-This file needs to be pushed to homebrew-prerelease. The formula will eventually also be put into homebrew-release, if no problems appear.
+1. Fetches the base formula (class body, `install`, `caveats`, `test`) from the
+   current **stable tap** `${TEMPLATE_REPO}` (default `mulle-objc/homebrew-software`).
+2. Downloads the release source tarball and computes its sha256 (never guessed).
+3. Rewrites `version`, `url`, the **source** sha256, and the `vendor` version +
+   `runtime-load-version` (from `${MULLE_OBJC_RUNTIME_LOAD_VERSION}`), and
+   **removes** the `bottle do` block (CI builds fresh bottles for this tag; a stale
+   block would mislead `brew`).
+4. `ruby -c` syntax-checks the result and asserts the `version` line is the tag.
+5. PUTs it to `${REPO}/${FORMULA_IN_REPO}` on `${MULLE_CLANG_BRANCH}` via the
+   Contents API (no clone), idempotently, then re-reads the branch and confirms the
+   staged version equals the tag.
+6. Fails if `.github/workflows/bottle-build.sh` is missing on the branch.
 
-[Apple codenames](https://en.wikipedia.org/wiki/List_of_Apple_codenames)
+## Ordering
 
+This task **must run before** *"Build macOS bottles via GitHub Actions"*. It is
+placed immediately before it in the task list; do not reorder it later.
 
-You can't run the script on macos inside this app, because... it's Apple I guess.
+## Environment
+
+- `MULLE_CLANG_PROJECT_TAG` — release tag (e.g. `22.1.8.8`)
+- `MULLE_CLANG_BRANCH` — release branch (e.g. `mulle/22.1.8`)
+- `MULLE_OBJC_RUNTIME_LOAD_VERSION` — load version (e.g. `21`)
+- `GITHUB_REPO` (optional; default `mulle-cc/mulle-clang-project`)
+- `TEMPLATE_REPO` / `TEMPLATE_BRANCH` (optional; default `mulle-objc/homebrew-software` / `master`)
+- `FORMULA_IN_REPO` (optional; default `.github/workflows/mulle-clang-project.rb`)
+
+## Note
+
+The **finalized** formula (with the real `bottle do` shas) is produced later by the
+*"Finalize and promote homebrew formula to stable taps"* task, from the release
+assets. This task only stages the build-time formula.
+
+## Next release: use the attached source asset
+
+The GitHub tag archive (`archive/refs/tags/<TAG>.tar.gz`) is generated on demand
+and is **not deterministic** (`export-subst` + `git describe` auto-abbrev varies
+by backend), so the source `sha256` can change unexpectedly. From the next
+compiler release onward, the *"Attach stable source tarball as release asset"*
+task runs first and this task must set `url` to that asset
+(`SOURCE_ASSET_URL`) and the source `sha256` to `SOURCE_ASSET_SHA256` instead of
+downloading the tag archive.

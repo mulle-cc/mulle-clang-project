@@ -15,11 +15,9 @@ fi
 cd "$REPO" || exit 1
 git pull || exit 1
 
-# Derive the llvmorg tag: strip patch version (22.1.2.2 -> llvmorg-22.1.2)
-LLVM_ORG_VERSION="llvmorg-${MULLE_CLANG_PROJECT_TAG%.*}"
-
-# Update build-llvm.sh default version
-sed -i "s/: \${LLVM_VERSION:=llvmorg-[0-9.]*/: \${LLVM_VERSION:=${LLVM_ORG_VERSION}/" build-llvm.sh
+# LLVM_VERSION is the mulle-clang-project git ref that build-llvm.sh checks out
+# (a tag like 22.1.8.8), NOT an upstream llvmorg-* ref.
+sed -i "s/: \${LLVM_VERSION:=[0-9][0-9.]*/: \${LLVM_VERSION:=${MULLE_CLANG_PROJECT_TAG}/" build-llvm.sh
 
 # Update README.md
 sed -i "s/LLVM_VERSION=[0-9][0-9.]*/LLVM_VERSION=${MULLE_CLANG_PROJECT_TAG}/g" README.md

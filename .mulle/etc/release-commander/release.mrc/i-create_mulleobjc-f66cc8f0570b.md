@@ -1,90 +1,55 @@
-Create mulle-objc x86_64 compiler for **trixie, bookworm, and forky**. Just run the script.
+# Build the mulle-clang `.deb` packages via GitHub Actions
 
-> #### Harmless warning
-> /home/nat/mono/mulle-clang-project/clang/lib/Sema/SemaDeclObjC.cpp:2916:10: warning: add explicit braces to avoid dangling else [-Wdangling-else]
-> 2916 |          else
->
+**Package building is automated. Do NOT build debs locally in a VM or docker — that
+is obsolete.**
 
-## Forky build (no sanitizers)
+The `.deb` files for **bookworm / trixie / forky (Debian)** and
+**ubuntu22.04 / ubuntu24.04 / ubuntu26.04**, each for **amd64 and arm64**, are built
+from the release source tarball and uploaded directly to the GitHub release by two
+manually-triggered, idempotent workflows installed by the
+`mulle-clang-project-deb-ci.mrc` bundle:
 
-The forky deb must be built **without sanitizers** because `linux/scc.h` was
-removed from kernel UAPI headers in Debian forky/sid. Pass:
+| Workflow | Distros |
+|---|---|
+| `.github/workflows/debian-debs.yml` | bookworm / trixie / forky |
+| `.github/workflows/debs.yml` | ubuntu22.04 / ubuntu24.04 / ubuntu26.04 |
 
-```
-CMAKEFLAGS="-DLLVM_ENABLE_RUNTIMES="
-```
+## Run
 
-This disables compiler-rt entirely. The resulting deb has no ASan/TSan/etc.
-This should be noted in release notes.
+Just run the script. It:
 
-### Docker-based build (preferred for forky)
+1. asserts the repo **default branch** equals `MULLE_CLANG_BRANCH` (a
+   `workflow_dispatch` workflow is only dispatchable from the default branch — a
+   hard rule enforced by the CI bundle preflight),
+2. exits immediately if all 12 expected `.deb` assets are already on the release,
+3. otherwise, **per workflow**: if that workflow's debs are already all present it
+   is skipped entirely; else it **attaches** to an in-flight run, or **dispatches**
+   a fresh one only when none is running (never creating duplicate runs), passing
+   `-f tag=${MULLE_CLANG_PROJECT_TAG}`,
+4. **polls for at most `MULLE_CI_POLL_SECONDS` (default 300 = 5 min)**, printing a
+   status snapshot every 30 s, then returns.
 
-No need for a VM — use a `debian:testing` container:
+### Non-blocking poll model (important)
 
-```bash
-mkdir -p /tmp/forky-output
-docker run --rm --privileged --memory=32g --cpus=32 \
-  -v /path/to/mulle-clang-cpack:/cpack:ro \
-  -v /tmp/forky-output:/output \
-  debian:testing bash -c '
-ln -s /usr/bin/env /usr/local/bin/sudo
-apt-get update -qq
-apt-get install -y -qq git cmake ninja-build clang wget python3 lsb-release file linux-libc-dev
-mkdir -p /build && cd /build
-cp -r /cpack mulle-clang-cpack
-VERSION="22.1.2.6" RC="" NINJAFLAGS="" CMAKEFLAGS="-DLLVM_ENABLE_RUNTIMES=" \
-  ./mulle-clang-cpack/package-build clean download build verpack
-cp *.deb /output/
-'
-```
+CI here is long — canary then a 5-way fanout, and the runner pool can serialize it
+to well over an hour. A blocking `gh run watch` gives the commander no visibility
+until the call returns, so the script deliberately does **not** block to
+completion. That is why the task stays `in-progress` and is re-run every ~5 min;
+each re-run prints one progress update and **re-attaches to the same runs** rather
+than dispatching new ones.
 
-Requirements: ~32 CPUs, 16GB+ RAM, ~25GB disk. Build takes ~12 minutes.
+### Exit codes
 
-### ABI note (discovered 2026-08-01)
+| exit | meaning |
+|---|---|
+| `0` | all 12 expected `.deb` assets are present → done, certifiable |
+| `1` | a tracked run finished `failure`/`cancelled`, or the run finished but assets are still missing → real failure |
+| `3` | still running at the poll deadline → task stays `in-progress`; re-run to continue polling |
 
-The Debian era boundary for `.deb` packages is determined by **shared library
-sonames**, NOT by release dates. Ubuntu 25.10 (questing) onward imports from
-Debian forky/sid and has `libxml2.so.16` instead of `.so.2`. The mapping in
-`github-ci/install.sh` must reflect this. See the `update_muller_de` MRC task
-instruction for the full verification procedure.
+Re-dispatching is cheap and safe: each workflow first checks whether its `.deb`
+already exists on the release and skips the build if so. Use `-f force=true` to
+force a rebuild.
 
-## Manual Usage
-
-### Unix
-
-#### Get git happening and clone cpack-mulle-clang:
-
-``` bash
-sudo apt-get install git sudo
-git clone https://github.com/mulle-cc/mulle-clang-cpack.git
-```
-
-#### Build mulle-clang into a local opt folder:
-
-Set `VERSION` appropriately:
-
-``` bash
-VERSION="17.0.6.0"
-RC="" # e.g. -RC1
-mkdir mono
-cd mono
-wget -O - "https://github.com/mulle-cc/mulle-clang-project/archive/${VERSION}${RC}.tar.gz" | tar xfz -
-mv "mulle-clang-project-${VERSION}${RC}" mulle-clang-project
-mkdir opt/mulle-clang-project
-sudo ln -s "$PWD/opt/mulle-clang-project" "/opt/mulle-clang-project"
-```
-
-####  Build normally
-
-``` bash
-PREFIX="/opt" NAME="${VERSION}" ./mulle-clang-project/clang/bin/cmake-ninja.linux
-```
-
-
-#### Create .deb package and upload:
-
-``` bash
-cp ../cpack-mulle-clang/* .
-chmod 755 generate-package
-./generate-package
-```
+> Historical note: the forky build ships **without compiler runtimes**
+> (`CMAKEFLAGS="-DLLVM_ENABLE_RUNTIMES="`). This is handled inside the CI build
+> script; it is noted in the release notes.

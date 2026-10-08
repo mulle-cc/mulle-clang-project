@@ -8,9 +8,9 @@
       "principalTool": "",
       "status": "done",
       "skillLevel": "Low",
-      "certHash": "cc7cb70e01973e87",
-      "certTimestamp": "2026-10-06T17:58:13+02:00",
-      "logFilename": "l-figure_out_versi-a1b2c3d4e5f6-2026-10-06T17-57-31.log"
+      "certHash": "03b8e26e84c945c8",
+      "certTimestamp": "2026-10-06T18:07:15+02:00",
+      "logFilename": "l-figure_out_versi-a1b2c3d4e5f6-2026-10-06T18-05-59.log"
     },
     {
       "title": "Push branch to mulle and GitHub",
@@ -18,9 +18,11 @@
       "scriptFilename": "s-push_branch_to_g-1a2b3c4d5e6f.sh",
       "uuid": "1a2b3c4d-5e6f-4000-0000-000000000000",
       "principalTool": "",
-      "status": "in-progress",
+      "status": "done",
       "skillLevel": "Low",
-      "certComment": "FAILED 2026-10-06: 'mulle' remote push OK (af59fdc253e1..2e94fa7ed3ab), but 'origin' (GitHub mulle-cc/mulle-clang-project) rejected mulle/22.1.8 as non-fast-forward ('fetch first'). Local branch 2e94fa7e diverged from origin/mulle/22.1.8. Needs reconciliation before this task can pass. Script exit 1."
+      "certHash": "27083ce8ad48354e",
+      "certTimestamp": "2026-10-06T18:05:50+02:00",
+      "logFilename": "l-push_branch_to_m-1a2b3c4d5e6f-2026-10-06T18-05-29.log"
     },
     {
       "title": "Release mulle-clang compiler",
@@ -28,9 +30,12 @@
       "scriptFilename": "s-release_mullecla-d519668af8fa.sh",
       "uuid": "d519668a-f8fa-44c7-ac0f-06b67d367e53",
       "principalTool": "",
-      "status": "todo",
+      "status": "done",
       "skillLevel": "Low",
-      "backgroundColor": "#FFCF9F"
+      "backgroundColor": "#FFCF9F",
+      "certHash": "925485fb23934a60",
+      "certTimestamp": "2026-10-06T18:07:47+02:00",
+      "logFilename": "l-release_mullecla-d519668af8fa-2026-10-06T18-07-23.log"
     },
     {
       "title": "Create a debian VM if needed",
@@ -38,8 +43,21 @@
       "scriptFilename": "s-create_a_vm_for_-bb5a1bc46d58.sh",
       "uuid": "bb5a1bc4-6d58-44d6-9c09-dd6e5acfbdf5",
       "principalTool": "",
-      "status": "todo",
-      "skillLevel": "Low"
+      "status": "done",
+      "skillLevel": "Low",
+      "certHash": "22aaa167425cceaa",
+      "certTimestamp": "2026-10-06T18:08:49+02:00",
+      "logFilename": "l-create_a_vm_for_-bb5a1bc46d58-2026-10-06T18-08-01.log"
+    },
+    {
+      "title": "Attach stable source tarball as release asset",
+      "filename": "i-attach_stable_so-ssa000000001.md",
+      "scriptFilename": "s-attach_stable_so-ssa000000001.sh",
+      "uuid": "ssa000000001",
+      "principalTool": "gh",
+      "status": "skipped",
+      "skillLevel": "Medium",
+      "certComment": "SKIPPED for 22.1.8.8 (debs/bottles already built from the non-deterministic GitHub tag archive). MUST run on the NEXT compiler release, before deb/bottle CI and before formula staging/promote."
     },
     {
       "title": "Prepare mulle-clang-cpack and commit",
@@ -47,26 +65,47 @@
       "scriptFilename": "s-prepare_for_mull-8708711f3369.sh",
       "uuid": "8708711f-3369-4406-b2b7-4ba01b31091b",
       "principalTool": "",
-      "status": "todo",
-      "skillLevel": "Low"
+      "status": "done",
+      "skillLevel": "Low",
+      "certHash": "112a2c9bf25efdf5",
+      "certTimestamp": "2026-10-06T18:09:27+02:00",
+      "logFilename": "l-prepare_mullecl-8708711f3369-2026-10-06T18-09-03.log"
     },
     {
-      "title": "Create mulle-clang-project x86_64 debian package",
+      "title": "Build Debian and Ubuntu debs via GitHub Actions",
       "filename": "i-create_mulleobjc-f66cc8f0570b.md",
       "scriptFilename": "s-create_mulleobjc-f66cc8f0570b.sh",
       "uuid": "f66cc8f0-570b-452c-a355-6eafd7aa97b3",
       "principalTool": "",
-      "status": "todo",
-      "skillLevel": "Low"
+      "status": "done",
+      "skillLevel": "Low",
+      "certHash": "34b740bc3409524d",
+      "certTimestamp": "2026-10-07T17:51:28+02:00",
+      "logFilename": "l-build_debian_and-f66cc8f0570b-2026-10-07T17-50-49.log"
     },
     {
-      "title": "Upload debian package to release",
+      "title": "Stage 22.1.8.8 formula into release branch for CI bottles",
+      "filename": "i-create_homebrew_-a356163a177b.md",
+      "scriptFilename": "s-create_homebrew_-a356163a177b.sh",
+      "uuid": "a356163a-177b-43c0-af0c-9787dbe609ee",
+      "principalTool": "",
+      "status": "done",
+      "skillLevel": "Low",
+      "certHash": "a2cf364f2f8630ab",
+      "certTimestamp": "2026-10-08T01:39:38+02:00",
+      "logFilename": "l-stage_22188_form-a356163a177b-2026-10-08T01-38-27.log"
+    },
+    {
+      "title": "Build macOS bottles via GitHub Actions",
       "filename": "i-upload_debian_pa-bb720d437457.md",
       "scriptFilename": "s-upload_debian_pa-bb720d437457.sh",
       "uuid": "bb720d43-7457-4f30-84ad-b743094f7006",
       "principalTool": "",
-      "status": "todo",
-      "skillLevel": "Low"
+      "status": "done",
+      "skillLevel": "Low",
+      "certHash": "49e486d09078b714",
+      "certTimestamp": "2026-10-08T11:07:11+02:00",
+      "logFilename": "l-build_macos_bott-bb720d437457-2026-10-08T09-05-08.log"
     },
     {
       "title": "Write GitHub release notes",
@@ -74,17 +113,11 @@
       "scriptFilename": "s-write_release_no-8f4a9c2b.sh",
       "uuid": "8f4a9c2b-e7d1-4a55-9b2c-3d6f8a1e4b77",
       "principalTool": "gh",
-      "status": "todo",
-      "skillLevel": "Low"
-    },
-    {
-      "title": "Edit homebrew bottle formula  (macos)",
-      "filename": "i-create_homebrew_-a356163a177b.md",
-      "scriptFilename": "s-create_homebrew_-a356163a177b.sh",
-      "uuid": "a356163a-177b-43c0-af0c-9787dbe609ee",
-      "principalTool": "",
-      "status": "skipped",
-      "skillLevel": "Low"
+      "status": "done",
+      "skillLevel": "Low",
+      "certHash": "0c8283a98a5b5d67",
+      "certTimestamp": "2026-10-08T11:26:46+02:00",
+      "logFilename": "l-write_release_no-8f4a9c2be7d1-2026-10-08T11-26-02.log"
     },
     {
       "title": "Brew the bottle (macos)",
@@ -105,13 +138,16 @@
       "skillLevel": "Low"
     },
     {
-      "title": "Promote homebrew formula to stable tap",
+      "title": "Finalize and promote homebrew formula to stable taps",
       "filename": "i-promote_homebrew-e7c1a9b4.md",
       "scriptFilename": "s-promote_homebrew-e7c1a9b4.sh",
       "uuid": "e7c1a9b4-2f3d-4a61-9c8e-5b0d7f6a2e13",
       "principalTool": "gh",
-      "status": "todo",
-      "skillLevel": "Low"
+      "status": "done",
+      "skillLevel": "Low",
+      "certHash": "8ca3b741577cc112",
+      "certTimestamp": "2026-10-08T11:34:10+02:00",
+      "logFilename": "l-finalize_and_pro-e7c1a9b42f3d-2026-10-08T11-28-26.log"
     },
     {
       "title": "Edit github-ci project with mulle-clang URL",
@@ -119,8 +155,11 @@
       "scriptFilename": "s-edit_githubci_pr-bbf5b1d62ddd.sh",
       "uuid": "bbf5b1d6-2ddd-43bc-b6e5-5895425f921c",
       "principalTool": "",
-      "status": "todo",
-      "skillLevel": "Low"
+      "status": "done",
+      "skillLevel": "Low",
+      "certHash": "a2983831b70f36cf",
+      "certTimestamp": "2026-10-08T11:46:27+02:00",
+      "logFilename": "l-edit_githubci_pr-bbf5b1d62ddd-2026-10-08T11-45-05.log"
     },
     {
       "title": "Update mulle-clang-mingw version and commit",
@@ -128,8 +167,11 @@
       "scriptFilename": "s-update_mulleming-c7d3e2f1a8b9.sh",
       "uuid": "c7d3e2f1-a8b9-4000-0000-000000000000",
       "principalTool": "",
-      "status": "todo",
-      "skillLevel": "Low"
+      "status": "done",
+      "skillLevel": "Low",
+      "certHash": "24b38f258a1e4102",
+      "certTimestamp": "2026-10-08T11:48:23+02:00",
+      "logFilename": "l-update_mulleming-c7d3e2f1a8b9-2026-10-08T11-47-32.log"
     },
     {
       "title": "Update README.md version info",
@@ -137,13 +179,18 @@
       "scriptFilename": "s-update_readmemd-8fc927dbde3c.sh",
       "uuid": "8fc927dbde3c",
       "principalTool": "",
-      "status": "todo",
-      "skillLevel": "Low"
+      "status": "done",
+      "skillLevel": "Low",
+      "certHash": "14c0df4f19e07083",
+      "certTimestamp": "2026-10-08T11:49:35+02:00",
+      "logFilename": "l-update_readmemd-8fc927dbde3c-2026-10-08T11-48-31.log"
     }
   ],
   "environmentVariables": {
     "MULLE_CLANG_PROJECT_TAG": "22.1.8.8",
     "MULLE_CLANG_BRANCH": "mulle/22.1.8",
+    "MULLE_RELEASE_TAG": "0.31",
+    "MULLE_OBJC_RUNTIME_MIN_VERSION": "0.30",
     "PWD": "/home/src/srcL/mulle-clang-22.1.8/mulle-clang-project",
     "MULLE_CLANG_CPACK_DIR": "/home/src/srcO/mulle-cc/mulle-clang-cpack",
     "MULLE_REPOS_DIR": "/home/src/srcO",

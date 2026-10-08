@@ -16,12 +16,14 @@ gh release view "${VERSION}" --repo "${REPO}" --json name -q '.name' > /dev/null
 }
 
 # --- 2. Authoritative facts ---
-# min required runtime version: parent release tag is passed as MULLE_RELEASE_TAG
-# Format: strip a trailing ".0" so "0.30.0" is shown as "0.30" (matches reference style)
-RUNTIME_VER="${MULLE_RELEASE_TAG:-unknown}"
+# min required runtime version: authoritative source is
+# MULLE_OBJC_RUNTIME_MIN_VERSION (the compiler's minimum compatible runtime),
+# NOT MULLE_RELEASE_TAG (the parent objc release version).
+# Format: strip a trailing ".0" so "0.30.0" is shown as "0.30" (reference style)
+RUNTIME_VER="${MULLE_OBJC_RUNTIME_MIN_VERSION:-unknown}"
 RUNTIME_VER="${RUNTIME_VER%.0}"
 echo "Required mulle-objc-runtime: ${RUNTIME_VER}"
-echo "  (from parent MULLE_RELEASE_TAG: ${MULLE_RELEASE_TAG:-unset})"
+echo "  (from MULLE_OBJC_RUNTIME_MIN_VERSION: ${MULLE_OBJC_RUNTIME_MIN_VERSION:-unset})"
 
 # load version
 LOAD_VERSION=$(grep -oP 'COMPATIBLE_MULLE_OBJC_RUNTIME_LOAD_VERSION\s+\K\d+' \
